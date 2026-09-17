@@ -14,6 +14,7 @@ import asyncio
 import datetime
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2267,7 +2268,10 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         import ast
         import i18n
 
-        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py")) as f:
+        # encoding is explicit: the source contains non-ASCII text (emoji in
+        # user-facing strings), and Python's default encoding is the locale's
+        # on Windows (cp1252), which can't decode it.
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"), encoding="utf-8") as f:
             src_text = f.read()
         tree = ast.parse(src_text)
         src_lines = src_text.splitlines()
@@ -6125,7 +6129,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
             original_path = db.DB_PATH
             try:
                 db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                await legacy_scores_slash(inter, "NP", 1999, "2026-07-01")
+                await legacy_scores_slash(inter, 1999, "NP", "2026-07-01")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6141,7 +6145,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
             try:
                 db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
                 await self._build_temp_archive(tmpdir)
-                await legacy_scores_slash(inter, "NP", 2026, "2026-07-20")
+                await legacy_scores_slash(inter, 2026, "NP", "2026-07-20")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6156,7 +6160,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
             original_path = db.DB_PATH
             try:
                 db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                await legacy_show_ladder_slash(inter, "NP", 1999)
+                await legacy_show_ladder_slash(inter, 1999, "NP")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6183,7 +6187,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
                 raw.commit()
                 raw.close()
 
-                await legacy_show_ladder_slash(inter, "NP", 2026)  # date omitted
+                await legacy_show_ladder_slash(inter, 2026, "NP")  # date omitted
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6297,6 +6301,234 @@ class TestDataIntegrity(unittest.IsolatedAsyncioTestCase):
         remaining = await db.get_players_remaining("NP", TODAY)
         self.assertNotIn("FHRITP", remaining)
         await db.execute("UPDATE players SET status='A' WHERE ign='FHRITP'")
+
+
+class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
+    """
+    Covers the league list coming from the db's teams table instead of a
+    hardcoded default (db.load_league_names_sync), and /legacy's league
+    options coming from the *archived season's* teams table rather than
+    today's — leagues get added and deleted between seasons.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+
+    async def asyncTearDown(self):
+        await _patched_close()
+        await db.close_archive_connections()
+
+    def _write_db(self, path, teams):
+        raw = sqlite3.connect(path)
+        raw.executescript(SCHEMA)
+        for tid, name in teams:
+            raw.execute("INSERT INTO teams VALUES (?, ?, ?)", (tid, name, name))
+        raw.commit()
+        raw.close()
+        return path
+
+    def _make_interaction(self, year=None):
+        inter = MagicMock()
+        inter.response = MagicMock()
+        inter.response.defer = AsyncMock()
+        inter.followup = MagicMock()
+        inter.followup.send = AsyncMock()
+        inter.guild = MagicMock()
+        inter.user = MagicMock()
+        admin_role = MagicMock()
+        admin_role.name = "Administrator"
+        inter.user.roles = [admin_role]
+        inter.locale = discord.Locale.american_english
+        inter.namespace = MagicMock()
+        inter.namespace.year = year
+        return inter
+
+    # -- db.load_league_names_sync ------------------------------------------
+
+    def test_load_league_names_sync_reads_teams_table(self):
+        """The league map is whatever the teams table says — a league that
+        isn't a row there (NI, deleted) must not appear."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = self._write_db(
+                os.path.join(tmpdir, "neuroverse.db"),
+                [("NP", "NeuroPerverse"), ("NX", "NeuroChristians")],
+            )
+            names = db.load_league_names_sync(path)
+        self.assertEqual(names, {"NP": "NeuroPerverse", "NX": "NeuroChristians"})
+        self.assertNotIn("NI", names)
+
+    def test_load_league_names_sync_missing_file_returns_empty(self):
+        """A fresh install (or a test run) with no database file yet must
+        still be able to import the bot, so this returns {} rather than
+        raising."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            names = db.load_league_names_sync(os.path.join(tmpdir, "nope.db"))
+        self.assertEqual(names, {})
+
+    def test_load_league_names_sync_no_teams_table_returns_empty(self):
+        """A database file that exists but has no teams table yet (pre-
+        migration) also degrades to {} instead of raising at import time."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "empty.db")
+            sqlite3.connect(path).close()
+            names = db.load_league_names_sync(path)
+        self.assertEqual(names, {})
+
+    def test_load_league_names_sync_does_not_write_to_the_database(self):
+        """Opened read-only — a league-list read must never be able to modify
+        the live db, and must not create a WAL/journal file alongside it
+        (the deploy process treats stray -wal files as state to delete)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = self._write_db(os.path.join(tmpdir, "neuroverse.db"), [("NP", "NeuroPerverse")])
+            before = os.path.getmtime(path)
+            db.load_league_names_sync(path)
+            self.assertEqual(os.path.getmtime(path), before)
+            self.assertFalse(os.path.exists(path + "-wal"))
+
+    def test_no_module_hardcodes_the_league_list(self):
+        """Guard against the hardcoded default list coming back. Each module
+        that needs league display names must load it from the teams table;
+        none of them should carry league names as source literals (that's
+        exactly how a deleted league like NI lingered in four places)."""
+        for mod in ("optimized_bot.py", "sheet_image.py", "siege.py", "ladder_flow.py"):
+            with open(os.path.join(os.path.dirname(__file__), mod), encoding="utf-8") as f:
+                src = f.read()
+            self.assertIn("db.load_league_names_sync()", src, f"{mod} must load leagues from the teams table")
+            for literal in ("'NeuroPerverse'", '"NeuroPerverse"', "'NeuroInverse'", '"NeuroInverse"'):
+                self.assertNotIn(literal, src, f"{mod} hardcodes a league name ({literal})")
+
+    # -- /legacy league options come from that season -----------------------
+
+    async def test_archive_league_autocomplete_uses_that_seasons_teams(self):
+        """The whole point: options come from the archive's own teams table.
+        A league that existed that season but has since been deleted must be
+        offered, and a league that exists only now must not be."""
+        from optimized_bot import archive_league_autocomplete
+        inter = self._make_interaction(year=2026)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_path = db.DB_PATH
+            try:
+                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                self._write_db(
+                    os.path.join(tmpdir, "neuroverse_2026.db"),
+                    [("NI", "NeuroInverse"), ("NP", "NeuroPerverse")],
+                )
+                with patch.dict("optimized_bot.LEAGUE_NAMES",
+                                {"NP": "NeuroPerverse", "ZZ": "NeuroBrandNew"}, clear=True):
+                    choices = await archive_league_autocomplete(inter, "")
+            finally:
+                await db.close_archive_connections()
+                db.DB_PATH = original_path
+        values = {c.value for c in choices}
+        self.assertEqual(values, {"NI", "NP"})
+        self.assertNotIn("ZZ", values)  # exists now, didn't exist in 2026
+
+    async def test_archive_league_autocomplete_filters_on_current_input(self):
+        from optimized_bot import archive_league_autocomplete
+        inter = self._make_interaction(year=2026)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_path = db.DB_PATH
+            try:
+                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                self._write_db(
+                    os.path.join(tmpdir, "neuroverse_2026.db"),
+                    [("NI", "NeuroInverse"), ("NP", "NeuroPerverse")],
+                )
+                choices = await archive_league_autocomplete(inter, "inverse")
+            finally:
+                await db.close_archive_connections()
+                db.DB_PATH = original_path
+        self.assertEqual([c.value for c in choices], ["NI"])
+
+    async def test_archive_league_autocomplete_falls_back_to_live_list(self):
+        """Before a year is entered there's no archive to read, so the field
+        shows the live leagues rather than sitting mysteriously empty."""
+        from optimized_bot import archive_league_autocomplete
+        inter = self._make_interaction(year=None)
+        with patch.dict("optimized_bot.LEAGUE_NAMES",
+                        {"NP": "NeuroPerverse", "NX": "NeuroChristians"}, clear=True):
+            choices = await archive_league_autocomplete(inter, "")
+        self.assertEqual({c.value for c in choices}, {"NP", "NX"})
+
+    async def test_archive_league_autocomplete_falls_back_when_no_archive(self):
+        from optimized_bot import archive_league_autocomplete
+        inter = self._make_interaction(year=1999)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_path = db.DB_PATH
+            try:
+                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                with patch.dict("optimized_bot.LEAGUE_NAMES", {"NP": "NeuroPerverse"}, clear=True):
+                    choices = await archive_league_autocomplete(inter, "")
+            finally:
+                await db.close_archive_connections()
+                db.DB_PATH = original_path
+        self.assertEqual([c.value for c in choices], ["NP"])
+
+    async def test_legacy_rank_serves_a_league_that_no_longer_exists(self):
+        """A season's own league must be viewable even after it's deleted
+        from the live teams table — indexing the live league map (which is
+        what the code used to do) would be a KeyError, not a miss."""
+        from optimized_bot import legacy_rank_slash
+        inter = self._make_interaction(year=2026)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_path = db.DB_PATH
+            try:
+                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                archive = self._write_db(
+                    os.path.join(tmpdir, "neuroverse_2026.db"), [("NI", "NeuroInverse")]
+                )
+                raw = sqlite3.connect(archive)
+                raw.execute(
+                    "INSERT INTO players (team_id,ign,status,off_ovr,def_ovr,total_ovr) "
+                    "VALUES ('NI','ArchivedInverse','A',240,220,7000)"
+                )
+                raw.commit()
+                raw.close()
+                with patch.dict("optimized_bot.LEAGUE_NAMES", {"NP": "NeuroPerverse"}, clear=True):
+                    await legacy_rank_slash(inter, 2026, "NI")
+            finally:
+                await db.close_archive_connections()
+                db.DB_PATH = original_path
+        inter.followup.send.assert_called_once()
+        self.assertIsNotNone(inter.followup.send.call_args.kwargs.get("file"))
+
+    async def test_legacy_rank_rejects_league_absent_from_that_season(self):
+        """The league field is a dynamic autocomplete, so Discord doesn't
+        constrain the value — a league that season never had gets a friendly
+        error, not an empty image or a crash."""
+        from optimized_bot import legacy_rank_slash
+        inter = self._make_interaction(year=2026)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_path = db.DB_PATH
+            try:
+                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                self._write_db(os.path.join(tmpdir, "neuroverse_2026.db"), [("NP", "NeuroPerverse")])
+                await legacy_rank_slash(inter, 2026, "ZZ")
+            finally:
+                await db.close_archive_connections()
+                db.DB_PATH = original_path
+        inter.followup.send.assert_called_once()
+        self.assertTrue(inter.followup.send.call_args.kwargs.get("ephemeral"))
+        self.assertIsNone(inter.followup.send.call_args.kwargs.get("file"))
+
+    async def test_sync_league_name_reaches_every_modules_map(self):
+        """/league renaming a league at runtime must update every module's
+        copy — each loads its own from the teams table at import and can't
+        import optimized_bot back without a circular import."""
+        import optimized_bot, sheet_image, siege as siege_mod, ladder_flow
+        maps = (optimized_bot.LEAGUE_NAMES, sheet_image.LEAGUE_NAMES,
+                siege_mod.LEAGUE_NAMES, ladder_flow.LEAGUE_NAMES)
+        saved = [dict(m) for m in maps]
+        try:
+            optimized_bot._sync_league_name("QQ", "NeuroRenamed")
+            for m in maps:
+                self.assertEqual(m.get("QQ"), "NeuroRenamed")
+        finally:
+            for m, original in zip(maps, saved):
+                m.clear()
+                m.update(original)
 
 
 # ---------------------------------------------------------------------------

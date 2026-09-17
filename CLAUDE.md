@@ -6,10 +6,13 @@ don't let it go stale.
 
 ## What this is
 
-A Discord bot (`TittyBot#0428`) for an 8-team Madden Mobile league system.
-Teams/leagues: NP (NeuroPerverse), ND (NeuroDiverse), NI (NeuroInverse),
+A Discord bot (`TittyBot#0428`) for a multi-league Madden Mobile league system.
+Leagues as of Sept 2026: NP (NeuroPerverse), ND (NeuroDiverse),
 NA (NeuroAdverse), NR (NeuroReverse), NC (NeuroChaos), NT (NeuroTraverse),
-NX (NeuroChristians).
+NX (NeuroChristians). NI (NeuroInverse) existed earlier and has been deleted.
+**Don't treat that list as fixed — and don't hardcode it anywhere.** The
+`teams` table is the source of truth; see "League list comes from the teams
+table" below.
 
 **Stack:** discord.py 2.7+, SQLite via `aiosqlite`, hosted on bot-hosting.net
 (Pterodactyl panel). Fully localized in 5 languages (en, es, fr, pt, de).
@@ -1095,6 +1098,82 @@ generic default — so one specific font file being unavailable degrades to
 test that simulates this exact scenario (oblique unavailable at both
 candidate paths, regular weight available) and asserts the resulting font
 size, not just that rendering succeeds.
+
+## League list comes from the teams table, not a hardcoded dict
+
+`LEAGUE_NAMES` used to be a hardcoded `{team_id: display name}` dict,
+**duplicated verbatim in four modules** (`optimized_bot.py`,
+`sheet_image.py`, `siege.py`, `ladder_flow.py` — the latter three can't
+import `optimized_bot` without a circular import, so each kept its own
+copy). All four still listed NI/NeuroInverse well after that league was
+deleted from the `teams` table, which is exactly the drift this arrangement
+invites.
+
+All four now call **`db.load_league_names_sync()`** at import instead. It
+reads `SELECT id, name FROM teams` with the **stdlib `sqlite3` driver,
+synchronously, read-only** (`file:...?mode=ro`). The sync/stdlib part is not
+laziness — it's forced: `@app_commands.choices(league=LEAGUE_CHOICES)` is
+evaluated *while `optimized_bot`'s module body is still executing*, long
+before `db.init()` or any event loop exists, so an `await` is impossible
+there. A missing db file or missing `teams` table returns `{}` with a log
+line rather than raising, so a fresh install (or a test run in a directory
+with no db) can still import the bot. `db.list_teams(conn=None)` is the
+async counterpart for normal runtime use, and takes an archive `conn`.
+
+Consequences worth knowing:
+- A league added/renamed/deleted in `teams` is picked up **on the next
+  restart**, with no code change. Deleting a league's row is now genuinely
+  sufficient to retire it.
+- `/league`'s runtime add/rename path goes through
+  `_sync_league_name(lid, name)`, which writes the new name into *all four*
+  modules' maps. Updating only `optimized_bot`'s (the old behavior) left
+  `/rank` image titles and siege labels showing the stale name until the
+  next restart.
+- Slash-command *choices* still can't be updated at runtime — they're fixed
+  when the command is registered with Discord — so a league added via
+  `/league` appears in `LEAGUE_CHOICES` for future registrations but needs a
+  `/sync` to show up in the picker. That predates this change.
+- A test (`test_no_module_hardcodes_the_league_list`) scans all four
+  modules' source and fails if a league-name literal reappears, so the
+  hardcoded list can't quietly come back.
+
+## /legacy league options are per-season, from the archive's own teams table
+
+Leagues change year over year, so the **live** league list is the wrong list
+for an archived season: a 2026 archive can contain a league since deleted
+(NI) and lack one created afterward. `/legacy`'s league field therefore
+can't use `@app_commands.choices` at all — static choices are fixed at
+registration time and **cannot depend on another argument's value**.
+
+`archive_league_autocomplete()` reads the already-entered year via
+`interaction.namespace.year` (same mechanism as `league_player_autocomplete`)
+and lists that archive's own `teams` rows. It falls back to the live list
+when year isn't filled in yet / isn't a valid year / has no archive, so the
+field is never mysteriously empty mid-typing. **`year` was moved to be the
+first parameter** on all four league-taking `/legacy` subcommands (`rank`,
+`stats`, `scores`, `show_ladder`) so Discord prompts for it before league —
+the autocomplete has nothing to scope by otherwise.
+
+Because an autocomplete only *suggests* values and never restricts what
+Discord accepts, each of those commands re-validates via
+**`_resolve_archive_league()`**, which returns that season's display name for
+the league or sends `common.invalid_league` and bails. This also replaced
+every `LEAGUE_NAMES[league]` in the `/legacy` commands — for an
+archive-only league that's a **`KeyError`, not a miss**, which is a real
+crash reproduced by
+`test_legacy_rank_serves_a_league_that_no_longer_exists`. `send_rank_image`,
+`send_stats_image`, and `_build_ladder_image` grew an optional
+`league_name=` for this, so archive output is titled with the season's own
+name rather than today's.
+
+## Windows note for running the suite
+
+`tests.py`'s `test_every_command_marked_admin_in_manual_actually_requires_admin`
+reads `optimized_bot.py` as text to `ast.parse` it. It had no `encoding=`
+argument, so on Windows it decoded as cp1252 and died on the emoji in the
+bot's user-facing strings (`UnicodeDecodeError: 0x8f`) — a pre-existing
+failure invisible on the Linux host. Now passes `encoding="utf-8"`. If a
+future test opens a source file, pass the encoding explicitly.
 
 ## Workflow conventions for future sessions
 

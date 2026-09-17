@@ -36,11 +36,9 @@ def _sort_options(lang: str):
     return [(i18n.t(key, lang), col) for key, col in SORT_OPTION_KEYS]
 
 
-LEAGUE_NAMES = {
-    'NP': 'NeuroPerverse', 'ND': 'NeuroDiverse', 'NI': 'NeuroInverse',
-    'NA': 'NeuroAdverse',  'NR': 'NeuroReverse',  'NC': 'NeuroChaos',
-    'NT': 'NeuroTraverse', 'NX': 'NeuroChristians',
-}
+# Loaded from the db's teams table at import (see db.load_league_names_sync)
+# rather than imported from optimized_bot, which would be a circular import.
+LEAGUE_NAMES = db.load_league_names_sync()
 
 
 # ---------------------------------------------------------------------------

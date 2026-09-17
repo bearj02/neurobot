@@ -8,6 +8,7 @@ No host, no credentials, no network — just a file in the bot directory.
 import os
 import asyncio
 import datetime
+import sqlite3
 import aiosqlite
 from logger_config import global_logger as logger
 
@@ -15,6 +16,54 @@ DB_PATH = os.getenv("DB_PATH", "neuroverse.db")
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "backups")
 BACKUP_RETENTION_DAYS = 14
 _db: aiosqlite.Connection | None = None
+
+
+def load_league_names_sync(path: str | None = None) -> dict[str, str]:
+    """
+    {team_id: display name} read straight from the teams table, synchronously,
+    with the stdlib sqlite3 driver.
+
+    This is the import-time counterpart to list_teams() below, and it exists
+    because optimized_bot.py needs the league list *while its module body is
+    still executing* — `@app_commands.choices(league=LEAGUE_CHOICES)` is
+    evaluated as each command is defined, long before there's an event loop
+    or an aiosqlite connection to await. Every module that needs a league
+    display-name map (optimized_bot, sheet_image, siege, ladder_flow) calls
+    this instead of keeping its own hardcoded copy, so a league added,
+    renamed, or deleted in the teams table is picked up everywhere on the
+    next restart with no code change.
+
+    Opened read-only. A missing database file or missing teams table returns
+    {} with a log line rather than raising — a fresh install (or a test run
+    in a directory with no db) still has to be able to import the bot.
+    """
+    db_file = path or DB_PATH
+    if not os.path.isfile(db_file):
+        logger.warning(f"No database file at {db_file} — league list starts empty")
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+        try:
+            rows = conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Could not read the teams table from {db_file}: {e}")
+        return {}
+    return {row[0]: row[1] for row in rows}
+
+
+async def list_teams(conn=None) -> dict[str, str]:
+    """
+    {team_id: display name} from the teams table.
+
+    Pass an archive connection (see get_archive_conn) to get *that season's*
+    own league list, which is not necessarily today's — leagues get added and
+    deleted between seasons, so a 2026 archive can contain a league that no
+    longer exists (and miss one that does).
+    """
+    rows = await fetchall("SELECT id, name FROM teams ORDER BY id", conn=conn)
+    return {r['id']: r['name'] for r in rows}
 
 
 async def init():

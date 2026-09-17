@@ -10,11 +10,11 @@ from PIL import Image, ImageDraw, ImageFont
 from logger_config import global_logger as logger
 import db
 
-LEAGUE_NAMES = {
-    'NP': 'NeuroPerverse', 'ND': 'NeuroDiverse', 'NI': 'NeuroInverse',
-    'NA': 'NeuroAdverse',  'NR': 'NeuroReverse',  'NC': 'NeuroChaos',
-    'NT': 'NeuroTraverse', 'NX': 'NeuroChristians',
-}
+# Read from the db's teams table at import, not hardcoded — see
+# db.load_league_names_sync. Callers rendering an *archived* season should
+# pass league_name= explicitly, since that season's league list is its own
+# (see send_rank_image).
+LEAGUE_NAMES = db.load_league_names_sync()
 
 # ---------------------------------------------------------------------------
 # Fonts
@@ -230,17 +230,20 @@ def _render_table(title, headers, rows, aligns=None, subtitle=None):
 # Rank table
 # ---------------------------------------------------------------------------
 
-async def send_rank_image(ctx, team_id, conn=None, season_label=None, **kwargs):
+async def send_rank_image(ctx, team_id, conn=None, season_label=None, league_name=None, **kwargs):
     """Fetch roster from DB, render as PNG, send as file.
     conn: optional archive connection (see db.get_archive_conn) for /legacy.
-    season_label: optional suffix for the title, e.g. "(2026 Season)"."""
+    season_label: optional suffix for the title, e.g. "(2026 Season)".
+    league_name: display name override. /legacy passes that season's own name
+      for the league, since the module-level LEAGUE_NAMES holds today's
+      leagues and a past season's may no longer be among them."""
     try:
         players = await db.get_rank_table(team_id, conn=conn)
         if not players:
             await ctx.send(f"No active roster data found for `{team_id}`.")
             return
 
-        league  = LEAGUE_NAMES.get(team_id, team_id)
+        league  = league_name or LEAGUE_NAMES.get(team_id, team_id)
         headers = ['#', 'Player', 'Pwr Rank', 'OVR', 'Games', 'Yearly', '7-Day', 'Kobes']
         aligns  = ['R', 'L',      'R',        'R',   'R',     'R',      'R',     'R']
         rows = []
@@ -268,12 +271,13 @@ async def send_rank_image(ctx, team_id, conn=None, season_label=None, **kwargs):
         await ctx.send(f"Error generating rank table: {e}")
 
 
-async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, season_label=None):
+async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, season_label=None,
+                           league_name=None):
     """
     League stats as a PNG — stat categories across the top, one row per
     player underneath (same layout as /rank), plus a final League Avg row
     summarizing the whole league.
-    conn/season_label: see send_rank_image.
+    conn/season_label/league_name: see send_rank_image.
     """
     try:
         stats = await db.get_league_stats(team_id, include_inactive=include_inactive, conn=conn)
@@ -281,7 +285,7 @@ async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, seas
             await ctx.send(f"No stats found for `{team_id}`.")
             return
 
-        league  = LEAGUE_NAMES.get(team_id, team_id)
+        league  = league_name or LEAGUE_NAMES.get(team_id, team_id)
         headers = ['#', 'Player', 'Games', 'Yearly', '30-Day', '7-Day', '3-Day',
                    'HOF', 'E1', 'E2', 'E3', 'Gold-', 'Kobes', '3+TD%', '2PT%', 'Fumbles']
         aligns  = ['R', 'L', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R']

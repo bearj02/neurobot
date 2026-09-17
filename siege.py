@@ -29,13 +29,10 @@ from discord.ui import View, Button, Select, Modal, TextInput
 import db
 import i18n
 
-# Mirrors optimized_bot.py's LEAGUE_NAMES — duplicated locally (same pattern
-# ladder_flow.py already uses) to avoid a circular import.
-LEAGUE_NAMES = {
-    'NP': 'NeuroPerverse',  'ND': 'NeuroDiverse',  'NI': 'NeuroInverse',
-    'NA': 'NeuroAdverse',   'NR': 'NeuroReverse',   'NC': 'NeuroChaos',
-    'NT': 'NeuroTraverse',  'NX': 'NeuroChristians',
-}
+# Loaded from the db's teams table at import (see db.load_league_names_sync)
+# rather than imported from optimized_bot, which would be a circular import.
+# Both modules read the same source of truth, so they can't drift.
+LEAGUE_NAMES = db.load_league_names_sync()
 
 SIEGE_MODS = db.SIEGE_MODS
 

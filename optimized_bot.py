@@ -22,10 +22,12 @@ import aiohttp
 from dotenv import load_dotenv
 
 import db
+import ladder_flow
 from ladder_flow import start_ladder_flow
 import siege
 import i18n
 from status import get_status
+import sheet_image
 from sheet_image import send_rank_image, send_stats_image, clear_cache as clear_rank_cache
 from newday import newday
 from tournament import TournamentManager
@@ -56,16 +58,45 @@ def game_day() -> datetime.date:
         return (now - datetime.timedelta(days=1)).date()
     return now.date()
 
-LEAGUE_NAMES: dict = {
-    'NP': 'NeuroPerverse',  'ND': 'NeuroDiverse',  'NI': 'NeuroInverse',
-    'NA': 'NeuroAdverse',   'NR': 'NeuroReverse',   'NC': 'NeuroChaos',
-    'NT': 'NeuroTraverse',  'NX': 'NeuroChristians',
-}
+# The league list comes straight from the db's teams table — there is
+# deliberately no hardcoded default to fall back on, so a league added,
+# renamed, or deleted there (NI/NeuroInverse, for instance) is reflected on
+# the next restart without a code change, and can't silently disagree with
+# what the database actually contains.
+#
+# Loaded synchronously (db.load_league_names_sync, stdlib sqlite3, read-only)
+# rather than via the async db layer because LEAGUE_CHOICES below is consumed
+# by @app_commands.choices decorators, which run while this module is still
+# being imported — before db.init() and before there's an event loop at all.
+LEAGUE_NAMES: dict = db.load_league_names_sync()
+
+if not LEAGUE_NAMES:
+    logger.error(
+        "No leagues loaded from the teams table — every league-scoped command "
+        "will register with an empty option list. Check that the database file "
+        "exists and is readable, then restart."
+    )
 
 LEAGUE_CHOICES = [
     app_commands.Choice(name=name, value=tid)
     for tid, name in LEAGUE_NAMES.items()
 ]
+
+
+def _sync_league_name(lid: str, name: str):
+    """
+    Push a league added or renamed at runtime by /league into every module's
+    league-name map.
+
+    sheet_image, siege, and ladder_flow each load their own copy from the
+    teams table at import (db.load_league_names_sync) — they can't import
+    this module without a circular import — so the new name has to be handed
+    to each one explicitly, or /rank's image titles and siege's league labels
+    keep showing the old name until the next restart.
+    """
+    for mapping in (LEAGUE_NAMES, sheet_image.LEAGUE_NAMES,
+                    siege.LEAGUE_NAMES, ladder_flow.LEAGUE_NAMES):
+        mapping[lid] = name
 
 LADDER_STYLE_CHOICES = [
     app_commands.Choice(name="Classic (data table)", value="classic"),
@@ -761,10 +792,76 @@ async def stats_slash(interaction: discord.Interaction, league: str, include_ina
 legacy_group = app_commands.Group(name="legacy", description="View stats from a previous, archived season")
 
 
+async def archive_league_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    League options for /legacy, pulled from *that season's own* teams table
+    rather than the live one. Leagues change year over year — a season's
+    archive can contain a league that has since been deleted, and miss one
+    created afterward — so the live list is the wrong list for a past season.
+
+    This has to be an autocomplete rather than @app_commands.choices: static
+    choices are fixed when the command is registered with Discord and can't
+    depend on another argument's value. Reading the already-entered year off
+    interaction.namespace (the same mechanism league_player_autocomplete uses
+    for its league) is the only way league options can follow year.
+
+    Falls back to the live league list when year isn't filled in yet, isn't a
+    valid year, or has no archive — so the field is never mysteriously empty
+    while someone is still typing. The commands themselves re-validate the
+    league against the archive (see _resolve_archive_league), since an
+    autocomplete only suggests values and never restricts what Discord will
+    accept.
+    """
+    names = None
+    year = getattr(interaction.namespace, 'year', None)
+    if year is not None:
+        try:
+            conn = await db.get_archive_conn(int(year))
+        except (TypeError, ValueError):
+            conn = None
+        if conn is not None:
+            names = await db.list_teams(conn=conn)
+    if names is None:
+        names = LEAGUE_NAMES
+
+    cur = (current or "").lower()
+    return [
+        app_commands.Choice(name=name, value=tid)
+        for tid, name in names.items()
+        if cur in tid.lower() or cur in name.lower()
+    ][:25]
+
+
+async def _resolve_archive_league(interaction: discord.Interaction, conn, league: str, lang: str) -> str | None:
+    """
+    Validate a /legacy league against that season's own teams table, returning
+    its display name for that season — or None after sending an error message.
+
+    Two reasons this can't just index LEAGUE_NAMES the way the live commands
+    do: the league field is a dynamic autocomplete (see
+    archive_league_autocomplete), so Discord doesn't constrain the value for
+    us; and a league that existed in the archived season may not exist today,
+    which would be a KeyError on the live map rather than a perfectly valid
+    lookup against the archive.
+
+    Assumes the interaction is already deferred — every /legacy command defers
+    before opening its archive connection.
+    """
+    names = await db.list_teams(conn=conn)
+    if league not in names:
+        await interaction.followup.send(
+            i18n.t('common.invalid_league', lang, league=league,
+                   leagues=', '.join(names) or '—'),
+            ephemeral=True
+        )
+        return None
+    return names[league]
+
+
 @legacy_group.command(name="rank", description="Display the power ranking table for a league from a past season")
-@app_commands.describe(league="League code", year="Season year (e.g. 2026)")
-@app_commands.choices(league=LEAGUE_CHOICES)
-async def legacy_rank_slash(interaction: discord.Interaction, league: str, year: int):
+@app_commands.describe(year="Season year (e.g. 2026)", league="League (options come from that season)")
+@app_commands.autocomplete(league=archive_league_autocomplete)
+async def legacy_rank_slash(interaction: discord.Interaction, year: int, league: str):
     if not await _require_admin(interaction): return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
@@ -773,28 +870,37 @@ async def legacy_rank_slash(interaction: discord.Interaction, league: str, year:
         await interaction.followup.send(i18n.t('legacy.err.no_archive', lang, year=year), ephemeral=True)
         return
 
+    league_name = await _resolve_archive_league(interaction, conn, league, lang)
+    if league_name is None:
+        return
+
     class InteractionCtx:
         channel = interaction.channel
         async def send(self, *args, **kwargs):
             await interaction.followup.send(*args, **kwargs)
 
-    await send_rank_image(InteractionCtx(), league, conn=conn, season_label=i18n.t('legacy.season_label', lang, year=year))
+    await send_rank_image(InteractionCtx(), league, conn=conn, league_name=league_name,
+                          season_label=i18n.t('legacy.season_label', lang, year=year))
 
 
 @legacy_group.command(name="stats", description="View league-wide averages for a team from a past season")
 @app_commands.describe(
-    league="League code",
     year="Season year (e.g. 2026)",
+    league="League (options come from that season)",
     include_inactive="Include inactive/former players in this league (default: false)"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
-async def legacy_stats_slash(interaction: discord.Interaction, league: str, year: int, include_inactive: bool = False):
+@app_commands.autocomplete(league=archive_league_autocomplete)
+async def legacy_stats_slash(interaction: discord.Interaction, year: int, league: str, include_inactive: bool = False):
     if not await _require_admin(interaction): return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
     conn = await db.get_archive_conn(year)
     if conn is None:
         await interaction.followup.send(i18n.t('legacy.err.no_archive', lang, year=year), ephemeral=True)
+        return
+
+    league_name = await _resolve_archive_league(interaction, conn, league, lang)
+    if league_name is None:
         return
 
     class InteractionCtx:
@@ -804,7 +910,8 @@ async def legacy_stats_slash(interaction: discord.Interaction, league: str, year
 
     await send_stats_image(
         InteractionCtx(), league, include_inactive=include_inactive,
-        conn=conn, season_label=i18n.t('legacy.season_label', lang, year=year)
+        conn=conn, league_name=league_name,
+        season_label=i18n.t('legacy.season_label', lang, year=year)
     )
 
 
@@ -874,19 +981,23 @@ async def legacy_history_slash(interaction: discord.Interaction, player: str, st
 
 @legacy_group.command(name="scores", description="View scores for a league across a date range as a grid, from a past season")
 @app_commands.describe(
-    league="League code",
     year="Season year (e.g. 2026)",
+    league="League (options come from that season)",
     start="Start date (YYYY-MM-DD)",
     end="End date (YYYY-MM-DD), defaults to start date"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
-async def legacy_scores_slash(interaction: discord.Interaction, league: str, year: int, start: str, end: str = None):
+@app_commands.autocomplete(league=archive_league_autocomplete)
+async def legacy_scores_slash(interaction: discord.Interaction, year: int, league: str, start: str, end: str = None):
     if not await _require_admin(interaction): return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
     conn = await db.get_archive_conn(year)
     if conn is None:
         await interaction.followup.send(i18n.t('legacy.err.no_archive', lang, year=year), ephemeral=True)
+        return
+
+    league_name = await _resolve_archive_league(interaction, conn, league, lang)
+    if league_name is None:
         return
 
     try:
@@ -912,7 +1023,7 @@ async def legacy_scores_slash(interaction: discord.Interaction, league: str, yea
     result = await _build_scores_result(league, start_date, end_date, lang, conn=conn, season_label=season_label)
     if result is None:
         await interaction.followup.send(
-            i18n.t('scores.no_scores_range', lang, league=LEAGUE_NAMES[league], start=start_date, end=end_date)
+            i18n.t('scores.no_scores_range', lang, league=league_name, start=start_date, end=end_date)
         )
         return
     buf, content = result
@@ -924,18 +1035,23 @@ async def legacy_scores_slash(interaction: discord.Interaction, league: str, yea
 
 @legacy_group.command(name="show_ladder", description="Display the ladder matchups for a league from a past season")
 @app_commands.describe(
-    league="League to display",
     year="Season year (e.g. 2026)",
+    league="League to display (options come from that season)",
     date="Date (YYYY-MM-DD), defaults to the season's last recorded date",
     style="Visual style for the image (defaults to Classic)"
 )
-@app_commands.choices(league=LEAGUE_CHOICES, style=LADDER_STYLE_CHOICES)
-async def legacy_show_ladder_slash(interaction: discord.Interaction, league: str, year: int, date: str = None, style: str = "classic"):
+@app_commands.choices(style=LADDER_STYLE_CHOICES)
+@app_commands.autocomplete(league=archive_league_autocomplete)
+async def legacy_show_ladder_slash(interaction: discord.Interaction, year: int, league: str, date: str = None, style: str = "classic"):
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
     conn = await db.get_archive_conn(year)
     if conn is None:
         await interaction.followup.send(i18n.t('legacy.err.no_archive', lang, year=year), ephemeral=True)
+        return
+
+    league_name = await _resolve_archive_league(interaction, conn, league, lang)
+    if league_name is None:
         return
 
     if date is None:
@@ -956,14 +1072,14 @@ async def legacy_show_ladder_slash(interaction: discord.Interaction, league: str
             return
 
     season_label = i18n.t('legacy.season_label', lang, year=year)
-    buf = await _build_ladder_image(league, game_date, conn=conn, season_label=season_label, style=style)
+    buf = await _build_ladder_image(league, game_date, conn=conn, season_label=season_label,
+                                    style=style, league_name=league_name)
     if buf is None:
         await interaction.followup.send(
-            i18n.t('ladder_cmd.err.no_data', lang, league=LEAGUE_NAMES[league]), ephemeral=True
+            i18n.t('ladder_cmd.err.no_data', lang, league=league_name), ephemeral=True
         )
         return
 
-    league_name = LEAGUE_NAMES[league]
     await interaction.followup.send(
         file=discord.File(buf, filename=f"ladder_{league_name}_{year}.png")
     )
@@ -3033,11 +3149,15 @@ async def manual_slash(interaction: discord.Interaction):
 # /show_ladder — display today's (or a date's) ladder matchups
 # ============================================================================
 
-async def _build_ladder_image(league: str, game_date, conn=None, season_label: str | None = None, style: str = 'classic'):
+async def _build_ladder_image(league: str, game_date, conn=None, season_label: str | None = None,
+                              style: str = 'classic', league_name: str | None = None):
     """
     Shared logic for /show_ladder and /legacy show_ladder.
     Returns an image buffer, or None if there's no ladder data at all for this league.
     style: 'classic', 'neon', 'clean', or 'scoreboard' — see sheet_image.render_ladder_image.
+    league_name: display name to title the image with. /legacy passes the name
+      from that season's own teams table, since a league it archived may not
+      be in the live LEAGUE_NAMES at all anymore (KeyError, not a miss).
     """
     # Try daily snapshot first
     rows = await db.get_ladder_snapshot(league, game_date, conn=conn)
@@ -3068,7 +3188,7 @@ async def _build_ladder_image(league: str, game_date, conn=None, season_label: s
 
     from sheet_image import render_ladder_image
 
-    league_name = LEAGUE_NAMES[league]
+    league_name = league_name or LEAGUE_NAMES.get(league, league)
 
     # Show the opposing league in the title, if it's been recorded for this
     # date — either from a screenshot extraction or set directly via /matchup.
@@ -3368,8 +3488,8 @@ class LeagueAddModal(Modal, title="Add New League"):
             "INSERT INTO teams (id, name, sheet_name) VALUES (?, ?, ?)",
             (lid, name, name)
         )
-        # Add to LEAGUE_NAMES and LEAGUE_CHOICES at runtime
-        LEAGUE_NAMES[lid] = name
+        # Add to every module's league-name map and to LEAGUE_CHOICES at runtime
+        _sync_league_name(lid, name)
         LEAGUE_CHOICES.append(app_commands.Choice(name=name, value=lid))
 
         await interaction.response.send_message(
@@ -3404,7 +3524,7 @@ class LeagueRenameView(View):
             async def on_submit(self2, inter):
                 name = self2.new_name.value.strip()
                 await db.execute("UPDATE teams SET name=?, sheet_name=? WHERE id=?", (name, name, lid))
-                LEAGUE_NAMES[lid] = name
+                _sync_league_name(lid, name)
                 # Update LEAGUE_CHOICES
                 for i, c in enumerate(LEAGUE_CHOICES):
                     if c.value == lid:
