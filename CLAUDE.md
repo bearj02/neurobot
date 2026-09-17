@@ -1043,3 +1043,5 @@ size, not just that rendering succeeds.
   data — this project's Discord library version has changed meaningfully
   during this conversation (Components V2 modal system, `discord.ui.Label`)
   and stale assumptions have caused real bugs before.
+
+   <!-- github sync test, 2026-09-17 -->
