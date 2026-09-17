@@ -28,21 +28,30 @@ NX (NeuroChristians).
 
 ## Critical: how deployment actually works (NO shell access)
 
-The user has **no SSH/shell access** to the host — only Pterodactyl's File
-Manager (upload/download files) and a restart button. This shapes everything:
+**As of Sept 2026, this project migrated from manual file-manager uploads
+to a GitHub-connected workflow** (see the "GitHub deployment workflow"
+section below for the full mechanism) — but the fundamental constraint
+that shaped this project from the start hasn't changed: **the user still
+has no real SSH/shell access.** The panel does have something labeled
+"terminal," but it was directly tested and confirmed to just echo input
+back rather than execute anything — not a real shell, don't treat it as
+one if it's ever mentioned again. This still shapes everything below:
 
 - All schema and data migrations MUST run automatically from code
   (`db.py`'s `_migrate_schema()`, called on every startup). There is no other
   way to apply a DB change. Every migration must be idempotent (safe to rerun
   forever) since it runs on literally every restart.
-- **The database runs in WAL mode.** Uploading a new `neuroverse.db` while the
-  bot is still running causes a real race condition — the live process is
-  still writing to the file at the same time the upload replaces it. This
-  produces exactly the failure mode we hit repeatedly early on: corruption
-  (`disk image is malformed`) and/or silent partial reverts where only the
-  most-recently-written data survives. **Confirmed root cause, not a guess.**
-  Correct sequence: **fully stop the bot → delete any leftover
-  `.db-wal`/`.db-shm` → upload the new `.db` → start the bot.**
+- **The database runs in WAL mode.** Replacing `neuroverse.db` on the server
+  while the bot is still running causes a real race condition — the live
+  process is still writing to the file at the same time the replacement
+  happens. This produces exactly the failure mode hit repeatedly early on:
+  corruption (`disk image is malformed`) and/or silent partial reverts where
+  only the most-recently-written data survives. **Confirmed root cause, not
+  a guess.** Correct sequence: **fully stop the bot → delete any leftover
+  `.db-wal`/`.db-shm` → upload the new `.db` → start the bot.** This risk is
+  specifically about manually replacing the database file (e.g. restoring
+  from a backup) — it's unrelated to the GitHub deploy workflow below, since
+  `neuroverse.db` is `.gitignore`d and never touched by a code sync at all.
 - When diagnosing "the file I delivered doesn't match what's live," always
   ask for a fresh export **including `.db-wal` and `.db-shm`**, not just the
   bare `.db` — a plain file can be missing transactions still sitting in the
@@ -53,6 +62,63 @@ Manager (upload/download files) and a restart button. This shapes everything:
   runs on every startup and once daily, using SQLite's own online backup API
   (not a raw file copy — WAL mode means a raw copy can miss unflushed data).
   Backups land in a local `backups/` folder, pruned after 14 days.
+
+## GitHub deployment workflow (replaces manual file-manager uploads)
+
+The project is on bot-hosting.net's **new panel** (a separate system from
+their older Pterodactyl-based legacy panel — confirmed this project was
+already on the new panel, not mid-migration between the two). The new
+panel's file manager includes a GitHub sync feature, and this project's
+live server is now connected to a real GitHub repo.
+
+**How a deploy actually happens, confirmed by direct, live testing (not
+assumed from the panel's own docs, which were ambiguous on this point):**
+1. Commit and push a change to the repo's default branch (`main`, after
+   the initial `migration` branch was merged in).
+2. Restart the bot from the panel.
+3. That restart **both** pulls the latest commit from GitHub **and**
+   starts the process — "auto-pull at restart" is a real, confirmed-working
+   setting for this server, not just a theoretical option. There is no
+   separate "click Sync" step needed for a routine update; the panel's
+   manual Sync button is only for reconnecting/resetting the link itself
+   (e.g. the very first connection, or if the link ever breaks).
+4. This didn't add a step that wasn't already there — the bot always
+   needed a restart to pick up any code change, GitHub or not, since
+   editing a file on disk never affects an already-running process. What
+   changed is that the restart now also handles getting the latest code,
+   replacing manual file-manager uploads entirely.
+
+**Sync strategy is Merge, never "Replace all files."** Replace would wipe
+`neuroverse.db` and anything else present on the server but not tracked in
+the repo (since those aren't in Git at all, Replace has no way to know
+they should survive). Merge only touches files that exist in the repo,
+leaving everything else — the database, its `-wal`/`-shm` siblings, the
+`gifs*` folders, `.pyc` cache — completely alone. This was verified
+directly: the first sync onto the already-running server was a
+confirmed no-op with the bot coming up clean afterward, exactly as
+expected for a repo that mirrored the live state at the time.
+
+**What's tracked in Git vs. what stays server-only:** `.gitignore`
+excludes `*.gif` (the `gifs*` folders — large, static, and not something
+that benefits from version history), `*.db`/`*.db-shm`/`*.db-wal` (runtime
+data, never source code — daily backups are the right tool for DB safety,
+not Git), and the usual `__pycache__/`/`*.pyc`. Everything else — every
+`.py` file, `CLAUDE.md`, `requirements.txt`, the `fonts/` directory — is
+tracked and is what actually gets deployed on a restart.
+
+**Two now-deleted files were confirmed to be dead MySQL-era leftovers
+before this migration** (`db_schema.sql`, `neuroverse_mm26.sql`) — see the
+"MySQL-era leftovers cleaned up" section below for the full story; they
+were never part of what got imported into the new repo.
+
+**No `.env` file exists on this server at all** — bot-hosting.net's new
+panel holds environment variables (including the Discord bot token) on
+their own separate dashboard tab, not as a file on disk. This is a cleaner
+separation than a typical `.env`-based setup and means there was never a
+risk of the token ending up in a `git add .` by accident — but it's still
+worth a visual check of anywhere a bot client or API key gets constructed
+before trusting that no token is hardcoded as a literal fallback
+somewhere in the source instead.
 
 ## Database gotchas (each one cost real time to find — don't relearn these)
 
@@ -1043,5 +1109,3 @@ size, not just that rendering succeeds.
   data — this project's Discord library version has changed meaningfully
   during this conversation (Components V2 modal system, `discord.ui.Label`)
   and stale assumptions have caused real bugs before.
-
-   <!-- github sync test, 2026-09-17 -->
