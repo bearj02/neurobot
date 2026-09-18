@@ -6869,12 +6869,39 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         that needs league display names must load it from the teams table;
         none of them should carry league names as source literals (that's
         exactly how a deleted league like NI lingered in four places)."""
-        for mod in ("optimized_bot.py", "sheet_image.py", "siege.py", "ladder_flow.py"):
+        for mod in ("optimized_bot.py", "sheet_image.py", "siege.py", "ladder_flow.py", "status.py"):
             with open(os.path.join(os.path.dirname(__file__), mod), encoding="utf-8") as f:
                 src = f.read()
             self.assertIn("db.load_league_names_sync()", src, f"{mod} must load leagues from the teams table")
             for literal in ("'NeuroPerverse'", '"NeuroPerverse"', "'NeuroInverse'", '"NeuroInverse"'):
                 self.assertNotIn(literal, src, f"{mod} hardcodes a league name ({literal})")
+
+    def test_no_module_hardcodes_team_ids_either(self):
+        """The name-literal check above scanned four named modules and looked
+        only for display names, so it missed newday.py, which carried its own
+        list of team *ids*. That cost a real production failure: with NI gone
+        from teams, the nightly placeholder insert hit the matchup_day foreign
+        key and aborted the run partway, leaving five leagues with no row.
+
+        So: scan every module in the project, and look for id lists too.
+        """
+        import glob
+        import re
+        skip = {'tests.py'}
+        # Two or more two-letter uppercase quoted strings in a row — i.e. a
+        # literal league-id list, however it's named.
+        pattern = re.compile(r"""(['"])[A-Z]{2}\1\s*,\s*(['"])[A-Z]{2}\2""")
+        for path in glob.glob(os.path.join(os.path.dirname(__file__), '*.py')):
+            mod = os.path.basename(path)
+            if mod in skip:
+                continue
+            with open(path, encoding='utf-8') as f:
+                src = f.read()
+            for literal in ("'NeuroPerverse'", '"NeuroPerverse"'):
+                self.assertNotIn(literal, src, f'{mod} hardcodes a league name')
+            hit = pattern.search(src)
+            self.assertIsNone(hit, f'{mod} looks like it hardcodes a team-id list: {hit.group(0) if hit else ""}')
+
 
     # -- /legacy league options come from that season -----------------------
 
@@ -7006,6 +7033,75 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
             for m, original in zip(maps, saved):
                 m.clear()
                 m.update(original)
+
+
+class TestNewDay(unittest.IsolatedAsyncioTestCase):
+    """
+    The nightly placeholder-row job. Its failure mode is quiet — a partial
+    run just means some leagues have no matchup_day row for the day, which
+    only shows up later as /status looking wrong.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def test_newday_creates_a_row_for_every_team_in_the_table(self):
+        import newday as newday_mod
+        import datetime as _dt
+        teams = await db.list_teams()
+        await newday_mod.newday()
+        today = str(_dt.date.today())
+        for tid in teams:
+            row = await db.fetchone(
+                "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
+            self.assertIsNotNone(row, f'no placeholder row created for {tid}')
+
+    async def test_newday_does_not_insert_for_a_deleted_league(self):
+        """The actual production crash: a league removed from `teams` must not
+        be inserted for, because matchup_day.team_id is a foreign key to it."""
+        import newday as newday_mod
+        import datetime as _dt
+        await db.execute("DELETE FROM players WHERE team_id='NP'")
+        await db.execute("DELETE FROM teams WHERE id='NP'")
+        await newday_mod.newday()   # must not raise
+        row = await db.fetchone(
+            "SELECT team_id FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            (str(_dt.date.today()),))
+        self.assertIsNone(row, 'created a matchup_day row for a league that no longer exists')
+
+    async def test_one_failing_team_does_not_skip_the_rest(self):
+        """The original loop aborted on the first failure, so every league
+        after the bad one silently got nothing. Order matters here: the
+        failure is injected on the first team processed."""
+        import newday as newday_mod
+        import datetime as _dt
+        teams = list(await db.list_teams())
+        self.assertGreater(len(teams), 1, 'fixture needs at least two teams')
+        first, rest = teams[0], teams[1:]
+
+        real_new_day = db.new_day
+
+        async def flaky(team_id, game_date):
+            if team_id == first:
+                raise sqlite3.IntegrityError('FOREIGN KEY constraint failed')
+            return await real_new_day(team_id, game_date)
+
+        db.new_day = flaky
+        try:
+            await newday_mod.newday()   # must not raise
+        finally:
+            db.new_day = real_new_day
+
+        today = str(_dt.date.today())
+        for tid in rest:
+            row = await db.fetchone(
+                "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
+            self.assertIsNotNone(row, f'{tid} was skipped after an earlier team failed')
 
 
 # ---------------------------------------------------------------------------

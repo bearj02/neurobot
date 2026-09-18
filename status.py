@@ -8,16 +8,10 @@ import discord
 import db
 import i18n
 
-TEAM_NAMES = {
-    'NP': 'NeuroPerverse',
-    'ND': 'NeuroDiverse',
-    'NI': 'NeuroInverse',
-    'NA': 'NeuroAdverse',
-    'NR': 'NeuroReverse',
-    'NC': 'NeuroChaos',
-    'NT': 'NeuroTraverse',
-    'NX': 'NeuroChristians',
-}
+# Read from the db's teams table at import, not hardcoded — see
+# db.load_league_names_sync. This was the last module still carrying its own
+# copy of the league list; it listed NI long after that league was deleted.
+TEAM_NAMES = db.load_league_names_sync()
 
 _eastern        = ZoneInfo("America/New_York")
 MAX_SCORE       = 24   # max score per drive
