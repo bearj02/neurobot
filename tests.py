@@ -7061,6 +7061,34 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
             self.assertIsNotNone(row, f'no placeholder row created for {tid}')
 
+    async def test_rerunning_newday_neither_duplicates_nor_clobbers(self):
+        """Idempotency, stated precisely: a second run must not add a second
+        row for a team that already has one (UNIQUE(team_id, game_date)
+        guarantees that), and must not reset a row that already has real data
+        on it. The latter is the part worth pinning — INSERT OR IGNORE skips
+        the row entirely, whereas an upsert here would zero out a recorded
+        opponent and score. This matters because a partial run has to be
+        safe to re-run by hand mid-day."""
+        import newday as newday_mod
+        import datetime as _dt
+        today = str(_dt.date.today())
+        await newday_mod.newday()
+        # A day's real data lands on the placeholder row
+        await db.execute(
+            "UPDATE matchup_day SET opp_ign=?, opp_score=?, our_score=? WHERE team_id='NP' AND game_date=?",
+            ('Legends of Valhalla', 14, 22, today))
+
+        await newday_mod.newday()
+        await newday_mod.newday()
+
+        rows = await db.fetchall(
+            "SELECT opp_ign, opp_score, our_score FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            (today,))
+        self.assertEqual(len(rows), 1, "a re-run duplicated the day's matchup row")
+        self.assertEqual(rows[0]['opp_ign'], 'Legends of Valhalla', 'a re-run wiped the recorded opponent')
+        self.assertEqual((rows[0]['opp_score'], rows[0]['our_score']), (14, 22),
+                         'a re-run reset the recorded scores')
+
     async def test_newday_does_not_insert_for_a_deleted_league(self):
         """The actual production crash: a league removed from `teams` must not
         be inserted for, because matchup_day.team_id is a foreign key to it."""
