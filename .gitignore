@@ -4,3 +4,4 @@
 *.db-wal
 __pycache__/
 *.pyc
+style_previews/

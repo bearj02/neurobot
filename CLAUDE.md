@@ -962,8 +962,8 @@ fix ever needs another `TextInput` constructor kwarg the stub doesn't track yet.
 
 
 **Player names now use each style's own display font, not a generic
-fallback** — tactical/varsity/street/championship/arcade all use
-Black Ops One/Graduate/Bungee Inline/Nabla/Press Start 2P for names too,
+fallback** — tactical/varsity/street/arcade all use
+Black Ops One/Graduate/Bungee Inline/Press Start 2P for names too,
 matching the title, per an explicit request that a style's whole table
 feel consistent rather than just the header being themed. Confirmed each
 font stays legible at the sizes names actually render at before making
@@ -998,6 +998,298 @@ font, magenta/cyan neon; very wide per character, so titles/labels lean on
 short, using `_POSTER_FONT_BOLD` instead for the actual player
 names/stats). Bungee Inline/Honk/Nabla weren't used for this round but are
 still sitting in the uploaded zip if a future style wants them.
+
+## /show_ladder: four newer styles, and the ones that were removed
+
+**`championship` (Nabla) was deleted outright** — the user's call, the 3D
+extruded variable font simply looked wrong at these sizes. It's gone from
+the renderer, the dispatcher, `LADDER_STYLE_CHOICES` and every test style
+list. Nabla itself is still in `fonts/` and `_FONT_NABLA_PATH` still
+exists, but nothing uses it; don't reintroduce it for a new style without
+asking first.
+
+**Four styles added (Sept 2026):**
+- `gridiron` — football field: green turf, a white yard line under every
+  row, hash marks, slot number as a field number on both sidelines. The
+  only style whose layout comes from the sport rather than a generic
+  poster treatment. Black Ops One (shared with tactical).
+- `blueprint` — technical schematic: blueprint blue, fine grid, corner
+  registration marks, dimension leaders around the diff readout.
+  Monospace, which is most of what makes it read as a drawing.
+- `newsprint` — broadsheet sports page, and **the only light-background
+  style** (every other one is dark, so it's the one that looks genuinely
+  different in Discord's light theme). Graduate masthead (shared with
+  varsity, but black-ink-on-paper reads nothing like varsity's navy/gold),
+  halftone dots, hairline column rule. Names deliberately stay in the
+  condensed bold: Graduate has no true lowercase, and real IGNs carry case
+  distinctions worth keeping (`thebigbreesy` vs `TheBigBreesy`).
+- `terminal` — CRT green phosphor, scanline overlay, prompt-led rows.
+  Press Start 2P for the header banner only; **rows stay monospace on
+  purpose** — a terminal whose columns don't line up stops looking like a
+  terminal, and that font is far too wide per character for 16 rows.
+
+**Second font batch (Sept 2026), user-supplied:** Anton, Bebas Neue,
+Orbitron (static weights + variable), Share Tech Mono, VT323 — requested
+specifically so the styles that had no display face could get one. Current
+assignment:
+
+| Style | Face | Notes |
+| --- | --- | --- |
+| `neon` | Orbitron | Black weight for the title, Bold elsewhere. Slashed zero is a design feature of the face, not a bug |
+| `scoreboard` | Anton | Heavy condensed broadcast caps |
+| `blueprint` | Share Tech Mono | Genuinely monospaced (verified) |
+| `terminal` | VT323 | Genuinely monospaced; **every size in that style is ~1.36x** the monospace-family equivalent, because VT323's glyphs fill only ~0.73 of the em box (measured, not guessed) |
+| `newsprint` | Graduate masthead | Shared with varsity; names stay condensed bold to keep IGN case |
+| `gridiron` | Black Ops One | **Shares tactical's face by explicit preference** — don't "fix" this; the two look nothing alike otherwise. An earlier version used Bebas Neue, which being caps-only also flattened IGN case |
+| `tactical` / `varsity` / `street` / `arcade` | Black Ops One / Graduate / Bungee Inline / Press Start 2P | First batch, unchanged |
+| `clean` | none (condensed bold) | Identity is layout/colour, not type |
+| `carnival` | Honk (title/labels only) | See the Honk-legibility note above |
+
+**Bebas Neue is bundled but unused** now that gridiron reverted — it's
+available for a future style, and a test keeps it loadable.
+
+`_FONT_SHARE_TECH` and `_FONT_VT323` fall back to the **monospace** family,
+not the condensed bold every other display font falls back to: both styles
+depend on fixed-width columns lining up, so a missing bundled file has to
+degrade to another monospace face rather than a proportional one. There's
+a test for this; it checks the intent (every path in the chain names a Mono
+face) as well as measuring whichever candidates exist locally, since most
+are Linux system paths absent on a dev machine.
+
+**Getting more fonts is still a manual step.** Fetching them is a known
+dead end (see the font-loading section above: GitHub raw blocks automated
+access, CDN routes need JS, and Google Fonts' CSS endpoint only serves
+woff2, which PIL/FreeType cannot read at all). The working route is the
+user downloading .ttf files from fonts.google.com into `fonts/` — which is
+now a git commit plus a restart, not a file-manager upload. When a batch
+arrives, check each one before wiring it up: that it loads at the sizes
+actually used, that its cap height matches what the existing sizes were
+tuned for (VT323 did not), whether it has real lowercase (Bebas Neue and
+Graduate do not), and whether it's truly monospaced if a style depends on
+that.
+
+## /show_ladder: 25 styles, and the themed engine behind the newest 12
+
+**There are exactly 25 ladder styles, which is exactly Discord's hard cap
+of 25 choices per command parameter.** `LADDER_STYLE_CHOICES` has an
+`assert` on it for this reason. A 26th style **cannot** be added as a
+static choice — it would need an autocomplete callback instead (same
+mechanism `/legacy`'s league field uses). Tests enforce both directions of
+the picker/renderer contract: every offered style must render something
+different from `classic` (a style that falls through looks like the picker
+being ignored), and every implemented style must appear in the picker (the
+four newest sat unreachable for a while precisely because they didn't).
+
+**The 12 newest styles share one renderer, `_render_ladder_themed`,** driven
+by a theme dict in `_LADDER_THEMES` — palette, fonts, badge shape, header
+variant, row treatment, plus optional `bg_art` and `row_tint` hooks. The
+nine older bespoke renderers were left exactly as they are; only new styles
+go through the engine. Adding a style is a theme entry plus a picker choice,
+and the shared row logic (centred names, the diff column, badge geometry)
+can't drift per style. The full key list is documented in a comment above
+the engine.
+
+The 12: `gators` (blue/orange — see below), `ledboard` (LED dot-matrix,
+Bitcount), `dossier` (typewritten scouting file, Special Elite),
+`gameboy` (green LCD, DotGothic16), `cyberdeck` (circuit uplink, Audiowide),
+`starfield` (deep space, Nova Square), `hazard` (industrial caution,
+Wallpoet), `bubble` (pastel rounded, Keania One), `sketch` (pencil on paper,
+Syne Mono), `prestige` (black/gold, Graduate), `paper` (quiet serif ledger,
+Newsreader), `heatmap` (rows tinted by the diff, Anton).
+
+**`gators` exists to satisfy an explicit request for a blue-and-orange
+style** (Florida's colours). It uses the real pair — `#0021A5` blue,
+`#FA4616` orange — and a test asserts the palette actually is blue and
+orange rather than trusting the style's name. The first attempt used a
+darker navy that read as generic; if this ever looks washed out, check it's
+still on the true blue.
+
+**Third font batch, user-supplied:** Audiowide, Bitcount Grid Double,
+DotGothic16, Keania One, Newsreader, Nova Square, Special Elite, Syne Mono,
+Wallpoet. Notes worth keeping:
+- **Keania One's `8` is all but indistinguishable from its `S`** — real
+  rosters render as `GCraneSCowboys`, `FunkyT19S`, `+S`. Confirmed on a
+  rendered digit sheet, not assumed. It's title/label-only in `bubble`,
+  exactly like Honk in `carnival`; names/stats/slot numbers/diff all use the
+  condensed bold. A test enforces this. **Check any new display face this
+  way before wiring it to names** — it's the second time this exact defect
+  has appeared.
+- Bitcount Grid Double and Syne Mono are genuinely monospaced; Newsreader
+  ships a true italic (used for newsprint's kicker) and five optical sizes
+  (the 24pt cut is the one wired up).
+- Wallpoet measures 0.80x the baseline cap height and is very wide, hence
+  `hazard`'s larger sizes and taller header.
+- `newsprint` moved off the Graduate stand-in onto **Newsreader** now that a
+  real newspaper serif is available; its names still stay condensed bold, as
+  a serif at 24px on a tinted row is a real legibility step down.
+
+## Faux-bolding, and which faces can take it
+
+Several of these faces ship a **Regular weight only**, and PIL has no
+synthetic bold. Where one reads too light, the options are a bigger size or
+a 1px `stroke_width` outline in the glyph's own colour (supported by
+`_draw_centered_name`, `_draw_diff` and `_draw_slot_badge` via a `stroke`
+argument, and by the themed engine via `name_stroke`/`num_stroke`/
+`title_stroke`).
+
+**Stroke only works on a light, open face. It wrecks tight or heavy ones** —
+all three of these were tried and reverted after looking at the render:
+- Anton (`heatmap`): counters closed up, "Ruffis" read as "Buffis",
+  "Rob926" as "Bob926".
+- DotGothic16 (`gameboy`): pixel shapes filled in, "scotty" read as
+  "ecotty", slot 16 as 18.
+- VT323 (`terminal`): 'm' and 'W' filled in, "Packman425" read as
+  "Packnan425".
+
+Share Tech Mono (`blueprint`) is the one that takes it cleanly, and is the
+only place `stroke=1` survives. Everywhere else the fix was size: blueprint
+and terminal are both a size up (terminal now ~1.55x the monospace-family
+equivalent), heatmap went 42/25 → 46/27. A test pins this so a future
+"make it bolder" doesn't reintroduce the smudging.
+
+**`gameboy` was inverted to the real DMG panel** — dark ink on the pale
+yellow-green LCD (`9bbc0f` / `8bac0f` / `306230` / `0f380f`), not light text
+on dark green. The first version was light-on-dark and both muddy and hard
+to read; inverting it also freed up enough contrast to colour the two diff
+signs differently, which the dark version couldn't do at all (both signs
+had to share one colour there).
+
+## Decals: laurels, helmets, and the value of testing a shape in isolation
+
+`prestige` has gold laurel branches flanking the title
+(`_draw_laurel_branch` / `_draw_leaf`), and `varsity` has blank football
+helmet decals either side of its title (`_helmet_layer` / `_paste_helmet`).
+Both were requested specifically, and both are the sort of thing a later
+palette tweak can silently drop, so there's a test asserting each renderer
+still references its decal helper.
+
+**The laurels took two attempts as well, and the second failure is the
+instructive one: mirroring.** Generating the facing branch by negating
+coordinates produces a *180-degree rotation*, not a horizontal mirror — the
+pair ends up pointing the same way round instead of opening toward each
+other like a wreath. Both decals therefore draw one orientation onto an RGBA
+layer and use `transpose(FLIP_LEFT_RIGHT)` for the other side
+(`_laurel_layer`/`_paste_laurel`, `_helmet_layer`/`_paste_helmet`). The
+laurels also gained a bezier stem, alternating tapering leaves, a tip curl
+and berries after "more flourishy" feedback, and the pair sits wider apart —
+with `title_pad` on the theme reserving room so a long matchup title can't
+run under them.
+
+**The helmet took two attempts, and the useful lesson is how it was
+caught.** The first version drew outline arcs straight onto the image and
+read as "a circle with an eye" — the shape was wrong, not the placement.
+Rendering the silhouette *alone* on a plain background at three sizes made
+that obvious immediately, where it was nearly invisible inside a full
+ladder render. The working version is a filled silhouette on its own RGBA
+layer (shell, jaw, ear hole, a pieslice bite for the face opening, two
+facemask bars and a chin bar), pasted in — which also means the mirrored
+copy is a `FLIP_LEFT_RIGHT` rather than a second set of hand-mirrored
+coordinates. Laurels needed a second pass too, for position: at radius 62
+centred on y=58 they ran off the top edge and tangled with the frame's
+corner ticks.
+
+**A pixel assertion has to be computed against the shapes, not eyeballed.**
+The helmet test checks a point that's transparent only because of the
+face-opening cut. The first point chosen (100, 100) turned out to be
+outside the shell ellipse entirely, so it was transparent either way and
+the test passed even with the cut removed — confirmed by actually deleting
+the cut and watching the test still pass. The replacement (88, 55) was
+derived from the ellipse maths and verified to fail without the cut.
+
+**`bubble` keeps Keania One for names and numbers despite the ambiguity.**
+Its '8' is nearly identical to its 'S' (so `GCrane8Cowboys` renders as
+`GCraneSCowboys`), which is the same defect that keeps Honk out of
+carnival's rows — but here it was raised explicitly and the look was
+preferred over the legibility. There's a test pinning that decision; don't
+revert it on legibility grounds without asking.
+
+**`gators` took three passes; the two rejected ones are worth knowing.**
+Bebas Neue read as "a spreadsheet with team colours" (now Audiowide, which
+also keeps lowercase so IGN casing survives). The replacement then used 1x
+chevron polygons behind the title, which came out **blocky** — and put white
+type on orange, which was **hard to read**. Current version: all diagonal art
+supersampled (see `_ART_SUPERSAMPLE`), a two-tone blue wedge behind the title
+instead of chevrons, orange kept to a swept top band and a thin base rule
+well clear of the text, the home band flipped to light-with-navy-type, and
+navy numerals on the orange badges. If a future tweak puts white back on that
+orange, that's the same contrast problem returning.
+
+**PIL antialiases neither polygons nor lines.** Any art that is mostly
+diagonals — laurels, chevrons, swept bands, the heatmap wedges — must be
+drawn at `_ART_SUPERSAMPLE` (4x) and downscaled with LANCZOS, or the edges
+stair-step. This is the actual cause of "blocky", not the shapes themselves.
+
+`heatmap` got the same angling treatment (slanted badges plus a diagonal
+header field) alongside its size bump.
+
+**`newsprint` is set in Newsreader throughout** — masthead, column heads,
+names, slot numbers, with the true italic on the kicker and stat text. An
+earlier pass changed only the masthead and left the body in the generic
+condensed bold, which still read as unstyled; if it ever looks "default"
+again, check the *body* font, not the title.
+
+**Background art that scatters elements (`starfield`, `cyberdeck`,
+`dossier`, `bubble`) uses a seeded `random.Random`**, so the same ladder
+renders byte-identically every time. There's a test for it; an unseeded
+version would shimmer between otherwise identical calls.
+
+## Ladder rows: offensive OVR, and the middle difference column
+
+**`matchup_ladder.our_total_ovr` is NOT our team's overall despite the
+name — it holds the *opponent's* team overall.** `ladder_flow.py`'s
+opponent CSV flow writes `opp['total_ovr']` into that column, and
+`classic` labels it "Opp TOT" correctly. Nothing should ever use it for
+our side; our player's numbers come from `players` (`off_ovr` via
+`get_ladder_snapshot`'s join, `total_ovr` for team overall).
+
+**`_ladder_row_fields`'s `our_stat` used to be
+`r.get('ladder_rank') or r.get('our_off_ovr')`** — and `ladder_rank` is
+non-None for any league with ladder weights configured, which in practice
+is all of them (the `pwr_rank_weights` table ships global `ladder`-category
+rows). So what the poster styles actually showed next to our players was a
+weighted rank score, not an OVR. It's `off_ovr` unconditionally now.
+`classic` still has its own separate Ladder Rank column, so that number
+didn't disappear anywhere it was labelled.
+
+**New middle column: `off_ovr - opp_def_ovr`**, pre-formatted with a sign
+in `_ladder_row_fields` as `diff`/`diff_val`, drawn by the shared
+`_draw_diff()` (green-ish positive / red-ish negative in each style's own
+palette). It draws **nothing** when either OVR is missing rather than a 0,
+which would read as an even matchup. `_DIFF_GUTTER` (46px either side of
+the midline) is the space every style reserves for it; the styles that had
+a full-height centre divider now split that rule above and below the
+number. `clean` had no end-of-row slot badges to fall back on, so its
+centre circle became a pill holding the slot number and the diff together.
+
+## Ladder player names are centred in their column
+
+Explicit request, applied to every style including `classic`. All of the
+geometry lives in one helper, `_draw_centered_name()` — each style passes
+only its column bounds, colours, and a `fitter` lambda, which keeps each
+style's font constant inside that style's own source where the
+font-choice tests can still see it (`test_carnival_style_player_names_use_
+reliable_font_not_honk` and friends scan for exact call shapes like
+`_fit_text(draw, f['our_ign'], _POSTER_FONT_BOLD` — keep that shape when
+touching a renderer).
+
+Two things that are easy to get wrong here:
+- **The fit budget has to be measured from the centre outward, not from
+  the column width.** A centred name grows in *both* directions, so it
+  has to fit between the centre and whichever edge is nearer, after
+  subtracting the stat's width and gap on the side the stat sits on.
+  Otherwise a long name slides under the slot badge on one side while
+  crossing the centre divider on the other.
+- **`_fit_text` returns its floor size even when the text still doesn't
+  fit**, so `_draw_centered_name` truncates (via `_truncate_to_width`,
+  suffix `..` rather than `…` — the bundled pixel/display fonts only
+  cover basic Latin and would render a missing-glyph box). It returns
+  `(font, text_as_drawn)`, and the drawn text is what a caller measuring
+  the result must use.
+
+`_render_table` grew a `'C'` alignment (see `_cell_text_x`) for classic's
+two name columns; its numeric columns stay right-aligned so digits still
+line up. `/rank`, `/scores` and `/stats` pass the same aligns they always
+did and are unaffected.
 
 These fonts have no standard OS package the way DejaVu does, so their
 fallback chains are just `[bundled_path] + _POSTER_FONT_BOLD` (Condensed

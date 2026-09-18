@@ -4983,7 +4983,7 @@ class TestScoresGrid(unittest.TestCase):
     def test_carnival_style_player_names_use_reliable_font_not_honk(self):
         """
         Unlike every other display-font style (tactical/varsity/arcade/
-        street/championship all use their title font for player names too,
+        street all use their title font for player names too,
         per an explicit consistency request), carnival is a deliberate
         exception: confirmed directly that Honk's digit glyphs are
         genuinely hard to distinguish from letters in mixed alphanumeric
@@ -5005,7 +5005,7 @@ class TestScoresGrid(unittest.TestCase):
         self.assertNotIn("_fit_variable_text(draw, f['opp_ign']", source)
 
     def test_other_display_font_styles_use_title_font_for_names(self):
-        """The consistency fix itself: tactical/varsity/street/championship
+        """The consistency fix itself: tactical/varsity/street
         (and arcade, checked separately since it's a wide non-variable
         font) must use their own display font for player names, not a
         generic fallback, confirmed directly from source rather than by
@@ -5017,7 +5017,13 @@ class TestScoresGrid(unittest.TestCase):
             ('_render_ladder_varsity', '_FONT_GRADUATE'),
             ('_render_ladder_street', '_FONT_BUNGEE'),
             ('_render_ladder_arcade', '_FONT_PRESS_START'),
-            ('_render_ladder_championship', '_FONT_NABLA_PATH'),
+            # Second font batch — one display face per style that had none.
+            ('_render_ladder_neon', '_FONT_ORBITRON'),
+            ('_render_ladder_scoreboard', '_FONT_ANTON'),
+            # gridiron deliberately shares tactical's face, by preference.
+            ('_render_ladder_gridiron', '_FONT_BLACK_OPS'),
+            ('_render_ladder_blueprint', '_FONT_SHARE_TECH'),
+            ('_render_ladder_terminal', '_FONT_VT323'),
         ]
         for func_name, font_const in checks:
             source = inspect.getsource(getattr(sheet_image, func_name))
@@ -5077,7 +5083,10 @@ class TestScoresGrid(unittest.TestCase):
              'opp_ign': f'Opp{i}', 'opp_def_ovr': 110 + i}
             for i in range(1, 17)
         ]
-        for style in ['classic', 'neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street', 'carnival', 'championship']:
+        for style in ['classic', 'neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                      'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
+                      'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
+                      'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = render_ladder_image(
                 "NeuroPerverse vs seams suspicious", rows, subtitle="Ladder (E1)",
                 style=style, our_team_name="NeuroPerverse", opponent_name="seams suspicious", division="E1"
@@ -5115,7 +5124,10 @@ class TestScoresGrid(unittest.TestCase):
             'opp_ign': 'AnotherVeryLongOpponentNameThatShouldAlsoFit',
             'opp_def_ovr': 114,
         }]
-        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street', 'carnival', 'championship']:
+        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                      'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
+                      'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
+                      'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = render_ladder_image("Title", rows, style=style,
                                        our_team_name="NeuroPerverse", opponent_name="seams suspicious")
             img = Image.open(buf)  # must not raise
@@ -5128,7 +5140,10 @@ class TestScoresGrid(unittest.TestCase):
         from PIL import Image
         rows = [{'slot': 1, 'our_ign': 'Grizzly', 'ladder_rank': None, 'our_off_ovr': None,
                  'opp_ign': None, 'opp_def_ovr': None}]
-        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street', 'carnival', 'championship']:
+        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                      'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
+                      'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
+                      'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = render_ladder_image("Title", rows, style=style)  # must not raise
             img = Image.open(buf)
             self.assertGreater(img.width, 0)
@@ -5140,7 +5155,10 @@ class TestScoresGrid(unittest.TestCase):
         from PIL import Image
         few_rows = [{'slot': i, 'our_ign': f'P{i}', 'opp_ign': f'O{i}'} for i in range(1, 4)]
         many_rows = [{'slot': i, 'our_ign': f'P{i}', 'opp_ign': f'O{i}'} for i in range(1, 17)]
-        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street', 'carnival', 'championship']:
+        for style in ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                      'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
+                      'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
+                      'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             few_img = Image.open(render_ladder_image("T", few_rows, style=style))
             many_img = Image.open(render_ladder_image("T", many_rows, style=style))
             self.assertLess(few_img.height, many_img.height)
@@ -5621,7 +5639,10 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
     async def test_build_ladder_image_passes_style_through(self):
         from optimized_bot import _build_ladder_image
         await db.upsert_ladder_slot("NP", TODAY, 1, opp_ign="TestOpp", opp_def_ovr=200, our_ign="Grizzly")
-        for style in ['classic', 'neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street', 'carnival', 'championship']:
+        for style in ['classic', 'neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                      'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
+                      'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
+                      'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = await _build_ladder_image("NP", datetime.date.fromisoformat(TODAY), style=style)
             self.assertIsNotNone(buf)
 
@@ -6301,6 +6322,462 @@ class TestDataIntegrity(unittest.IsolatedAsyncioTestCase):
         remaining = await db.get_players_remaining("NP", TODAY)
         self.assertNotIn("FHRITP", remaining)
         await db.execute("UPDATE players SET status='A' WHERE ign='FHRITP'")
+
+
+class TestThemedLadderStyles(unittest.TestCase):
+    """
+    The theme-driven ladder styles (everything after the original bespoke
+    renderers). They all share _render_ladder_themed, so what needs testing
+    per theme is its *config* — a missing key or a font whose digits can't
+    be read renders perfectly happily and just looks wrong.
+    """
+
+    ROWS = [
+        {'slot': i, 'our_ign': n, 'our_off_ovr': ovr, 'opp_ign': o, 'opp_def_ovr': d}
+        for i, (n, ovr, o, d) in enumerate([
+            ('Seahawks', 136, 'Carterman', 133), ('CorgiCola', 125, 'CGL', 133),
+            ('PHOKing_Frank', 142, 'GCrane8Cowboys', 133), ('wagdad', 132, 'MIAMiknerF', 132),
+        ], 1)
+    ]
+
+    def test_every_theme_renders_a_valid_png(self):
+        from PIL import Image
+        from sheet_image import render_ladder_image, _LADDER_THEMES
+        for style in _LADDER_THEMES:
+            buf = render_ladder_image("T", self.ROWS, style=style, our_team_name="NeuroAdverse",
+                                      opponent_name="Legends of Valhalla", division="E1")
+            img = Image.open(buf)
+            self.assertEqual(img.format, "PNG", style)
+            self.assertGreater(img.width, 0, style)
+
+    def test_every_theme_declares_the_keys_the_engine_requires(self):
+        from sheet_image import _LADDER_THEMES
+        for style, t in _LADDER_THEMES.items():
+            for key in ('bg', 'text', 'font_title', 'font_name', 'font_num'):
+                self.assertIn(key, t, f'{style} is missing required theme key {key!r}')
+
+    def test_every_theme_scales_with_row_count(self):
+        from PIL import Image
+        from sheet_image import render_ladder_image, _LADDER_THEMES
+        few = self.ROWS[:1]
+        many = [dict(r, slot=i) for i, r in enumerate(self.ROWS * 4, 1)]
+        for style in _LADDER_THEMES:
+            a = Image.open(render_ladder_image("T", few, style=style))
+            b = Image.open(render_ladder_image("T", many, style=style))
+            self.assertLess(a.height, b.height, style)
+
+    def test_every_theme_handles_missing_opponent_data(self):
+        from PIL import Image
+        from sheet_image import render_ladder_image, _LADDER_THEMES
+        rows = [{'slot': 1, 'our_ign': 'Grizzly', 'our_off_ovr': None,
+                 'opp_ign': None, 'opp_def_ovr': None}]
+        for style in _LADDER_THEMES:
+            img = Image.open(render_ladder_image("T", rows, style=style))  # must not raise
+            self.assertGreater(img.width, 0, style)
+
+    def test_gators_theme_is_blue_and_orange(self):
+        """The one explicit colour request: Florida's livery. Checks the
+        actual palette rather than trusting the style's name."""
+        from sheet_image import _LADDER_THEMES
+        t = _LADDER_THEMES['gators']
+        r, g, b = t['bg']
+        # Hue relationships rather than a brightness floor: blue has to
+        # dominate, which is true of both a navy and a royal blue.
+        self.assertTrue(b > 100 and b > r * 2 and b > g * 2, f'gators background is not blue: {t["bg"]}')
+
+        # Orange has to be present, but deliberately not pinned to a
+        # particular key: it moved off the home band when white-on-orange
+        # turned out to be hard to read, and that fix shouldn't fail this.
+        colours = [v for v in t.values() if isinstance(v, tuple) and len(v) == 3]
+        oranges = [c for c in colours if c[0] > 200 and 40 < c[1] < 160 and c[2] < 100]
+        self.assertGreaterEqual(len(oranges), 2,
+                                f'gators has no orange left in its palette: {colours}')
+
+    def test_bubble_uses_keania_throughout_by_explicit_choice(self):
+        """Keania One's '8' is nearly identical to its 'S' (confirmed on a
+        rendered digit sheet), so GCrane8Cowboys reads as GCraneSCowboys.
+        That was raised and the look was explicitly preferred over the
+        ambiguity — unlike carnival/Honk, where the reliable font stayed.
+        This test pins the decision so nobody "fixes" it back on legibility
+        grounds without asking first."""
+        import sheet_image
+        t = sheet_image._LADDER_THEMES['bubble']
+        for key in ('font_title', 'font_name', 'font_num'):
+            self.assertEqual(t[key], sheet_image._FONT_KEANIA,
+                             f'bubble should use Keania One for {key}')
+
+    def test_stroke_is_only_used_on_faces_open_enough_to_take_it(self):
+        """Faux-bolding via stroke helps a light, open face and wrecks a
+        tight or heavy one: a 1px outline closed up Anton\'s counters
+        ("Ruffis" -> "Buffis"), DotGothic16\'s pixel shapes ("scotty" ->
+        "ecotty") and VT323\'s m/W ("Packman425" -> "Packnan425"). Share
+        Tech Mono in blueprint is the one that takes it cleanly."""
+        import inspect
+        import sheet_image
+        blueprint = inspect.getsource(sheet_image._render_ladder_blueprint)
+        self.assertIn('stroke=1', blueprint, 'blueprint should faux-bold Share Tech Mono')
+        terminal = inspect.getsource(sheet_image._render_ladder_terminal)
+        self.assertNotIn('stroke=1', terminal, 'VT323 glyphs fill in when stroked')
+        for style in ('heatmap', 'gameboy'):
+            self.assertFalse(sheet_image._LADDER_THEMES[style].get('name_stroke'),
+                             f'{style} must not stroke its names — its face fills in')
+
+    def test_prestige_has_laurels_and_varsity_has_helmets(self):
+        """Both decals were asked for specifically, and both are easy to lose
+        in a later palette tweak since neither affects layout."""
+        import inspect
+        import sheet_image
+        self.assertIn('_paste_laurel',
+                      inspect.getsource(sheet_image._art_gold_rules),
+                      'prestige lost its laurels')
+        self.assertIn('_paste_helmet',
+                      inspect.getsource(sheet_image._render_ladder_varsity),
+                      'varsity lost its helmet decals')
+
+    def test_helmet_silhouette_has_a_face_opening(self):
+        """The helmet is a filled silhouette with a bite taken out for the
+        face opening — an early outline version read as a plain circle. If
+        the cut-outs ever stop being transparent it becomes a blob again."""
+        from sheet_image import _helmet_layer
+        layer = _helmet_layer(120, (212, 175, 55))
+        alpha = layer.split()[-1]
+        px = alpha.load()
+        # (88, 55) is inside the shell ellipse but inside the face-opening
+        # wedge, and clear of the facemask bars — so it is solid without the
+        # cut and transparent with it. Picked by computing against the shapes
+        # rather than by eye: a first attempt used (100, 100), which is
+        # outside the shell altogether, so the assertion held either way and
+        # the test proved nothing.
+        self.assertGreater(px[40, 30], 200, 'helmet crown should be solid')
+        self.assertLess(px[88, 55], 40, 'helmet face opening should be cut away')
+
+    def test_newsprint_is_set_in_the_serif_throughout(self):
+        """The masthead alone was not enough — the body still rendered in the
+        generic condensed bold, which read as unstyled."""
+        import inspect
+        import sheet_image
+        src = inspect.getsource(sheet_image._render_ladder_newsprint)
+        self.assertIn("f['our_ign'], _FONT_NEWSREADER", src)
+        self.assertIn("f['opp_ign'], _FONT_NEWSREADER", src)
+        self.assertNotIn('_POSTER_FONT_BOLD', src, 'newsprint still falls back to the default face')
+
+    def test_every_theme_font_actually_loads_at_the_requested_size(self):
+        """Every font a theme names has to resolve to a real file somewhere in
+        its candidate chain. If none do, _load_font falls through to PIL's
+        default, which ignores the requested size and renders ~10px — the
+        exact silent failure that shipped once already.
+
+        Note this can't just check chain[0]: the DejaVu Condensed chains
+        (which several themes use for names) start at a bundled path that
+        isn't bundled — those legitimately resolve to a system copy."""
+        import os
+        import sheet_image
+        for style, t in sheet_image._LADDER_THEMES.items():
+            for key in ('font_title', 'font_name', 'font_num', 'font_stat', 'font_label'):
+                chain = t.get(key)
+                if not chain:
+                    continue
+                self.assertTrue(any(os.path.isfile(p) for p in chain),
+                                f'{style}.{key}: no candidate exists on disk: {chain}')
+                font = sheet_image._load_font(chain, 22)
+                self.assertEqual(font.size, 22, f'{style}.{key} did not load at the requested size')
+
+    def test_display_faces_are_bundled_not_system_dependent(self):
+        """The new display faces have no OS package anywhere, so for those the
+        bundled copy specifically must be present — a system fallback would
+        never exist on the production host."""
+        import os
+        import sheet_image
+        for const in ('_FONT_AUDIOWIDE', '_FONT_BITCOUNT', '_FONT_DOTGOTHIC', '_FONT_KEANIA',
+                      '_FONT_NEWSREADER', '_FONT_NEWSREADER_IT', '_FONT_NOVA_SQUARE',
+                      '_FONT_SPECIAL_ELITE', '_FONT_SYNE_MONO', '_FONT_WALLPOET'):
+            bundled = getattr(sheet_image, const)[0]
+            self.assertIn('fonts', bundled, f'{const} does not prefer a bundled copy')
+            self.assertTrue(os.path.isfile(bundled), f'{const} bundled file missing: {bundled}')
+
+    def test_heatmap_tint_tracks_the_diff(self):
+        """heatmap's whole point is the row colour carrying the same
+        information as the diff column — greener as we're favoured, redder as
+        we're not, and neutral when the OVR is unknown."""
+        from sheet_image import _heat_tint
+        big_plus = _heat_tint({'diff_val': 14}, 0)
+        big_minus = _heat_tint({'diff_val': -14}, 0)
+        unknown = _heat_tint({'diff_val': None}, 0)
+        self.assertGreater(big_plus[1], big_plus[0], 'favoured rows should read green')
+        self.assertGreater(big_minus[0], big_minus[1], 'underdog rows should read red')
+        self.assertLess(abs(unknown[0] - unknown[1]), 10, 'unknown should stay neutral')
+
+    def test_background_art_is_deterministic(self):
+        """Several themes scatter stars/speckle/blobs with random(); those are
+        seeded, so the same ladder has to render byte-identically every time
+        rather than shimmering between calls."""
+        from sheet_image import render_ladder_image
+        for style in ('starfield', 'cyberdeck', 'dossier', 'bubble'):
+            a = render_ladder_image("T", self.ROWS, style=style).getvalue()
+            b = render_ladder_image("T", self.ROWS, style=style).getvalue()
+            self.assertEqual(a, b, f'{style} renders differently on repeat calls')
+
+
+class TestLadderStyleChoices(unittest.TestCase):
+    """The /show_ladder picker and the renderer have to agree, and the whole
+    list has to fit inside Discord's hard cap of 25 choices per parameter."""
+
+    def _choices(self):
+        import optimized_bot
+        return optimized_bot.LADDER_STYLE_CHOICES
+
+    def test_style_choices_fit_discords_25_choice_limit(self):
+        choices = self._choices()
+        self.assertLessEqual(len(choices), 25,
+                             f'{len(choices)} choices exceeds Discord\'s per-parameter limit of 25')
+
+    def test_every_offered_style_actually_renders_something_distinct(self):
+        """A style in the picker that isn't wired up silently falls through to
+        classic, which looks like the picker being ignored."""
+        from sheet_image import render_ladder_image
+        classic = render_ladder_image("T", TestThemedLadderStyles.ROWS, style='classic').getvalue()
+        for choice in self._choices():
+            if choice.value == 'classic':
+                continue
+            out = render_ladder_image("T", TestThemedLadderStyles.ROWS, style=choice.value,
+                                      our_team_name="NeuroAdverse", opponent_name="Opponents")
+            self.assertNotEqual(out.getvalue(), classic,
+                                f'style {choice.value!r} fell through to classic')
+
+    def test_every_implemented_style_is_offered_in_the_picker(self):
+        """The other direction: a style built but never added to the picker is
+        unreachable for users, which is how the four newest ones sat unused."""
+        import sheet_image
+        offered = {c.value for c in self._choices()}
+        for style in sheet_image._LADDER_THEMES:
+            self.assertIn(style, offered, f'theme {style!r} is implemented but not in the picker')
+        for name in vars(sheet_image):
+            if name.startswith('_render_ladder_'):
+                style = name[len('_render_ladder_'):]
+                if style in ('themed', 'classic'):
+                    continue
+                self.assertIn(style, offered, f'{name} is implemented but not in the picker')
+
+    def test_choice_values_are_unique(self):
+        values = [c.value for c in self._choices()]
+        self.assertEqual(len(values), len(set(values)), 'duplicate style values in the picker')
+
+
+class TestBundledDisplayFonts(unittest.TestCase):
+    """
+    The second batch of display fonts (Anton, Bebas Neue, Orbitron, Share
+    Tech Mono, VT323), added so each style has its own face instead of
+    sharing the generic condensed bold. These are bundled files with no OS
+    package anywhere — if one goes missing from fonts/ the only symptom is
+    a silently different-looking style, so the bundling itself is what
+    needs checking.
+    """
+
+    # _FONT_BEBAS is included even though no style uses it right now — it's
+    # bundled, so it should stay loadable for whenever one does.
+    NEW_FONTS = ['_FONT_ANTON', '_FONT_BEBAS', '_FONT_ORBITRON', '_FONT_ORBITRON_BLACK',
+                 '_FONT_SHARE_TECH', '_FONT_VT323']
+
+    def test_each_new_font_is_bundled_and_loads_at_the_requested_size(self):
+        """The bundled path must come first in the chain and actually load —
+        not silently fall through to PIL's fixed ~10px default."""
+        import os
+        import sheet_image
+        for const in self.NEW_FONTS:
+            chain = getattr(sheet_image, const)
+            bundled = chain[0]
+            self.assertTrue(os.path.isfile(bundled), f'{const} bundled file missing: {bundled}')
+            self.assertIn('fonts', bundled, f'{const} should prefer the bundled copy')
+            for size in (13, 24, 42):
+                font = sheet_image._load_font(chain, size)
+                self.assertEqual(font.size, size, f'{const} did not load at size {size}')
+
+    def test_monospace_styles_fall_back_to_a_monospace_font(self):
+        """blueprint and terminal both depend on fixed-width columns, so
+        their fallback has to be another monospace face — not the condensed
+        bold every other display font falls back to, which would leave the
+        layout ragged if the bundled file ever went missing.
+
+        Checked two ways, because most of these candidates are Linux system
+        paths that don't exist on a dev machine: every path in the chain
+        must name a Mono face (machine-independent), and any that actually
+        exists here must measure as monospaced."""
+        import os
+        from PIL import Image, ImageDraw
+        import sheet_image
+        draw = ImageDraw.Draw(Image.new('RGB', (10, 10)))
+        for const in ('_FONT_SHARE_TECH', '_FONT_VT323'):
+            chain = getattr(sheet_image, const)
+            self.assertGreater(len(chain), 1, f'{const} has no fallback at all')
+            checked_real_file = False
+            for path in chain[1:]:
+                self.assertIn('mono', os.path.basename(path).lower(),
+                              f'{const} falls back to a non-monospace face: {path}')
+                if os.path.isfile(path):
+                    font = sheet_image._load_font([path], 20)
+                    widths = {round(draw.textlength(c, font=font), 2) for c in 'iWM10@'}
+                    self.assertEqual(len(widths), 1, f'{path} is not actually monospaced')
+                    checked_real_file = True
+            self.assertTrue(checked_real_file,
+                            f'{const} has no fallback present on this machine to verify')
+
+    def test_new_fonts_cover_the_characters_real_igns_use(self):
+        """A display font missing a glyph renders a blank box, and rosters
+        here really do contain digits, underscores and mixed case
+        (PHOKing_Frank, GCrane8Cowboys, thebigbreesy)."""
+        from PIL import Image, ImageDraw
+        import sheet_image
+        draw = ImageDraw.Draw(Image.new('RGB', (10, 10)))
+        samples = ['PHOKing_Frank', 'GCrane8Cowboys', 'thebigbreesy', 'Rob926', '+11', '-8', '0']
+        for const in self.NEW_FONTS:
+            font = sheet_image._load_font(getattr(sheet_image, const), 24)
+            for text in samples:
+                # A missing glyph collapses to zero width or to the .notdef
+                # box; either way the string measures differently than the
+                # sum of its characters rendering properly.
+                self.assertGreater(draw.textlength(text, font=font), 0,
+                                   f'{const} cannot render {text!r}')
+
+    def test_no_style_uses_the_retired_nabla_font(self):
+        """championship was removed for looking wrong; Nabla stays in
+        fonts/ but nothing should reference it again without asking."""
+        import inspect
+        import sheet_image
+        for name, obj in vars(sheet_image).items():
+            if name.startswith('_render_ladder_') and callable(obj):
+                self.assertNotIn('_FONT_NABLA_PATH', inspect.getsource(obj),
+                                 f'{name} uses the retired Nabla font')
+
+
+class TestLadderRowFieldsAndCentering(unittest.TestCase):
+    """
+    Covers the ladder row readouts: our side showing *offensive* OVR (not a
+    ladder-rank score, and never the opponent's team overall), the middle
+    OVR-difference column, and names being centred in their column.
+    """
+
+    def _row(self, **over):
+        row = {'slot': 1, 'our_ign': 'Seahawks', 'our_off_ovr': 136,
+               'opp_ign': 'Carterman', 'opp_def_ovr': 133,
+               # Named "our_total_ovr" but actually the OPPONENT's team
+               # overall — see _ladder_row_fields. Deliberately a wildly
+               # different scale so it's obvious if it leaks into our side.
+               'our_total_ovr': 4029}
+        row.update(over)
+        return row
+
+    def test_our_stat_is_offensive_ovr(self):
+        import sheet_image
+        f = sheet_image._ladder_row_fields(self._row())
+        self.assertEqual(f['our_stat'], '136')
+
+    def test_our_stat_is_not_the_opponents_team_overall(self):
+        """The reported bug: 4029 (matchup_ladder.our_total_ovr, which is the
+        opponent's team overall despite the column name) appearing next to
+        our own player instead of their offensive OVR."""
+        import sheet_image
+        f = sheet_image._ladder_row_fields(self._row())
+        self.assertNotEqual(f['our_stat'], '4029')
+        self.assertNotIn('4029', str(f['our_stat']))
+
+    def test_our_stat_ignores_ladder_rank(self):
+        """our_stat used to prefer ladder_rank, which is non-None for any
+        league with ladder weights configured — so the ladder showed a
+        weighted rank score where an OVR was expected, and the middle diff
+        column wouldn't have matched the two numbers either side of it."""
+        import sheet_image
+        f = sheet_image._ladder_row_fields(self._row(ladder_rank=1063.4))
+        self.assertEqual(f['our_stat'], '136')
+
+    def test_diff_is_off_ovr_minus_opp_def_ovr(self):
+        import sheet_image
+        self.assertEqual(sheet_image._ladder_row_fields(self._row())['diff'], '+3')
+        self.assertEqual(
+            sheet_image._ladder_row_fields(self._row(our_off_ovr=125))['diff'], '-8')
+        self.assertEqual(
+            sheet_image._ladder_row_fields(self._row(our_off_ovr=133))['diff'], '0')
+
+    def test_diff_matches_the_two_numbers_actually_displayed(self):
+        """Whatever else changes, the middle column has to be exactly the
+        difference of the two OVRs shown on either side of it — that's the
+        only reason it's readable at a glance."""
+        import sheet_image
+        for ours, theirs in ((136, 133), (117, 124), (142, 122), (130, 130)):
+            f = sheet_image._ladder_row_fields(self._row(our_off_ovr=ours, opp_def_ovr=theirs))
+            self.assertEqual(int(f['our_stat']) - int(f['opp_stat']), f['diff_val'])
+
+    def test_diff_is_absent_when_either_ovr_is_missing(self):
+        """A missing OVR must show nothing rather than a 0, which would read
+        as an even matchup."""
+        import sheet_image
+        self.assertIsNone(sheet_image._ladder_row_fields(self._row(our_off_ovr=None))['diff'])
+        self.assertIsNone(sheet_image._ladder_row_fields(self._row(opp_def_ovr=None))['diff'])
+
+    def test_every_poster_style_draws_the_diff(self):
+        """Source-level check across all styles at once: a style that forgets
+        the middle column renders perfectly fine, so nothing else would catch
+        it."""
+        import inspect
+        import sheet_image
+        styles = ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                  'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal']
+        for style in styles:
+            src = inspect.getsource(getattr(sheet_image, f'_render_ladder_{style}'))
+            self.assertIn('_draw_diff(', src, f'{style} never draws the OVR difference')
+
+    def test_every_poster_style_centers_names(self):
+        """Names are centred in their column in every style (an explicit
+        request), via the one shared helper — a style hand-placing them with
+        an lm/rm anchor again would silently drift out of line."""
+        import inspect
+        import sheet_image
+        styles = ['neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
+                  'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal']
+        for style in styles:
+            src = inspect.getsource(getattr(sheet_image, f'_render_ladder_{style}'))
+            self.assertEqual(src.count('_draw_centered_name('), 2,
+                             f'{style} should centre exactly two names per row')
+            self.assertNotIn("f['our_ign'], font=", src, f'{style} still hand-places our name')
+            self.assertNotIn("f['opp_ign'], font=", src, f'{style} still hand-places opp name')
+
+    def test_classic_centers_both_name_columns(self):
+        import inspect
+        import sheet_image
+        src = inspect.getsource(sheet_image._render_ladder_classic)
+        aligns = [l for l in src.splitlines() if 'aligns' in l and '=' in l][0]
+        self.assertEqual(aligns.count("'C'"), 2, "classic's two name columns should be centred")
+
+    def test_cell_text_x_centers_within_the_column(self):
+        import sheet_image
+        # 100-wide column, 40-wide text -> 30px of padding each side.
+        self.assertEqual(sheet_image._cell_text_x(0, 100, 'C', 40), 30)
+        self.assertEqual(sheet_image._cell_text_x(200, 100, 'C', 40), 230)
+        # Existing conventions unchanged.
+        self.assertEqual(sheet_image._cell_text_x(0, 100, 'L', 40), sheet_image.PAD_X)
+        self.assertEqual(sheet_image._cell_text_x(0, 100, 'R', 40),
+                         100 - sheet_image.PAD_X - 40)
+
+    def test_centered_name_stays_inside_its_column(self):
+        """A centred name grows both ways, so the fit has to be measured from
+        the centre out — the long-name case that would otherwise slide under
+        the slot badge or across the centre divider."""
+        from PIL import Image, ImageDraw
+        import sheet_image
+        draw = ImageDraw.Draw(Image.new('RGB', (1300, 60)))
+        stat_font = sheet_image._load_font(sheet_image._POSTER_FONT_REG, 16)
+        col_x0, col_x1 = 100, 600
+        cx = (col_x0 + col_x1) // 2
+        for name in ('X', 'PHOKing_Frank', 'GCrane8Cowboys',
+                     'ThisIsAnAbsurdlyLongPlayerNameThatCannotPossiblyFit'):
+            font, drawn = sheet_image._draw_centered_name(
+                draw, name, 'DEF 133', cx, 30, col_x0, col_x1,
+                lambda w: sheet_image._fit_text(draw, name, sheet_image._POSTER_FONT_BOLD, 25, 13, w),
+                (255, 255, 255), stat_font, (200, 200, 200), stat_side='right')
+            half = draw.textlength(drawn, font=font) / 2
+            stat_w = draw.textlength('DEF 133', font=stat_font)
+            self.assertGreaterEqual(cx - half, col_x0 - 1, f'{name} overflows the column start')
+            self.assertLessEqual(cx + half + 12 + stat_w, col_x1 + 1,
+                                 f'{name} + stat overflows the column end')
 
 
 class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):

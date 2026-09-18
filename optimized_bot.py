@@ -108,8 +108,31 @@ LADDER_STYLE_CHOICES = [
     app_commands.Choice(name="Arcade (retro 8-bit)", value="arcade"),
     app_commands.Choice(name="Street (urban/graffiti)", value="street"),
     app_commands.Choice(name="Carnival (playful/bouncy)", value="carnival"),
-    app_commands.Choice(name="Championship (gold 3D)", value="championship"),
+    app_commands.Choice(name="Gridiron (football field)", value="gridiron"),
+    app_commands.Choice(name="Blueprint (technical schematic)", value="blueprint"),
+    app_commands.Choice(name="Newsprint (broadsheet sports page)", value="newsprint"),
+    app_commands.Choice(name="Terminal (CRT green phosphor)", value="terminal"),
+    app_commands.Choice(name="Gators (blue & orange livery)", value="gators"),
+    app_commands.Choice(name="LED Board (dot-matrix scoreboard)", value="ledboard"),
+    app_commands.Choice(name="Dossier (typewritten scouting file)", value="dossier"),
+    app_commands.Choice(name="Game Boy (green LCD)", value="gameboy"),
+    app_commands.Choice(name="Cyberdeck (circuit/uplink)", value="cyberdeck"),
+    app_commands.Choice(name="Starfield (deep space)", value="starfield"),
+    app_commands.Choice(name="Hazard (industrial caution)", value="hazard"),
+    app_commands.Choice(name="Bubble (pastel rounded)", value="bubble"),
+    app_commands.Choice(name="Sketch (pencil on paper)", value="sketch"),
+    app_commands.Choice(name="Prestige (black & gold)", value="prestige"),
+    app_commands.Choice(name="Paper (quiet serif ledger)", value="paper"),
+    app_commands.Choice(name="Heatmap (rows tinted by mismatch)", value="heatmap"),
 ]
+
+# Discord allows a hard maximum of 25 choices per command parameter, and the
+# list above is exactly at it. A 26th style cannot be added as a static
+# choice — it would need an autocomplete callback instead (the same
+# mechanism /legacy's league field uses).
+assert len(LADDER_STYLE_CHOICES) <= 25, (
+    f"{len(LADDER_STYLE_CHOICES)} ladder styles exceeds Discord's 25-choice limit"
+)
 
 def _validate_league(league: str, lang: str = 'en') -> str:
     key = league.upper()
