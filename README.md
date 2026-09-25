@@ -1,6 +1,6 @@
 # Neuroverse Bot
 
-A Discord bot for running a multi-league **Madden Mobile** league system: score tracking, power rankings, ladder matchups, defensive stats, siege tracking and stats, tournaments, and archived past seasons — all as slash commands, fully localized in five languages.
+A Discord bot for running a multi-league **Madden Mobile** league system: score tracking, power rankings, ladder matchups, defensive stats, siege tracking and stats, NFL-style member seasons, tournaments, and archived past seasons — all as slash commands, fully localized in five languages.
 
 Built for the Neuroverse league system
 
@@ -13,6 +13,7 @@ Built for the Neuroverse league system
 - **Configurable rankings** — power rank and ladder rank are weighted formulas over dozens of stat factors, tunable per league through `/weights` and inspectable via `/factors`. Every average has a *fumble-adjusted* counterpart (fumbles excluded from the denominator rather than counted as a scored drive).
 - **Ladder builder with screenshot extraction** — `/ladder` can read a League vs League screenshot through Claude Haiku vision to pull the opponent roster, league name, division, and rank. Names that can't be matched exactly are handed back to an admin for manual matching rather than silently dropped, and suspicious OVR changes (relative to that player's own previous value) are held for review before they're applied.
 - **Siege mode** — full match lifecycle: opponent nodes with mods, per-player scoring against nodes, live status embeds, corrections, and per-mod splits.
+- **NeuroSeason** — an NFL-shaped season for individual members: signups, a conference/division draw, an 18-matchup schedule generated for any field size, screenshot-read results, NFL tiebreakers, and a self-seeding 16-team playoff.
 - **Multi-season archives** — `/legacy` runs the same lookups against a previous season's database file, opened read-only at the SQLite level.
 - **Five languages** — every user-facing string goes through `i18n.t()`: English, Spanish, French, Portuguese, German.
 
@@ -49,6 +50,34 @@ Run `/manual` in Discord for the full, localized, paginated reference. Summary:
 ### Siege
 `/siege` · `/node` · `/siegescore` · `/siegestatus` · `/updatesiege` ·
 `/siegefinal` · `/siegesplits` · `/siegehistory`
+
+### NeuroSeason
+An NFL-shaped season played by individual members rather than by leagues: up to
+32 sign up, get drawn into two conferences and their divisions, and play 18
+matchups each — division rivals twice, a full division in-conference, a full
+division cross-conference, and the rest filled in. Results are read from the
+Head to Head Arena "Game Stats" screenshot. When the last one is in, a 16-team
+playoff seeds itself and each round generates the next until a champion is
+crowned.
+
+| Command | Description |
+| --- | --- |
+| `/neuroseason create` | **Admin.** Open signups for a new season |
+| `/neuroseason join` / `leave` | Sign up, or withdraw before kickoff |
+| `/neuroseason start` | **Admin.** Draw the divisions and build the schedule |
+| `/neuroseason list` | Every season and its status |
+| `/neuroseason standings` | Standings by division, with the full tiebreaker chain |
+| `/neuroseason schedule` | The slate, filterable by player or week |
+| `/neuroseason bracket` | The playoff bracket |
+| `/neuroseason advance` | **Admin.** Fallback if a corrected result left a stage stuck |
+| `/seasonmatch` | Log a played matchup from its result screenshot |
+| `/seasonstats` | A player's stats for one season, or their whole career |
+
+Fewer than 32 signups doesn't change any of that: the layout scales (two
+conferences always, as many divisions as fit at three-plus members each, capped
+at four) and everyone still plays exactly 18. Below 16 members a 16-team
+bracket can't be drawn, so the playoff field drops to the largest clean power
+of two instead of being padded with byes.
 
 ### Roster management
 | Command | Description |
@@ -115,10 +144,11 @@ The database runs in WAL mode. **Stop the bot, delete any leftover `.db-wal` / `
 | `i18n.py` | Every user-facing string, all five languages |
 | `siege.py` | Siege game mode |
 | `ladder_flow.py` | The `/ladder` interactive builder |
-| `agent.py` | Claude vision extraction for ladder screenshots |
+| `neuroseason.py` | The NeuroSeason gamemode: scheduling, standings, playoffs |
+| `agent.py` | Claude vision extraction for ladder and season-match screenshots |
 | `sheet_image.py` | Pillow-based PNG table and poster rendering |
 | `tournament.py`, `status.py`, `newday.py` | Smaller feature areas |
-| `tests.py` | Test suite (~290 tests) with a full discord.py stub |
+| `tests.py` | Test suite (530+ tests) with a full discord.py stub |
 
 ## Tests
 

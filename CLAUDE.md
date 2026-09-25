@@ -23,10 +23,11 @@ table" below.
 - `i18n.py` — all user-facing strings, all 5 languages, manual page text
 - `siege.py` — the Siege game mode
 - `ladder_flow.py` — the `/ladder` builder flow (screenshot extraction or manual)
-- `agent.py` — Claude Haiku vision extraction for `/ladder` screenshots
+- `neuroseason.py` — the NeuroSeason gamemode (scheduling, standings, playoffs)
+- `agent.py` — Claude Haiku vision extraction for `/ladder` and `/seasonmatch` screenshots
 - `sheet_image.py` — PIL-based PNG table rendering (`/rank`, `/scores`, `/show_ladder`)
 - `tournament.py`, `status.py`, `newday.py` — smaller, mostly-stable feature areas
-- `tests.py` — full discord.py stub + ~290 tests, no real Discord/network needed
+- `tests.py` — full discord.py stub + 530+ tests, no real Discord/network needed
 - `db_schema.sql`, `logger_config.py` — supporting files, rarely touched
 
 ## Critical: how deployment actually works (NO shell access)
@@ -1480,3 +1481,174 @@ future test opens a source file, pass the encoding explicitly.
   data — this project's Discord library version has changed meaningfully
   during this conversation (Components V2 modal system, `discord.ui.Label`)
   and stale assumptions have caused real bugs before.
+
+
+## NeuroSeason — the NFL-shaped season gamemode (`neuroseason.py`)
+
+A season played by **individual members**, not by leagues — up to 32 people
+from any league sign up, get drawn into two conferences and their divisions,
+and play 18 matchups each. Results come in from a screenshot of the game's
+own Head to Head Arena "Game Stats" screen. When the last regular-season
+match is reported, a playoff field seeds itself and each round generates the
+next until a champion is recorded.
+
+**Four decisions the user made explicitly when this was built — don't
+silently revisit them:**
+- **Sub-32 fields auto-scale the layout.** Always two conferences; divisions
+  per conference is "as many as fit at 3+ members each, capped at 4", which
+  lands exactly on the NFL's 2x4x4 at 32. Not a lookup table of special
+  cases, and not ghost teams padding the field to 32.
+- **Everyone plays exactly 18, at every field size.** Small fields reach 18
+  by repeating opponents, not by playing a shorter season.
+- **Signups are slash-command self-serve** (`/neuroseason join season:N
+  player:<ign>`), open to anyone — no Discord-account linking, no button UI,
+  and deliberately nothing stopping someone signing another member up.
+- **The playoff field is 16.** Below 16 members that literally can't be
+  drawn, so it falls to the largest power of two that fits (12 members → 8,
+  7 → 4). It is never padded with byes or ghosts.
+
+### The four new tables — and why they're created differently to every other one
+
+`neuro_seasons`, `neuro_season_members`, `neuro_season_matches`,
+`neuro_season_stats`. **No other table in this database is created from
+code** — the rest were made by hand on the server long ago, and `db.py` only
+ever `ALTER`s them. There is no shell access to do that with anymore, so
+these four live in **`db.NEUROSEASON_SCHEMA`** (a single SQL string near the
+bottom of `db.py`), executed as `CREATE TABLE IF NOT EXISTS` by
+`_migrate_neuroseason_schema()` from `_migrate_schema()` on every startup.
+`tests.py`'s `setup_db()` builds its copy from **that same constant** rather
+than pasting the DDL into the test `SCHEMA` block — a schema change can't
+pass tests while breaking production.
+
+Worth knowing about the columns:
+- `neuro_season_members.team_id` is the league the player belonged to **at
+  signup**, same historical-attribution principle as `game_scores.team_id`.
+  A mid-season transfer doesn't move them out of the season or rewrite what
+  they've already played.
+- `get_neuro_season_members()` has **no status filter at all**. A season
+  roster is frozen at signup, so a member who goes inactive still owns their
+  matchups and their stats. Relatedly, `neuroseason._resolve_player()` falls
+  back to an unfiltered `players` lookup when `db.get_player()` (which
+  excludes `status='I'`) comes back empty — without that, a member going
+  inactive in week 9 would silently make their own remaining nine matchups
+  impossible to report. There's a test.
+- `match_num` is unique per season and **playoff rounds continue the regular
+  season's numbering** rather than restarting it, because that number is
+  what a player types into `/seasonmatch`.
+- `record_neuro_season_result()` **replaces** a previously-reported result
+  instead of adding a second one, using the same explicit check-then-act
+  pattern as `update_player_score`/`log_siege_score` (SELECT for the
+  existing row, UPDATE it by its own id, INSERT only if absent). This is the
+  third time this exact duplicate-row class of bug has been designed around
+  in this codebase; there's a test that reverts it and confirms totals
+  inflate.
+
+### Schedule generation (`build_schedule`)
+
+Runs in four steps: division rivals twice (6 at a 4-member division), one
+other division in-conference in full (4), one division cross-conference in
+full (4), then a fill stage to reach 18 — same-conference-unplayed first
+down to the last two games, then cross-conference-unplayed, then anything at
+all. At 32 members that produces exactly the requested 6/4/4/2/2, verified
+per-member by a test rather than just in aggregate.
+
+**The fill stage always pairs the two neediest members.** That ordering is
+load-bearing, not cosmetic: it's what keeps the remaining-degree sequence
+realisable (the Havel-Hakimi argument, which holds for multigraphs whenever
+the degree sum is even), so the unrestricted final pass can never strand
+someone needing games with nobody left to play them. A "prefer a fresh
+opponent" ordering looks nicer and can strand.
+
+**The calendar is ~20 weeks for an 18-game season, and that is correct.**
+Division pairs meet twice and can't do so in the same week, which pushes the
+minimum week count above the game count regardless of how well the packing
+works (Vizing, for multigraphs). Each member therefore gets about two byes.
+If someone reports "why are there 20 weeks", that's the answer — it isn't
+the packer being sloppy. Week assignment fills one week at a time, taking
+the most-booked members' games first, best of several **seeded** attempts
+(`_season_rng(season_id)`), so a season always regenerates identically
+rather than shimmering — same principle as the seeded background art in
+`sheet_image.py`.
+
+### Standings, tiebreakers and seeding
+
+`compute_standings` tracks overall, division and conference records
+separately (all three are tiebreakers) plus points for/against. Only
+`status='complete'` matches count — an unplayed matchup is not a loss.
+
+`rank_rows` applies the four requested tiebreakers in order: head-to-head,
+division record, conference record, points for, with `player_id` last so the
+order is stable rather than arbitrary. Head-to-head is computed **relative
+to the tied group** (for two, literally their record against each other).
+This is a deliberate simplification of the full NFL rulebook, which then
+drops to common games, strength of victory and eventually a coin toss — the
+four asked for are applied exactly, and the rest isn't implemented.
+
+`compute_seeds` seeds **every division winner above every wild card**, even
+a wild card with a better record — the NFL rule, and the reason seeding
+isn't just "sort the conference by record". The test for this had to be
+rewritten once: the first fixture happened to have the division winners also
+leading on record, so it passed identically against a plain record sort.
+It now asserts the discriminating order *and* asserts the fixture still
+discriminates.
+
+`build_playoff_round` **re-seeds every round** (best remaining vs worst
+remaining), NFL-style, rather than following a fixed bracket path. Rounds
+are created one at a time as the previous one finishes, so
+`_current_playoff_round` finds the furthest round present.
+
+### /seasonmatch and the confirmation step
+
+The screenshot shows **NFL team logos, never player names** — the bot cannot
+work out whose column is whose. That is the entire reason the command takes
+`left_player` and `right_player`: they describe the *picture*, not the
+fixture, and the match row decides which of them is the home side
+(`SeasonMatchConfirmView._sides()`). A test puts the away player in the left
+column specifically to pin this.
+
+**Nothing is written until a human confirms.** Vision misreads are a real,
+already-observed failure mode on this project (see the `/ladder` OVR sanity
+check), and a wrong season result is harder to notice than a wrong OVR
+because it silently moves the standings and the playoff seeding. The review
+embed shows every extracted stat; "Fix the score" opens a modal (from a
+button — a modal can never be opened from another modal's submission).
+Only the two scores are editable: they decide the match, the standings and
+every tiebreaker, and a modal caps at five components anyway.
+
+A **playoff match can't be saved as a tie** — there's no way to send two
+players into the next round, and inventing a tiebreak there would be the bot
+deciding a playoff game.
+
+`agent.extract_season_match_from_screenshot()` is a second, separate
+extractor in `agent.py` (the ladder one is untouched). Its prompt explicitly
+forbids reordering the columns by score or winner, and an unreadable stat
+must come back `null`, never `0` — a real 0 is meaningful on that screen (0
+turnovers is a clean game), so a 0 standing in for "couldn't read it" would
+put a fabricated stat into the season record. **Not yet tested against a
+real screenshot** — no network access in this sandbox — so it's worth a live
+`/seasonmatch` run after any prompt change, same caveat as the ladder
+extractor.
+
+### Stage advancement
+
+`advance_season(season_id)` is called after every saved result and is safe
+to call at any time — it only acts when the current stage or round has zero
+pending matches, so an early call is a no-op. `/neuroseason advance` is an
+admin fallback for the case where a result corrected after the fact left a
+stage stuck. Every seed is cleared before being re-set when the playoffs
+open, so a member who missed the field can't keep a seed from an earlier
+call.
+
+### Testing notes specific to this feature
+
+- The new tests use a **hand-written `_FakeInteraction`**, not `MagicMock` —
+  its `followup` has `send()` and nothing else, so code that mistakes a
+  followup for a response object fails the way it would in production. This
+  is the lesson from the `/ladder` manual-match crash that a `MagicMock`
+  hid completely.
+- `tests.py`'s aiohttp stub gained `ClientSession`: `agent.py` annotates with
+  it at import time, so the module couldn't be imported by the suite at all
+  before (it never had been).
+- Every new test was mutation-checked — the code it covers was broken on
+  purpose and the test confirmed to fail — rather than only confirmed to
+  pass. That's what caught the non-discriminating seeding fixture above.

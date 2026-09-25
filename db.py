@@ -269,6 +269,11 @@ async def _migrate_schema():
     except Exception as e:
         logger.error(f"Migration failed creating uq_siege_node_player index: {e}")
 
+    # The neuroseason gamemode's tables. Defined near the bottom of this file
+    # (NEUROSEASON_SCHEMA) and created here because there is no shell access
+    # to create a table any other way on this host.
+    await _migrate_neuroseason_schema()
+
 
 async def backup_database():
     """
@@ -2169,4 +2174,464 @@ async def get_siege_history(team_id: str, limit: int = 10) -> list[dict]:
         LIMIT ?
         """,
         (team_id, limit)
+    )
+
+
+# ===========================================================================
+# NEUROSEASON — NFL-style season gamemode
+# ===========================================================================
+#
+# Unlike every other table in this database, these four were never created by
+# hand on the server — there is no shell access to do that with (see
+# CLAUDE.md). NEUROSEASON_SCHEMA below is executed from _migrate_schema() on
+# every startup with CREATE TABLE IF NOT EXISTS, which is the only way a new
+# table can ever reach production here. It is also the single source of truth
+# the test suite builds its own copy of these tables from, so the two can't
+# drift apart the way a duplicated CREATE TABLE would.
+#
+# Scoping note, same principle as game_scores: a member row stores the
+# team_id the player belonged to *when they joined that season*. A player who
+# transfers leagues mid-season stays in the season they signed up for, and
+# their season history stays attributed to the league they played it under.
+
+NEUROSEASON_SCHEMA = """
+CREATE TABLE IF NOT EXISTS neuro_seasons (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT    NOT NULL,
+    status             TEXT    NOT NULL DEFAULT 'signups',
+    games_per_member   INTEGER NOT NULL DEFAULT 18,
+    max_members        INTEGER NOT NULL DEFAULT 32,
+    divisions_per_conf INTEGER,
+    weeks              INTEGER,
+    playoff_teams      INTEGER,
+    champion_player_id INTEGER,
+    created_at         TEXT    DEFAULT (datetime('now')),
+    started_at         TEXT,
+    completed_at       TEXT
+);
+CREATE TABLE IF NOT EXISTS neuro_season_members (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id  INTEGER NOT NULL,
+    player_id  INTEGER NOT NULL,
+    team_id    TEXT,
+    conference TEXT,
+    division   TEXT,
+    seed       INTEGER,
+    joined_at  TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (season_id) REFERENCES neuro_seasons(id),
+    FOREIGN KEY (player_id) REFERENCES players(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_neuro_season_member
+    ON neuro_season_members(season_id, player_id);
+CREATE TABLE IF NOT EXISTS neuro_season_matches (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id        INTEGER NOT NULL,
+    match_num        INTEGER NOT NULL,
+    stage            TEXT    NOT NULL DEFAULT 'regular',
+    round            TEXT,
+    conference       TEXT,
+    week             INTEGER,
+    home_player_id   INTEGER NOT NULL,
+    away_player_id   INTEGER NOT NULL,
+    home_score       INTEGER,
+    away_score       INTEGER,
+    winner_player_id INTEGER,
+    status           TEXT    NOT NULL DEFAULT 'pending',
+    played_at        TEXT,
+    FOREIGN KEY (season_id) REFERENCES neuro_seasons(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_neuro_season_match_num
+    ON neuro_season_matches(season_id, match_num);
+CREATE TABLE IF NOT EXISTS neuro_season_stats (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id           INTEGER NOT NULL,
+    season_id          INTEGER NOT NULL,
+    player_id          INTEGER NOT NULL,
+    opponent_player_id INTEGER,
+    points             INTEGER,
+    rushing_yds        INTEGER,
+    passing_yds        INTEGER,
+    kick_return_yds    INTEGER,
+    touchdowns         INTEGER,
+    turnovers          INTEGER,
+    field_goals        INTEGER,
+    result             TEXT,
+    created_at         TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (match_id)  REFERENCES neuro_season_matches(id),
+    FOREIGN KEY (player_id) REFERENCES players(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_neuro_season_stat
+    ON neuro_season_stats(match_id, player_id);
+"""
+
+# The per-match stat columns the screenshot extractor fills in. Kept as one
+# list so the DB layer, the vision agent and the confirmation embed can't
+# disagree about which stats a match records.
+SEASON_STAT_FIELDS = (
+    'points', 'rushing_yds', 'passing_yds', 'kick_return_yds',
+    'touchdowns', 'turnovers', 'field_goals',
+)
+
+
+async def _migrate_neuroseason_schema():
+    """Create the neuroseason tables if they aren't there yet. Idempotent —
+    every statement is IF NOT EXISTS, so this runs harmlessly on every
+    startup forever."""
+    try:
+        for stmt in NEUROSEASON_SCHEMA.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                await _db.execute(s)
+        await _db.commit()
+        logger.info("Migration applied: neuroseason tables present")
+    except Exception as e:
+        logger.error(f"Migration failed creating the neuroseason tables: {e}")
+
+
+# --- seasons ---------------------------------------------------------------
+
+async def create_neuro_season(name: str, games_per_member: int = 18,
+                              max_members: int = 32) -> dict:
+    """Open a new season for signups. Returns the created row."""
+    sid = await execute_insert(
+        "INSERT INTO neuro_seasons (name, games_per_member, max_members) VALUES (?,?,?)",
+        (name, games_per_member, max_members)
+    )
+    return await get_neuro_season(sid)
+
+
+async def get_neuro_season(season_id: int, conn=None) -> dict | None:
+    return await fetchone("SELECT * FROM neuro_seasons WHERE id=?", (season_id,), conn=conn)
+
+
+async def list_neuro_seasons(conn=None, limit: int = 25) -> list[dict]:
+    return await fetchall(
+        "SELECT * FROM neuro_seasons ORDER BY id DESC LIMIT ?", (limit,), conn=conn
+    )
+
+
+async def update_neuro_season(season_id: int, **fields):
+    """Update whichever season columns were passed. No-op with no fields."""
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    await execute(
+        f"UPDATE neuro_seasons SET {sets} WHERE id=?",
+        (*fields.values(), season_id)
+    )
+
+
+# --- members ---------------------------------------------------------------
+
+async def add_neuro_season_member(season_id: int, player_id: int, team_id: str | None) -> bool:
+    """
+    Sign a player up. Returns False (rather than raising) if they're already
+    in this season — the unique index is the real guard, this is the friendly
+    path for the common "ran it twice" case.
+    """
+    existing = await fetchone(
+        "SELECT id FROM neuro_season_members WHERE season_id=? AND player_id=?",
+        (season_id, player_id)
+    )
+    if existing:
+        return False
+    await execute_insert(
+        "INSERT INTO neuro_season_members (season_id, player_id, team_id) VALUES (?,?,?)",
+        (season_id, player_id, team_id)
+    )
+    return True
+
+
+async def remove_neuro_season_member(season_id: int, player_id: int) -> bool:
+    rows = await execute(
+        "DELETE FROM neuro_season_members WHERE season_id=? AND player_id=?",
+        (season_id, player_id)
+    )
+    return bool(rows)
+
+
+async def get_neuro_season_members(season_id: int, conn=None) -> list[dict]:
+    """
+    Every member of a season, with their player's ign/real_ign joined on.
+
+    No status filter at all: a season roster is frozen at signup time, so a
+    player who goes inactive (or transfers leagues) partway through is still
+    a member of the season they signed up for and still owns their results.
+    """
+    return await fetchall(
+        """
+        SELECT m.*, p.ign, p.real_ign, p.team_id AS current_team_id
+        FROM neuro_season_members m
+        JOIN players p ON p.id = m.player_id
+        WHERE m.season_id=?
+        ORDER BY m.id
+        """,
+        (season_id,), conn=conn
+    )
+
+
+async def get_neuro_season_member(season_id: int, player_id: int, conn=None) -> dict | None:
+    return await fetchone(
+        """
+        SELECT m.*, p.ign, p.real_ign
+        FROM neuro_season_members m
+        JOIN players p ON p.id = m.player_id
+        WHERE m.season_id=? AND m.player_id=?
+        """,
+        (season_id, player_id), conn=conn
+    )
+
+
+async def set_neuro_season_member_placement(season_id: int, player_id: int,
+                                            conference: str, division: str):
+    await execute(
+        "UPDATE neuro_season_members SET conference=?, division=? WHERE season_id=? AND player_id=?",
+        (conference, division, season_id, player_id)
+    )
+
+
+async def set_neuro_season_member_seed(season_id: int, player_id: int, seed: int | None):
+    await execute(
+        "UPDATE neuro_season_members SET seed=? WHERE season_id=? AND player_id=?",
+        (seed, season_id, player_id)
+    )
+
+
+# --- matches ---------------------------------------------------------------
+
+async def insert_neuro_season_matches(season_id: int, matches: list[dict]) -> int:
+    """
+    Bulk-insert scheduled matches. Each dict needs home_player_id/
+    away_player_id and may carry match_num, week, stage, round, conference.
+    match_num is assigned here when absent, continuing from whatever the
+    season already has — playoff rounds are appended to the regular season's
+    numbering rather than restarting it, so the match number a player types
+    into /seasonmatch is unambiguous for the whole season.
+    """
+    row = await fetchone(
+        "SELECT MAX(match_num) AS m FROM neuro_season_matches WHERE season_id=?", (season_id,)
+    )
+    next_num = (row['m'] or 0) + 1
+    for m in matches:
+        num = m.get('match_num') or next_num
+        next_num = max(next_num, num) + 1
+        await execute_insert(
+            """
+            INSERT INTO neuro_season_matches
+                (season_id, match_num, stage, round, conference, week,
+                 home_player_id, away_player_id)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (season_id, num, m.get('stage', 'regular'), m.get('round'),
+             m.get('conference'), m.get('week'),
+             m['home_player_id'], m['away_player_id'])
+        )
+    return len(matches)
+
+
+async def get_neuro_season_matches(season_id: int, stage: str | None = None,
+                                   round_name: str | None = None,
+                                   player_id: int | None = None,
+                                   week: int | None = None,
+                                   conn=None) -> list[dict]:
+    sql = """
+        SELECT mt.*, hp.ign AS home_ign, ap.ign AS away_ign
+        FROM neuro_season_matches mt
+        JOIN players hp ON hp.id = mt.home_player_id
+        JOIN players ap ON ap.id = mt.away_player_id
+        WHERE mt.season_id=?
+    """
+    args: list = [season_id]
+    if stage:
+        sql += " AND mt.stage=?"
+        args.append(stage)
+    if round_name:
+        sql += " AND mt.round=?"
+        args.append(round_name)
+    if player_id:
+        sql += " AND (mt.home_player_id=? OR mt.away_player_id=?)"
+        args += [player_id, player_id]
+    if week:
+        sql += " AND mt.week=?"
+        args.append(week)
+    sql += " ORDER BY mt.week, mt.match_num"
+    return await fetchall(sql, tuple(args), conn=conn)
+
+
+async def get_neuro_season_match(season_id: int, match_num: int, conn=None) -> dict | None:
+    return await fetchone(
+        """
+        SELECT mt.*, hp.ign AS home_ign, ap.ign AS away_ign
+        FROM neuro_season_matches mt
+        JOIN players hp ON hp.id = mt.home_player_id
+        JOIN players ap ON ap.id = mt.away_player_id
+        WHERE mt.season_id=? AND mt.match_num=?
+        """,
+        (season_id, match_num), conn=conn
+    )
+
+
+def _as_int(v) -> int | None:
+    """Coerce a possibly-missing, possibly-string stat to an int, or None."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+async def record_neuro_season_result(season_id: int, match_num: int,
+                                     home_stats: dict, away_stats: dict) -> dict:
+    """
+    Save a played match: the match row's scores/winner, plus one
+    neuro_season_stats row per player.
+
+    Re-reporting the same match *replaces* the previous entry rather than
+    adding a second one — the same explicit check-then-act pattern used by
+    update_player_score and log_siege_score (SELECT for the existing row
+    first, UPDATE it by its own id if found, INSERT otherwise; never lean on
+    an UPDATE's WHERE clause to double as the existence check). A screenshot
+    misread that later gets corrected must not leave the original behind to
+    be double-counted in the standings.
+    """
+    match = await fetchone(
+        "SELECT * FROM neuro_season_matches WHERE season_id=? AND match_num=?",
+        (season_id, match_num)
+    )
+    if match is None:
+        raise ValueError(f"Match #{match_num} doesn't exist in season {season_id}.")
+
+    home_pts = int(home_stats.get('points') or 0)
+    away_pts = int(away_stats.get('points') or 0)
+    if home_pts > away_pts:
+        winner = match['home_player_id']
+    elif away_pts > home_pts:
+        winner = match['away_player_id']
+    else:
+        winner = None
+
+    await execute(
+        """
+        UPDATE neuro_season_matches
+        SET home_score=?, away_score=?, winner_player_id=?, status='complete',
+            played_at=datetime('now')
+        WHERE id=?
+        """,
+        (home_pts, away_pts, winner, match['id'])
+    )
+
+    for pid, opp_id, stats, pts, opp_pts in (
+        (match['home_player_id'], match['away_player_id'], home_stats, home_pts, away_pts),
+        (match['away_player_id'], match['home_player_id'], away_stats, away_pts, home_pts),
+    ):
+        result = 'T' if pts == opp_pts else ('W' if pts > opp_pts else 'L')
+        vals = [_as_int(stats.get(f)) for f in SEASON_STAT_FIELDS]
+        vals[0] = pts  # points always comes from the authoritative score
+        existing = await fetchone(
+            "SELECT id FROM neuro_season_stats WHERE match_id=? AND player_id=?",
+            (match['id'], pid)
+        )
+        if existing:
+            sets = ", ".join(f"{f}=?" for f in SEASON_STAT_FIELDS)
+            await execute(
+                f"UPDATE neuro_season_stats SET {sets}, opponent_player_id=?, result=? WHERE id=?",
+                (*vals, opp_id, result, existing['id'])
+            )
+        else:
+            cols = ", ".join(SEASON_STAT_FIELDS)
+            marks = ",".join("?" * len(SEASON_STAT_FIELDS))
+            await execute_insert(
+                f"""
+                INSERT INTO neuro_season_stats
+                    (match_id, season_id, player_id, opponent_player_id, result, {cols})
+                VALUES (?,?,?,?,?,{marks})
+                """,
+                (match['id'], season_id, pid, opp_id, result, *vals)
+            )
+
+    return await get_neuro_season_match(season_id, match_num)
+
+
+async def count_neuro_season_pending(season_id: int, stage: str | None = None,
+                                     round_name: str | None = None) -> int:
+    sql = "SELECT COUNT(*) AS c FROM neuro_season_matches WHERE season_id=? AND status!='complete'"
+    args: list = [season_id]
+    if stage:
+        sql += " AND stage=?"
+        args.append(stage)
+    if round_name:
+        sql += " AND round=?"
+        args.append(round_name)
+    row = await fetchone(sql, tuple(args))
+    return row['c'] if row else 0
+
+
+# --- stats -----------------------------------------------------------------
+
+async def get_neuro_season_player_stats(season_id: int, player_id: int, conn=None) -> dict | None:
+    """One player's totals for one season: record, points for/against, and
+    every per-match stat column summed."""
+    sums = ', '.join(f'SUM({f}) AS {f}' for f in SEASON_STAT_FIELDS)
+    row = await fetchone(
+        f"""
+        SELECT COUNT(*) AS games,
+               SUM(CASE WHEN result='W' THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN result='L' THEN 1 ELSE 0 END) AS losses,
+               SUM(CASE WHEN result='T' THEN 1 ELSE 0 END) AS ties,
+               {sums}
+        FROM neuro_season_stats
+        WHERE season_id=? AND player_id=?
+        """,
+        (season_id, player_id), conn=conn
+    )
+    if not row or not row['games']:
+        return None
+    pa = await fetchone(
+        "SELECT SUM(points) AS pa FROM neuro_season_stats WHERE season_id=? AND opponent_player_id=?",
+        (season_id, player_id), conn=conn
+    )
+    row['points_against'] = (pa or {}).get('pa') or 0
+    return row
+
+
+async def get_neuro_season_player_career(player_id: int, conn=None) -> list[dict]:
+    """The same rollup, one row per season the player has played in."""
+    sums = ', '.join(f'SUM(st.{f}) AS {f}' for f in SEASON_STAT_FIELDS)
+    return await fetchall(
+        f"""
+        SELECT s.id AS season_id, s.name AS season_name,
+               COUNT(*) AS games,
+               SUM(CASE WHEN st.result='W' THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN st.result='L' THEN 1 ELSE 0 END) AS losses,
+               SUM(CASE WHEN st.result='T' THEN 1 ELSE 0 END) AS ties,
+               {sums}
+        FROM neuro_season_stats st
+        JOIN neuro_seasons s ON s.id = st.season_id
+        WHERE st.player_id=?
+        GROUP BY s.id
+        ORDER BY s.id DESC
+        """,
+        (player_id,), conn=conn
+    )
+
+
+async def get_neuro_season_all_stats(season_id: int, conn=None) -> list[dict]:
+    """Every member's season totals in one query — what the standings table is
+    built from, so standings never needs an N+1 of per-player lookups."""
+    sums = ', '.join(f'SUM(st.{f}) AS {f}' for f in SEASON_STAT_FIELDS)
+    return await fetchall(
+        f"""
+        SELECT st.player_id, p.ign,
+               COUNT(*) AS games,
+               SUM(CASE WHEN st.result='W' THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN st.result='L' THEN 1 ELSE 0 END) AS losses,
+               SUM(CASE WHEN st.result='T' THEN 1 ELSE 0 END) AS ties,
+               {sums}
+        FROM neuro_season_stats st
+        JOIN players p ON p.id = st.player_id
+        WHERE st.season_id=?
+        GROUP BY st.player_id
+        """,
+        (season_id,), conn=conn
     )
