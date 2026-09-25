@@ -7150,6 +7150,61 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# Test: /manual paging
+# ---------------------------------------------------------------------------
+
+class TestManualPages(unittest.TestCase):
+    """Every page has to actually build.
+
+    A sixth page was added without extending MANUAL_PAGE_COLORS, which is
+    indexed by page number — so paging onto it raised IndexError inside the
+    Next button's callback. An exception there means the interaction never
+    gets a response at all, so the symptom wasn't an error message, it was
+    the bot going silent. Nothing in the suite walked the pages, so nothing
+    caught it.
+    """
+
+    def test_every_page_builds_an_embed_in_every_language(self):
+        import optimized_bot
+        import i18n
+        for lang in i18n.SUPPORTED_LANGS:
+            view = optimized_bot.ManualView(lang)
+            for page in range(len(i18n.MANUAL_PAGE_KEYS)):
+                view.page = page
+                view._rebuild()          # the nav buttons for this page
+                view._build_embed()      # IndexError lives here
+
+    def test_there_is_a_colour_for_every_page(self):
+        """The modulo in _build_embed stops a missing colour from being fatal,
+        but a page silently reusing page 1's colour is still wrong."""
+        import optimized_bot
+        import i18n
+        self.assertGreaterEqual(len(optimized_bot.MANUAL_PAGE_COLORS),
+                                len(i18n.MANUAL_PAGE_KEYS))
+
+    def test_page_titles_agree_with_how_many_pages_there_are(self):
+        """Each title carries its own '(n/total)' counter, which has to be
+        renumbered whenever a page is added — an easy thing to miss."""
+        import i18n
+        total = len(i18n.MANUAL_PAGE_KEYS)
+        for n, key in enumerate(i18n.MANUAL_PAGE_KEYS, start=1):
+            for lang in i18n.SUPPORTED_LANGS:
+                title = i18n.TRANSLATIONS[f'{key}.title'][lang]
+                self.assertIn(f"({n}/{total})", title,
+                              f"{key} [{lang}] says {title!r}, expected ({n}/{total})")
+
+    def test_no_page_exceeds_discord_embed_limits(self):
+        import i18n
+        for key in i18n.MANUAL_PAGE_KEYS:
+            for lang in i18n.SUPPORTED_LANGS:
+                fields = i18n.TRANSLATIONS[f'{key}.fields'][lang]
+                self.assertLessEqual(len(fields), 25, f"{key} [{lang}] has too many fields")
+                for name, value in fields:
+                    self.assertLessEqual(len(name), 256, f"{key} [{lang}] {name}")
+                    self.assertLessEqual(len(value), 1024, f"{key} [{lang}] {name}")
+
+
+# ---------------------------------------------------------------------------
 # Test: NeuroSeason gamemode
 # ---------------------------------------------------------------------------
 

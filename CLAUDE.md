@@ -1652,3 +1652,26 @@ call.
 - Every new test was mutation-checked — the code it covers was broken on
   purpose and the test confirmed to fail — rather than only confirmed to
   pass. That's what caught the non-discriminating seeding fixture above.
+
+## Adding a page to `/manual` touches three places, not one
+
+Adding the NeuroSeason page caught this the hard way: `MANUAL_PAGE_COLORS`
+in `optimized_bot.py` is indexed **by page number**, and it had exactly five
+entries. A sixth page meant `IndexError` inside `ManualView._build_embed()`,
+raised from the Next button's callback — so the interaction never got a
+response and **the symptom was the bot going silent, not an error message**.
+Worth remembering generally: an exception inside a component callback reads
+to the user as the bot freezing.
+
+A new page needs all three of:
+1. `i18n.MANUAL_PAGE_KEYS` — append the key.
+2. `MANUAL_PAGE_COLORS` — append a colour. (`_build_embed` now takes the
+   index modulo the list length, so a missing one wraps instead of being
+   fatal, but the page still gets the wrong colour.)
+3. Every existing title's `(n/5)` counter — they're per-page, per-language,
+   so that's 5 languages x however many pages already exist.
+
+`TestManualPages` covers all three now (walks every page in every language,
+checks the colour list is long enough, and checks the title counters agree
+with the real page count) — verified by reverting the fix and confirming it
+reproduces the original `IndexError`.

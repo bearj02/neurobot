@@ -3251,9 +3251,16 @@ async def weights_slash(interaction: discord.Interaction,
 # /manual — ephemeral command reference
 # ============================================================================
 
+# One colour per manual page. This list is indexed by page number, so it
+# MUST have at least as many entries as i18n.MANUAL_PAGE_KEYS — a page with
+# no colour raised IndexError inside _build_embed(), which meant the Next
+# button's interaction never got a response at all and the bot simply
+# appeared to freeze rather than erroring visibly. The modulo below makes a
+# future page short of a colour wrap around instead of killing the command;
+# the test that walks every page in every language is the real guard.
 MANUAL_PAGE_COLORS = [
     discord.Color.blue(), discord.Color.green(), discord.Color.dark_red(),
-    discord.Color.orange(), discord.Color.purple(),
+    discord.Color.orange(), discord.Color.purple(), discord.Color.teal(),
 ]
 
 
@@ -3288,7 +3295,7 @@ class ManualView(View):
         embed    = discord.Embed(
             title=i18n.t(f'{page_key}.title', self.lang),
             description=i18n.t('manual.nav.footer', self.lang, page=self.page + 1, total=total),
-            color=MANUAL_PAGE_COLORS[self.page]
+            color=MANUAL_PAGE_COLORS[self.page % len(MANUAL_PAGE_COLORS)]
         )
         for name, value in i18n.tlist(f'{page_key}.fields', self.lang):
             embed.add_field(name=f"`{name}`", value=value, inline=False)
