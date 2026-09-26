@@ -1592,12 +1592,33 @@ leading on record, so it passed identically against a plain record sort.
 It now asserts the discriminating order *and* asserts the fixture still
 discriminates.
 
+**`/neuroseason standings` shows three records per row** — overall, division
+and conference (`_fmt_record`, which drops the trailing `-0` until there's
+actually been a tie, because three records on one line otherwise gets hard to
+read). That isn't decoration: division and conference record are two of the
+four tiebreakers, so the footer used to describe an ordering from numbers
+nobody could see.
+
+It takes an optional **`division:`** filter alongside `conference:`.
+`season_division_autocomplete` reads the season from
+`interaction.namespace.season` and lists **that season's own divisions**
+(`neuroseason.season_divisions`, straight from its members) rather than
+static choices — how many divisions a season has depends on how many people
+signed up for it, so a fixed list would offer names that produce an empty
+table. Falls back to every generatable name before a season is chosen.
+Re-validated case-insensitively in the handler, since autocomplete only
+suggests and Discord still accepts free text.
+
+A filter combination that matches nobody (a real division asked for inside
+the conference it isn't in) reports **that**, not "the season hasn't
+started" — the latter sends someone off to fix something that isn't broken.
+
 `build_playoff_round` **re-seeds every round** (best remaining vs worst
 remaining), NFL-style, rather than following a fixed bracket path. Rounds
 are created one at a time as the previous one finishes, so
 `_current_playoff_round` finds the furthest round present.
 
-### /seasonmatch and the confirmation step
+### /seasonmatch: the screenshot is optional, every stat is editable
 
 The screenshot shows **NFL team logos, never player names** — the bot cannot
 work out whose column is whose. That is the entire reason the command takes
@@ -1606,18 +1627,53 @@ fixture, and the match row decides which of them is the home side
 (`SeasonMatchConfirmView._sides()`). A test puts the away player in the left
 column specifically to pin this.
 
+**`left_player`/`right_player` autocomplete offers only the two players in
+the chosen match** (`season_match_player_autocomplete`, reading
+`interaction.namespace.season`/`.match` — the same mechanism
+`league_player_autocomplete` and `archive_league_autocomplete` use). Those
+are the only two values the command can accept, so offering the whole
+roster only invited a pick the command then had to reject. It falls back to
+the season roster when the match number isn't filled in yet or doesn't
+exist, so the field is never mysteriously empty mid-typing. `season` and
+`match` are declared **before** these two parameters, which is what makes
+the scoping possible — don't reorder them.
+
+**The screenshot is optional, because players forget to take one.** A match
+that genuinely happened still has to be reportable, so with no attachment
+the same editor opens with every stat blank. Three routes converge on one
+place — screenshot read fine (pre-filled), screenshot unreadable (blank,
+plus a note saying so), no screenshot at all (blank) — and none of them
+dead-ends. Note that an extraction failure is *deliberately* not fatal any
+more: a transient API error used to mean "you can't report this match",
+when a perfectly good manual path was one message away.
+
 **Nothing is written until a human confirms.** Vision misreads are a real,
 already-observed failure mode on this project (see the `/ladder` OVR sanity
 check), and a wrong season result is harder to notice than a wrong OVR
-because it silently moves the standings and the playoff seeding. The review
-embed shows every extracted stat; "Fix the score" opens a modal (from a
-button — a modal can never be opened from another modal's submission).
-Only the two scores are editable: they decide the match, the standings and
-every tiebreaker, and a modal caps at five components anyway.
+because it silently moves the standings and the playoff seeding. Typed-in
+numbers get the same review step, for the same reason.
 
-A **playoff match can't be saved as a tie** — there's no way to send two
-players into the next round, and inventing a tiebreak there would be the bot
-deciding a playoff game.
+**All seven stats are editable for either player, through one select menu
+(`STAT_PAGES`).** The split is per player — a page of four stats
+(`points`, rushing, passing, kick return) and a page of three (TD,
+turnovers, FG) — because a modal caps at five components. Pairing both
+players' value for one stat in a single modal would fit only *two* stats
+per modal, so per-player pages are what let every stat have its own
+labelled field instead of a combined "3/0/0" box somebody has to parse.
+Four menu entries (2 players x 2 pages) cover all fourteen values. The
+menu opens the modal — component → modal is legal, modal → modal is not.
+
+Two rules inside `SeasonStatEditModal.on_submit` worth not undoing:
+- **A blank box stores `None`, never `0`.** 0 is a real value on this
+  screen (0 turnovers is a clean game), so a blank standing in for 0 would
+  fabricate a stat.
+- **Parsed values are applied only after the whole page validates**, so a
+  typo in the last box can't leave the first three half-applied.
+
+**Confirm refuses while either score is missing** (`err.missing_points`) —
+saving then would record 0-0 and hand someone a loss they didn't play. Every
+other stat is genuinely optional. A **playoff match still can't be saved as
+a tie.**
 
 `agent.extract_season_match_from_screenshot()` is a second, separate
 extractor in `agent.py` (the ladder one is untouched). Its prompt explicitly
@@ -1649,6 +1705,11 @@ call.
 - `tests.py`'s aiohttp stub gained `ClientSession`: `agent.py` annotates with
   it at import time, so the module couldn't be imported by the suite at all
   before (it never had been).
+- `_FakeInteraction.namespace` is a real `SimpleNamespace`, **not** a
+  `MagicMock`. A MagicMock invents any attribute asked of it, so an
+  autocomplete reading a parameter the user hasn't filled in yet would get a
+  truthy mock instead of the miss it gets in production — which is exactly
+  the fallback branch worth testing.
 - Every new test was mutation-checked — the code it covers was broken on
   purpose and the test confirmed to fail — rather than only confirmed to
   pass. That's what caught the non-discriminating seeding fixture above.

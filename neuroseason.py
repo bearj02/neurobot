@@ -9,7 +9,8 @@ Flow:
   /neuroseason start    (admin) — freezes the roster, splits it into two
                                   conferences and their divisions, and
                                   generates every regular-season matchup
-  /seasonmatch                  — report a played matchup from a screenshot
+  /seasonmatch                  — report a played matchup, from a screenshot
+                                  or entered by hand
   /neuroseason standings        — division-by-division standings
   /neuroseason schedule         — the full slate, or one player's / one week's
   /neuroseason bracket          — the playoff bracket once the field is set
@@ -32,7 +33,7 @@ import datetime
 from collections import defaultdict
 
 import discord
-from discord.ui import View, Button, Modal, TextInput
+from discord.ui import View, Button, Select, Modal, TextInput
 
 import db
 import i18n
@@ -768,8 +769,38 @@ def _status_label(status: str, lang: str) -> str:
     return i18n.t(f'neuroseason.status.{status}', lang)
 
 
+async def season_divisions(season_id: int) -> list[str]:
+    """Every division this particular season actually drew, in name order.
+
+    Read from the season's own members rather than generated from
+    CONFERENCES x DIVISION_SUFFIXES: the layout scales with the signup count,
+    so a 16-member season has four divisions and a 32-member one has eight.
+    Offering names a given season never drew would just produce empty
+    tables."""
+    rows = await db.fetchall(
+        """
+        SELECT DISTINCT division FROM neuro_season_members
+        WHERE season_id=? AND division IS NOT NULL
+        ORDER BY division
+        """,
+        (season_id,)
+    )
+    return [r['division'] for r in rows]
+
+
+def _fmt_record(wins: int, losses: int, ties: int) -> str:
+    """W-L, or W-L-T once there's actually been a tie.
+
+    Three records now sit on every standings line, so the zero-tie case
+    dropping its trailing '-0' is what keeps the row readable — and a tie is
+    rare enough that showing it only when it happened is more informative
+    than a column of '-0'."""
+    return f"{wins}-{losses}" if not ties else f"{wins}-{losses}-{ties}"
+
+
 async def handle_standings(interaction: discord.Interaction, season_id: int,
-                           conference: str | None = None):
+                           conference: str | None = None,
+                           division: str | None = None):
     lang = i18n.resolve_lang(interaction)
     season = await _resolve_season(interaction, season_id, lang)
     if season is None:
@@ -786,31 +817,61 @@ async def handle_standings(interaction: discord.Interaction, season_id: int,
     matches = await db.get_neuro_season_matches(season_id, stage='regular')
     standings = compute_standings(members, matches)
 
+    # Autocomplete only ever *suggests* a value — Discord still accepts
+    # whatever was typed — so the division has to be re-validated here, the
+    # same way /legacy re-validates its league. Matched case-insensitively
+    # because a hand-typed "neuro east" is unambiguously the same division.
+    wanted_division = None
+    if division:
+        wanted_division = next(
+            (d for d in await season_divisions(season_id) if d.lower() == division.lower()),
+            None)
+        if wanted_division is None:
+            await _send(interaction, i18n.t(
+                'neuroseason.err.no_division', lang, division=division,
+                divisions=", ".join(await season_divisions(season_id)) or "—"))
+            return
+
     by_div: dict[str, list[dict]] = defaultdict(list)
     for r in standings:
         if conference and r['conference'] != conference:
             continue
+        if wanted_division and r['division'] != wanted_division:
+            continue
         by_div[r['division'] or '—'].append(r)
     if not by_div:
-        await _send(interaction, i18n.t('neuroseason.err.not_started', lang,
-                                        name=season['name']))
+        # A filter that matches nothing is a different problem from a season
+        # that hasn't started — e.g. a real division asked for inside the
+        # conference it isn't in. Saying "run /neuroseason start" there sends
+        # someone off to fix something that isn't broken.
+        key = ('neuroseason.err.empty_filter' if (conference or wanted_division)
+               else 'neuroseason.err.not_started')
+        await _send(interaction, i18n.t(key, lang, name=season['name'],
+                                        conference=conference or "—",
+                                        division=wanted_division or "—"))
         return
 
     embed = discord.Embed(
         title=i18n.t('neuroseason.standings.title', lang, name=season['name']),
         color=discord.Color.gold())
-    for division in sorted(by_div):
-        ranked = rank_rows(by_div[division], matches)
+    for div_name in sorted(by_div):
+        ranked = rank_rows(by_div[div_name], matches)
         lines = [
             i18n.t('neuroseason.standings.row', lang, pos=n, player=r['ign'],
-                   w=r['wins'], l=r['losses'], t=r['ties'],
+                   rec=_fmt_record(r['wins'], r['losses'], r['ties']),
+                   div=_fmt_record(r['div_wins'], r['div_losses'], r['div_ties']),
+                   conf=_fmt_record(r['conf_wins'], r['conf_losses'], r['conf_ties']),
                    pf=r['points_for'], pa=r['points_against'])
             for n, r in enumerate(ranked, start=1)
         ]
         for n, chunk in enumerate(chunk_lines_to_fit(lines)):
-            embed.add_field(name=division if n == 0 else f"{division} (cont.)",
+            embed.add_field(name=div_name if n == 0 else f"{div_name} (cont.)",
                             value=chunk, inline=False)
-    embed.set_footer(text=i18n.t('neuroseason.standings.footer', lang))
+    # Three records per line needs a key; the tiebreaker order is worth
+    # stating alongside it, since those same three records are what
+    # decides the order the rows are in.
+    embed.set_footer(text=i18n.t('neuroseason.standings.legend', lang) + "\n"
+                          + i18n.t('neuroseason.standings.footer', lang))
     await _send(interaction, embed=embed, ephemeral=False)
 
 
@@ -965,16 +1026,24 @@ def _stats_embed(ign: str, season_name: str, stats: dict, lang: str) -> discord.
 # ===========================================================================
 
 async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, match_num: int,
-                             left_ign: str, right_ign: str, screenshot):
+                             left_ign: str, right_ign: str, screenshot=None):
     """
-    Read a Head to Head Arena result screen and log it.
+    Log a played matchup, from a result screenshot or entered by hand.
 
     The screenshot identifies the two sides only by NFL team logo, never by
     player name, which is exactly why the command takes left_player and
     right_player — the bot cannot work out on its own whose column is
     whose. Both must be the two members actually scheduled in this match,
     in either order; the left/right arguments are about the picture, not
-    about who's listed first in the fixture.
+    about who's listed first in the fixture. (When the screenshot is
+    omitted there is no picture, and left/right are just two labels for the
+    two sides — the fixture still decides who's home.)
+
+    **The screenshot is optional.** Players forget to take one, and a match
+    that genuinely happened still has to be reportable — so with no
+    screenshot this opens the same editor with every stat blank. Every path
+    lands in the same place: the review embed plus the stat editor, with
+    nothing written until a human confirms.
     """
     lang = i18n.resolve_lang(interaction)
     season = await _resolve_season(interaction, season_id, lang)
@@ -1009,41 +1078,99 @@ async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, m
     # not after it (the /ladder manual-match flow had exactly this bug).
     await interaction.response.defer()
 
-    import agent
-    try:
-        extracted = await agent.extract_season_match_from_screenshot([screenshot.url])
-    except Exception as e:
-        logger.error(f"/seasonmatch extraction failed for season {season_id} match {match_num}: {e}")
-        await interaction.followup.send(i18n.t('neuroseason.err.extract_failed', lang, error=str(e)[:300]))
-        return
+    left_stats = blank_stats()
+    right_stats = blank_stats()
+    source = 'manual'
+    note = None
 
-    left_stats = dict(extracted.get('left') or {})
-    right_stats = dict(extracted.get('right') or {})
-    if left_stats.get('points') is None or right_stats.get('points') is None:
-        await interaction.followup.send(i18n.t('neuroseason.err.no_scores', lang))
-        return
+    if screenshot is not None:
+        import agent
+        try:
+            extracted = await agent.extract_season_match_from_screenshot([screenshot.url])
+        except Exception as e:
+            # Deliberately not a dead end. The match still happened, and the
+            # editor below can take every stat by hand — bailing here would
+            # make a transient API failure mean "you can't report this at
+            # all" when there's a perfectly good manual path one message
+            # away.
+            logger.error(
+                f"/seasonmatch extraction failed for season {season_id} match {match_num}: {e}")
+            note = i18n.t('neuroseason.err.extract_failed_manual', lang, error=str(e)[:200])
+        else:
+            left_stats.update({k: v for k, v in (extracted.get('left') or {}).items()
+                               if k in db.SEASON_STAT_FIELDS})
+            right_stats.update({k: v for k, v in (extracted.get('right') or {}).items()
+                                if k in db.SEASON_STAT_FIELDS})
+            source = 'screenshot'
+            if left_stats.get('points') is None or right_stats.get('points') is None:
+                note = i18n.t('neuroseason.err.no_scores_manual', lang)
 
-    view = SeasonMatchConfirmView(season, match, left, right, left_stats, right_stats, lang)
-    await interaction.followup.send(embed=view.build_embed(), view=view)
+    view = SeasonMatchConfirmView(season, match, left, right, left_stats, right_stats, lang,
+                                  source=source)
+    await interaction.followup.send(content=note, embed=view.build_embed(), view=view)
+
+
+def blank_stats() -> dict:
+    """Every stat column, explicitly unset. Not `{}` — a missing key and a
+    key that's genuinely None mean the same thing here, and keeping the full
+    shape means the editor and the embed never have to guess which stats
+    exist."""
+    return {f: None for f in db.SEASON_STAT_FIELDS}
+
+
+# The seven per-match stats, split into modal-sized pages.
+#
+# A modal takes at most five top-level components. Putting both players'
+# value for one stat in a single modal would fit only two stats per modal
+# (four fields), so the split is per player instead: one page of four stats,
+# one of three, giving every stat its own labelled field with no combined
+# "3/0/0"-style fields to parse. Four menu entries (two players x two pages)
+# cover all fourteen values.
+STAT_PAGES = (
+    ('score',  ('points', 'rushing_yds', 'passing_yds', 'kick_return_yds')),
+    ('counts', ('touchdowns', 'turnovers', 'field_goals')),
+)
+
+# The i18n suffix and input width for each stat. Yardage genuinely reaches
+# four digits over a season's worth of games; scores and counts don't.
+_STAT_META = {
+    'points':          ('pts',  3),
+    'rushing_yds':     ('rush', 4),
+    'passing_yds':     ('pass', 4),
+    'kick_return_yds': ('kr',   4),
+    'touchdowns':      ('td',   2),
+    'turnovers':       ('to',   2),
+    'field_goals':     ('fg',   2),
+}
+
+
+def _stat_label(field: str, lang: str) -> str:
+    return i18n.t(f'neuroseason.stat.{_STAT_META[field][0]}', lang)
 
 
 class SeasonMatchConfirmView(View):
     """
-    Vision extraction is imperfect (a misread leading digit is a real,
-    already-observed failure mode on this project — see the /ladder OVR
-    sanity check), and a season result is far harder to notice as wrong
-    later than an OVR is: it silently moves the standings and the playoff
-    seeding. So nothing is written until a human confirms what was read,
-    and the scores can be corrected in place first.
+    Review-and-edit step for a season result. Nothing is written until a
+    human presses Confirm.
 
-    Only the scores are editable here rather than all seven stats: the
-    scores are what decide the match, the standings and every tiebreaker,
-    and a modal is capped at five components anyway.
+    Two reasons this step exists at all, and they apply to both input
+    routes. Vision extraction is imperfect — a misread leading digit is an
+    already-observed failure mode on this project (see the /ladder OVR
+    sanity check) — and a wrong season result is much harder to notice
+    later than a wrong OVR, because it silently moves the standings and the
+    playoff seeding. Typed-by-hand numbers are just as worth a second look
+    before they land.
+
+    Every one of the seven stats is editable for either player through the
+    select menu, whether it arrived from a screenshot (pre-filled, correct
+    the wrong one) or not (blank, type them in). Same widgets, same code
+    path, so the two routes can't drift apart.
     """
 
     def __init__(self, season: dict, match: dict, left: dict, right: dict,
-                 left_stats: dict, right_stats: dict, lang: str = 'en'):
-        super().__init__(timeout=300)
+                 left_stats: dict, right_stats: dict, lang: str = 'en',
+                 source: str = 'screenshot'):
+        super().__init__(timeout=600)
         self.season = season
         self.match = match
         self.left = left
@@ -1051,21 +1178,37 @@ class SeasonMatchConfirmView(View):
         self.left_stats = left_stats
         self.right_stats = right_stats
         self.lang = lang
+        self.source = source
+
+        options = []
+        for side, player in (('left', left), ('right', right)):
+            for page_key, _fields in STAT_PAGES:
+                options.append(discord.SelectOption(
+                    label=f"{player['ign']} — {i18n.t(f'neuroseason.match.page_{page_key}', lang)}"[:100],
+                    value=f"{side}:{page_key}",
+                    description=i18n.t(f'neuroseason.match.page_{page_key}_desc', lang)[:100],
+                ))
+        edit_select = Select(
+            placeholder=i18n.t('neuroseason.match.edit_select_placeholder', lang)[:150],
+            options=options, row=0)
+        edit_select.callback = self._on_edit_select
+        self.add_item(edit_select)
 
         confirm = Button(label=i18n.t('neuroseason.match.confirm', lang),
-                         style=discord.ButtonStyle.success)
+                         style=discord.ButtonStyle.success, row=1)
         confirm.callback = self._on_confirm
         self.add_item(confirm)
 
-        edit = Button(label=i18n.t('neuroseason.match.edit', lang),
-                      style=discord.ButtonStyle.secondary)
-        edit.callback = self._on_edit
-        self.add_item(edit)
-
         cancel = Button(label=i18n.t('neuroseason.match.cancel', lang),
-                        style=discord.ButtonStyle.danger)
+                        style=discord.ButtonStyle.danger, row=1)
         cancel.callback = self._on_cancel
         self.add_item(cancel)
+
+    def stats_for(self, side: str) -> dict:
+        return self.left_stats if side == 'left' else self.right_stats
+
+    def player_for(self, side: str) -> dict:
+        return self.left if side == 'left' else self.right
 
     def build_embed(self) -> discord.Embed:
         lang = self.lang
@@ -1073,17 +1216,20 @@ class SeasonMatchConfirmView(View):
             title=i18n.t('neuroseason.match.review_title', lang,
                          num=self.match['match_num'], name=self.season['name']),
             description=i18n.t('neuroseason.match.review_desc', lang,
-                               left=self.left['ign'], lpts=self.left_stats.get('points'),
-                               right=self.right['ign'], rpts=self.right_stats.get('points')),
+                               left=self.left['ign'], lpts=_fmt(self.left_stats.get('points')),
+                               right=self.right['ign'], rpts=_fmt(self.right_stats.get('points'))),
             color=discord.Color.orange())
-        for label_key, field in (('rush', 'rushing_yds'), ('pass', 'passing_yds'),
-                                 ('kr', 'kick_return_yds'), ('td', 'touchdowns'),
-                                 ('to', 'turnovers'), ('fg', 'field_goals')):
-            embed.add_field(
-                name=i18n.t(f'neuroseason.stat.{label_key}', lang),
-                value=f"{_fmt(self.left_stats.get(field))} — {_fmt(self.right_stats.get(field))}",
-                inline=True)
-        embed.set_footer(text=i18n.t('neuroseason.match.review_footer', lang))
+        for _page_key, fields in STAT_PAGES:
+            for field in fields:
+                if field == 'points':
+                    continue          # already the headline in the description
+                embed.add_field(
+                    name=_stat_label(field, lang),
+                    value=f"{_fmt(self.left_stats.get(field))} — {_fmt(self.right_stats.get(field))}",
+                    inline=True)
+        footer_key = ('neuroseason.match.review_footer' if self.source == 'screenshot'
+                      else 'neuroseason.match.manual_footer')
+        embed.set_footer(text=i18n.t(footer_key, lang))
         return embed
 
     def _sides(self) -> tuple[dict, dict]:
@@ -1093,13 +1239,27 @@ class SeasonMatchConfirmView(View):
             return self.left_stats, self.right_stats
         return self.right_stats, self.left_stats
 
+    async def _on_edit_select(self, interaction: discord.Interaction):
+        # Component -> modal is legal; modal -> modal is not, which is why
+        # editing goes through this menu rather than chaining out of a
+        # previous modal's submission.
+        side, page_key = interaction.data['values'][0].split(':', 1)
+        await interaction.response.send_modal(SeasonStatEditModal(self, side, page_key))
+
     async def _on_confirm(self, interaction: discord.Interaction):
         await interaction.response.defer()
         lang = self.lang
         home_stats, away_stats = self._sides()
 
+        if home_stats.get('points') is None or away_stats.get('points') is None:
+            # Saving now would record 0-0 and hand someone a loss they didn't
+            # play. The rest of the stats are genuinely optional — a score
+            # is not.
+            await interaction.followup.send(i18n.t('neuroseason.err.missing_points', lang))
+            return
+
         if (self.match['stage'] == 'playoff'
-                and int(home_stats.get('points') or 0) == int(away_stats.get('points') or 0)):
+                and int(home_stats['points']) == int(away_stats['points'])):
             # A tie can't advance a bracket — there's no next round to send
             # two players into, and inventing a tiebreak here would be the
             # bot deciding a playoff game.
@@ -1113,18 +1273,13 @@ class SeasonMatchConfirmView(View):
             child.disabled = True
         await interaction.followup.send(
             i18n.t('neuroseason.match.saved', lang, num=self.match['match_num'],
-                   left=self.left['ign'], lpts=self.left_stats.get('points'),
-                   right=self.right['ign'], rpts=self.right_stats.get('points')))
+                   left=self.left['ign'], lpts=_fmt(self.left_stats.get('points')),
+                   right=self.right['ign'], rpts=_fmt(self.right_stats.get('points'))))
 
         note = await advance_season(self.season['id'], lang)
         if note:
             await interaction.followup.send(note)
         self.stop()
-
-    async def _on_edit(self, interaction: discord.Interaction):
-        # Button -> modal is the only legal way to open one here; a modal
-        # can never be opened from another modal's submission.
-        await interaction.response.send_modal(SeasonScoreEditModal(self))
 
     async def _on_cancel(self, interaction: discord.Interaction):
         for child in self.children:
@@ -1138,37 +1293,69 @@ def _fmt(v) -> str:
     return "—" if v is None else str(v)
 
 
-class SeasonScoreEditModal(Modal, title="Correct the score"):
-    def __init__(self, parent: SeasonMatchConfirmView):
+class SeasonStatEditModal(Modal, title="Edit stats"):
+    """
+    One page of one player's stats. Pre-filled with whatever's currently
+    held (from the screenshot, or from an earlier pass through this same
+    modal), blank where nothing is known yet.
+
+    A blank field means "not recorded" and stores None — deliberately not 0,
+    which is a real and different value on this screen (0 turnovers is a
+    clean game, not a missing stat).
+    """
+
+    def __init__(self, parent: SeasonMatchConfirmView, side: str, page_key: str):
         super().__init__()
         self.parent = parent
+        self.side = side
+        self.page_key = page_key
         lang = parent.lang
-        self.title = i18n.t('neuroseason.match.edit_title', lang)
+        player = parent.player_for(side)
+        stats = parent.stats_for(side)
 
-        self.left_score = TextInput(
-            default=str(parent.left_stats.get('points') or ''), max_length=3)
-        self.right_score = TextInput(
-            default=str(parent.right_stats.get('points') or ''), max_length=3)
-        self.add_item(discord.ui.Label(
-            text=i18n.t('neuroseason.match.label_left', lang, player=parent.left['ign'])[:45],
-            component=self.left_score))
-        self.add_item(discord.ui.Label(
-            text=i18n.t('neuroseason.match.label_right', lang, player=parent.right['ign'])[:45],
-            component=self.right_score))
+        self.fields = dict(STAT_PAGES)[page_key]
+        self.title = i18n.t('neuroseason.match.edit_page_title', lang,
+                            player=player['ign'],
+                            page=i18n.t(f'neuroseason.match.page_{page_key}', lang))[:45]
+
+        self.inputs: dict[str, TextInput] = {}
+        for field in self.fields:
+            _label_key, max_len = _STAT_META[field]
+            current = stats.get(field)
+            box = TextInput(default='' if current is None else str(current),
+                            required=False, max_length=max_len)
+            self.inputs[field] = box
+            # discord.ui.Label caps at 45 characters — German runs longest,
+            # so the slice is not decoration.
+            self.add_item(discord.ui.Label(text=_stat_label(field, lang)[:45], component=box))
 
     async def on_submit(self, interaction: discord.Interaction):
         lang = self.parent.lang
-        try:
-            left = int(self.left_score.value.strip())
-            right = int(self.right_score.value.strip())
-        except ValueError:
-            await interaction.response.send_message(
-                i18n.t('neuroseason.err.bad_score', lang), ephemeral=True)
-            return
-        self.parent.left_stats['points'] = left
-        self.parent.right_stats['points'] = right
-        await interaction.response.edit_message(embed=self.parent.build_embed(), view=self.parent)
+        parsed: dict[str, int | None] = {}
+        for field, box in self.inputs.items():
+            raw = (box.value or '').strip()
+            if not raw:
+                parsed[field] = None
+                continue
+            try:
+                parsed[field] = int(raw)
+            except ValueError:
+                await interaction.response.send_message(
+                    i18n.t('neuroseason.err.bad_stat', lang,
+                           stat=_stat_label(field, lang), value=raw[:20]),
+                    ephemeral=True)
+                return
+            if parsed[field] < 0:
+                await interaction.response.send_message(
+                    i18n.t('neuroseason.err.negative_stat', lang,
+                           stat=_stat_label(field, lang)),
+                    ephemeral=True)
+                return
 
+        # Applied only once every field on the page parsed, so a typo in the
+        # last box can't leave the first three half-applied.
+        self.parent.stats_for(self.side).update(parsed)
+        await interaction.response.edit_message(embed=self.parent.build_embed(), view=self.parent)
 
 # ===========================================================================
 # Stage advancement — playoffs generate themselves as rounds finish

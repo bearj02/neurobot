@@ -486,11 +486,11 @@ TRANSLATIONS['manual.page6.fields'] = {
         ("/neuroseason leave", "Withdraw before the season starts.\n`/neuroseason leave season:1 player:Grizzly`"),
         ("/neuroseason start", "**Admin.** Close signups, draw conferences and divisions, and build the schedule — 18 matchups each, whatever the field size.\n`/neuroseason start season:1`"),
         ("/neuroseason list", "Every season and its status."),
-        ("/neuroseason standings", "Standings by division. Ties broken by head-to-head, then division record, then conference record, then points for.\n`/neuroseason standings season:1`"),
+        ("/neuroseason standings", "Standings by division, each row showing overall, division and conference records plus points for/against.\n`/neuroseason standings season:1 division:Neuro East`\nBoth `conference:` and `division:` are optional filters; the division list comes from that season's own draw. Ties broken by head-to-head, then division record, then conference record, then points for."),
         ("/neuroseason schedule", "The slate, optionally for one player or one week.\n`/neuroseason schedule season:1 player:Grizzly`"),
         ("/neuroseason bracket", "The playoff bracket, once the regular season is done."),
         ("/neuroseason advance", "**Admin.** Fallback only — the playoffs open themselves and each round generates the next. Use this if a corrected result left a stage stuck."),
-        ("/seasonmatch", "Log a played matchup from its Head to Head Arena **Game Stats** screenshot.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[attach]`\nleft/right describe the screenshot's columns. The reading is shown for you to check, and nothing is saved until you confirm."),
+        ("/seasonmatch", "Log a played matchup. Once the match number is picked, only that match's two players are offered.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[attach]`\n**The screenshot is optional** — leave it off and enter every stat by hand. With one attached, left/right describe its columns and the reading is pre-filled. Either way, the menu lets you enter or correct any stat, and nothing is saved until you confirm."),
         ("/seasonstats", "A player's season stats, or their whole NeuroSeason career with season: left blank.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'es': [
@@ -499,11 +499,11 @@ TRANSLATIONS['manual.page6.fields'] = {
         ("/neuroseason leave", "Retírate antes de que empiece la temporada.\n`/neuroseason leave season:1 player:Grizzly`"),
         ("/neuroseason start", "**Admin.** Cierra las inscripciones, sortea conferencias y divisiones y genera el calendario — 18 enfrentamientos por miembro, sea cual sea el número de inscritos.\n`/neuroseason start season:1`"),
         ("/neuroseason list", "Todas las temporadas y su estado."),
-        ("/neuroseason standings", "Clasificación por división. Desempates: enfrentamiento directo, registro de división, registro de conferencia, puntos a favor.\n`/neuroseason standings season:1`"),
+        ("/neuroseason standings", "Clasificación por división; cada fila muestra el registro general, de división y de conferencia, más puntos a favor/en contra.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` y `division:` son filtros opcionales; la lista de divisiones sale del sorteo de esa temporada. Desempates: enfrentamiento directo, registro de división, registro de conferencia, puntos a favor."),
         ("/neuroseason schedule", "El calendario, opcionalmente de un jugador o una semana.\n`/neuroseason schedule season:1 player:Grizzly`"),
         ("/neuroseason bracket", "El cuadro de playoffs, una vez terminada la temporada regular."),
         ("/neuroseason advance", "**Admin.** Solo como respaldo — los playoffs se abren solos y cada ronda genera la siguiente. Úsalo si un resultado corregido dejó una fase bloqueada."),
-        ("/seasonmatch", "Registra un enfrentamiento jugado desde la captura de **Game Stats** de Head to Head Arena.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[adjuntar]`\nleft/right describen las columnas de la captura. La lectura se muestra para revisarla y no se guarda nada hasta que confirmes."),
+        ("/seasonmatch", "Registra un enfrentamiento jugado. Al elegir el número de partido, solo se ofrecen sus dos jugadores.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[adjuntar]`\n**La captura es opcional** — omítela e ingresa cada estadística a mano. Con una adjunta, left/right describen sus columnas y la lectura viene precargada. En ambos casos, el menú permite ingresar o corregir cualquier estadística; nada se guarda hasta que confirmes."),
         ("/seasonstats", "Estadísticas de un jugador en una temporada, o de toda su carrera si dejas season: en blanco.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'fr': [
@@ -512,11 +512,11 @@ TRANSLATIONS['manual.page6.fields'] = {
         ("/neuroseason leave", "Retirez-vous avant le début de la saison.\n`/neuroseason leave season:1 player:Grizzly`"),
         ("/neuroseason start", "**Admin.** Ferme les inscriptions, tire les conférences et divisions et génère le calendrier — 18 matchs chacun, quel que soit le nombre d'inscrits.\n`/neuroseason start season:1`"),
         ("/neuroseason list", "Toutes les saisons et leur statut."),
-        ("/neuroseason standings", "Classement par division. Départages : confrontation directe, bilan de division, bilan de conférence, points marqués.\n`/neuroseason standings season:1`"),
+        ("/neuroseason standings", "Classement par division ; chaque ligne affiche le bilan global, de division et de conférence, plus les points pour/contre.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` et `division:` sont des filtres facultatifs ; la liste des divisions vient du tirage de cette saison. Départages : confrontation directe, bilan de division, bilan de conférence, points marqués."),
         ("/neuroseason schedule", "Le calendrier, éventuellement pour un joueur ou une semaine.\n`/neuroseason schedule season:1 player:Grizzly`"),
         ("/neuroseason bracket", "Le tableau des playoffs, une fois la saison régulière terminée."),
         ("/neuroseason advance", "**Admin.** Secours uniquement — les playoffs s'ouvrent seuls et chaque tour génère le suivant. À utiliser si un résultat corrigé a bloqué une phase."),
-        ("/seasonmatch", "Enregistre un match joué à partir de la capture **Game Stats** de Head to Head Arena.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[joindre]`\nleft/right désignent les colonnes de la capture. La lecture vous est montrée pour vérification et rien n'est enregistré avant confirmation."),
+        ("/seasonmatch", "Enregistre un match joué. Une fois le numéro de match choisi, seuls ses deux joueurs sont proposés.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[joindre]`\n**La capture est facultative** — omettez-la et saisissez chaque stat à la main. Avec une capture, left/right désignent ses colonnes et la lecture est pré-remplie. Dans les deux cas, le menu permet de saisir ou corriger n'importe quelle stat, et rien n'est enregistré avant confirmation."),
         ("/seasonstats", "Les stats d'un joueur sur une saison, ou toute sa carrière si season: est laissé vide.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'pt': [
@@ -525,11 +525,11 @@ TRANSLATIONS['manual.page6.fields'] = {
         ("/neuroseason leave", "Retire-se antes de a temporada começar.\n`/neuroseason leave season:1 player:Grizzly`"),
         ("/neuroseason start", "**Admin.** Encerra as inscrições, sorteia conferências e divisões e gera o calendário — 18 confrontos por membro, seja qual for o número de inscritos.\n`/neuroseason start season:1`"),
         ("/neuroseason list", "Todas as temporadas e seu status."),
-        ("/neuroseason standings", "Classificação por divisão. Desempates: confronto direto, campanha na divisão, campanha na conferência, pontos a favor.\n`/neuroseason standings season:1`"),
+        ("/neuroseason standings", "Classificação por divisão; cada linha mostra a campanha geral, na divisão e na conferência, além de pontos pró/contra.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` e `division:` são filtros opcionais; a lista de divisões vem do sorteio daquela temporada. Desempates: confronto direto, campanha na divisão, campanha na conferência, pontos a favor."),
         ("/neuroseason schedule", "O calendário, opcionalmente de um jogador ou de uma semana.\n`/neuroseason schedule season:1 player:Grizzly`"),
         ("/neuroseason bracket", "A chave dos playoffs, quando a temporada regular terminar."),
         ("/neuroseason advance", "**Admin.** Apenas como reserva — os playoffs abrem sozinhos e cada rodada gera a seguinte. Use se um resultado corrigido travou uma fase."),
-        ("/seasonmatch", "Registra um confronto jogado a partir da captura de **Game Stats** do Head to Head Arena.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anexar]`\nleft/right descrevem as colunas da captura. A leitura é mostrada para você conferir e nada é salvo até confirmar."),
+        ("/seasonmatch", "Registra um confronto jogado. Ao escolher o número da partida, só os dois jogadores dela são oferecidos.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anexar]`\n**A captura é opcional** — deixe-a de fora e insira cada estatística à mão. Com uma anexada, left/right descrevem suas colunas e a leitura vem preenchida. Nos dois casos, o menu permite inserir ou corrigir qualquer estatística; nada é salvo até confirmar."),
         ("/seasonstats", "Estatísticas de um jogador numa temporada, ou toda a carreira deixando season: em branco.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'de': [
@@ -538,11 +538,11 @@ TRANSLATIONS['manual.page6.fields'] = {
         ("/neuroseason leave", "Zieh dich vor dem Saisonstart zurück.\n`/neuroseason leave season:1 player:Grizzly`"),
         ("/neuroseason start", "**Admin.** Schließt die Anmeldung, lost Conferences und Divisions aus und erstellt den Spielplan — je 18 Spiele, unabhängig von der Teilnehmerzahl.\n`/neuroseason start season:1`"),
         ("/neuroseason list", "Alle Saisons und ihr Status."),
-        ("/neuroseason standings", "Tabelle nach Division. Gleichstand entschieden durch: direkter Vergleich, Division-Bilanz, Conference-Bilanz, erzielte Punkte.\n`/neuroseason standings season:1`"),
+        ("/neuroseason standings", "Tabelle nach Division; jede Zeile zeigt Gesamt-, Division- und Conference-Bilanz sowie Punkte für/gegen.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` und `division:` sind optionale Filter; die Divisionsliste stammt aus der Auslosung dieser Saison. Gleichstand entschieden durch: direkter Vergleich, Division-Bilanz, Conference-Bilanz, erzielte Punkte."),
         ("/neuroseason schedule", "Der Spielplan, wahlweise für einen Spieler oder eine Woche.\n`/neuroseason schedule season:1 player:Grizzly`"),
         ("/neuroseason bracket", "Der Playoff-Baum, sobald die reguläre Saison vorbei ist."),
         ("/neuroseason advance", "**Admin.** Nur als Rückfalloption — die Playoffs öffnen sich selbst und jede Runde erzeugt die nächste. Nutze es, wenn ein korrigiertes Ergebnis eine Phase blockiert hat."),
-        ("/seasonmatch", "Erfasst ein gespieltes Spiel aus dem **Game Stats**-Screenshot der Head to Head Arena.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anhängen]`\nleft/right beschreiben die Spalten des Screenshots. Das Gelesene wird dir zur Prüfung gezeigt; gespeichert wird erst nach Bestätigung."),
+        ("/seasonmatch", "Erfasst ein gespieltes Spiel. Nach Wahl der Spielnummer werden nur dessen zwei Spieler angeboten.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anhängen]`\n**Der Screenshot ist optional** — lass ihn weg und gib jede Statistik von Hand ein. Mit Screenshot beschreiben left/right dessen Spalten und das Gelesene ist vorausgefüllt. In beiden Fällen kannst du über das Menü jede Statistik eingeben oder korrigieren; gespeichert wird erst nach Bestätigung."),
         ("/seasonstats", "Die Saison-Statistik eines Spielers, oder die gesamte Laufbahn, wenn season: leer bleibt.\n`/seasonstats player:Grizzly season:1`"),
     ],
 }
@@ -2426,26 +2426,12 @@ TRANSLATIONS['neuroseason.err.extract_failed'] = {
     'pt': "⚠️ Não foi possível ler essa captura: {error}",
     'de': "⚠️ Screenshot konnte nicht gelesen werden: {error}",
 }
-TRANSLATIONS['neuroseason.err.no_scores'] = {
-    'en': "⚠️ Couldn't read both final scores from that screenshot. Try a clearer one of the **Game Stats** tab.",
-    'es': "⚠️ No se pudieron leer ambos marcadores finales. Prueba con una captura más clara de la pestaña **Game Stats**.",
-    'fr': "⚠️ Impossible de lire les deux scores finaux. Essayez une capture plus nette de l'onglet **Game Stats**.",
-    'pt': "⚠️ Não foi possível ler os dois placares finais. Tente uma captura mais nítida da aba **Game Stats**.",
-    'de': "⚠️ Beide Endstände konnten nicht gelesen werden. Versuche einen klareren Screenshot des **Game Stats**-Tabs.",
-}
 TRANSLATIONS['neuroseason.err.playoff_tie'] = {
     'en': "⚠️ A playoff match can't end tied — there's no way to send two players into the next round. Correct the score and confirm again.",
     'es': "⚠️ Un partido de playoffs no puede terminar empatado — no hay forma de pasar a dos jugadores a la siguiente ronda. Corrige el marcador y confirma de nuevo.",
     'fr': "⚠️ Un match de playoffs ne peut pas se terminer par une égalité — impossible d'envoyer deux joueurs au tour suivant. Corrigez le score et confirmez à nouveau.",
     'pt': "⚠️ Uma partida de playoffs não pode terminar empatada — não há como levar dois jogadores à próxima rodada. Corrija o placar e confirme novamente.",
     'de': "⚠️ Ein Playoff-Spiel kann nicht unentschieden enden — zwei Spieler können nicht in die nächste Runde. Korrigiere den Punktestand und bestätige erneut.",
-}
-TRANSLATIONS['neuroseason.err.bad_score'] = {
-    'en': "⚠️ Both scores have to be whole numbers.",
-    'es': "⚠️ Ambos marcadores deben ser números enteros.",
-    'fr': "⚠️ Les deux scores doivent être des nombres entiers.",
-    'pt': "⚠️ Ambos os placares precisam ser números inteiros.",
-    'de': "⚠️ Beide Punktestände müssen ganze Zahlen sein.",
 }
 
 TRANSLATIONS['neuroseason.create.success'] = {
@@ -2540,11 +2526,11 @@ TRANSLATIONS['neuroseason.standings.title'] = {
     'de': "📊 {name} — Tabelle",
 }
 TRANSLATIONS['neuroseason.standings.row'] = {
-    'en': "`{pos}.` **{player}** {w}-{l}-{t} · PF {pf} · PA {pa}",
-    'es': "`{pos}.` **{player}** {w}-{l}-{t} · PF {pf} · PC {pa}",
-    'fr': "`{pos}.` **{player}** {w}-{l}-{t} · PP {pf} · PC {pa}",
-    'pt': "`{pos}.` **{player}** {w}-{l}-{t} · PF {pf} · PC {pa}",
-    'de': "`{pos}.` **{player}** {w}-{l}-{t} · PF {pf} · PA {pa}",
+    'en': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PA {pa}",
+    'es': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PC {pa}",
+    'fr': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PP {pf} · PC {pa}",
+    'pt': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PC {pa}",
+    'de': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PA {pa}",
 }
 TRANSLATIONS['neuroseason.standings.footer'] = {
     'en': "Ties broken by: head-to-head, division record, conference record, points for.",
@@ -2677,25 +2663,8 @@ TRANSLATIONS['neuroseason.match.review_footer'] = {
 TRANSLATIONS['neuroseason.match.confirm'] = {
     'en': "Confirm", 'es': "Confirmar", 'fr': "Confirmer", 'pt': "Confirmar", 'de': "Bestätigen",
 }
-TRANSLATIONS['neuroseason.match.edit'] = {
-    'en': "Fix the score", 'es': "Corregir marcador", 'fr': "Corriger le score",
-    'pt': "Corrigir placar", 'de': "Punkte korrigieren",
-}
 TRANSLATIONS['neuroseason.match.cancel'] = {
     'en': "Cancel", 'es': "Cancelar", 'fr': "Annuler", 'pt': "Cancelar", 'de': "Abbrechen",
-}
-TRANSLATIONS['neuroseason.match.edit_title'] = {
-    'en': "Correct the final score", 'es': "Corregir el marcador final",
-    'fr': "Corriger le score final", 'pt': "Corrigir o placar final",
-    'de': "Endstand korrigieren",
-}
-TRANSLATIONS['neuroseason.match.label_left'] = {
-    'en': "{player} (left)", 'es': "{player} (izquierda)", 'fr': "{player} (gauche)",
-    'pt': "{player} (esquerda)", 'de': "{player} (links)",
-}
-TRANSLATIONS['neuroseason.match.label_right'] = {
-    'en': "{player} (right)", 'es': "{player} (derecha)", 'fr': "{player} (droite)",
-    'pt': "{player} (direita)", 'de': "{player} (rechts)",
 }
 TRANSLATIONS['neuroseason.match.saved'] = {
     'en': "✅ Match #{num} logged: **{left} {lpts} — {rpts} {right}**",
@@ -2786,4 +2755,109 @@ TRANSLATIONS['neuroseason.stat.to'] = {
 TRANSLATIONS['neuroseason.stat.fg'] = {
     'en': "Field Goals", 'es': "Goles de Campo", 'fr': "Field Goals",
     'pt': "Field Goals", 'de': "Field Goals",
+}
+
+# --- /seasonmatch manual stat entry (screenshot optional) ---
+
+TRANSLATIONS['neuroseason.stat.pts'] = {
+    'en': "Points", 'es': "Puntos", 'fr': "Points", 'pt': "Pontos", 'de': "Punkte",
+}
+TRANSLATIONS['neuroseason.match.page_score'] = {
+    'en': "Score & yards", 'es': "Marcador y yardas", 'fr': "Score et yards",
+    'pt': "Placar e jardas", 'de': "Punkte & Yards",
+}
+TRANSLATIONS['neuroseason.match.page_score_desc'] = {
+    'en': "Points, rushing, passing, kick return",
+    'es': "Puntos, terrestres, aéreas, retorno",
+    'fr': "Points, course, passe, retour de coup de pied",
+    'pt': "Pontos, terrestres, aéreas, retorno",
+    'de': "Punkte, Lauf, Pass, Return",
+}
+TRANSLATIONS['neuroseason.match.page_counts'] = {
+    'en': "TDs, turnovers & FGs", 'es': "TDs, pérdidas y FGs",
+    'fr': "TDs, ballons perdus & FGs", 'pt': "TDs, perdas e FGs",
+    'de': "TDs, Ballverluste & FGs",
+}
+TRANSLATIONS['neuroseason.match.page_counts_desc'] = {
+    'en': "Touchdowns, turnovers, field goals",
+    'es': "Touchdowns, pérdidas de balón, goles de campo",
+    'fr': "Touchdowns, ballons perdus, field goals",
+    'pt': "Touchdowns, perdas de posse, field goals",
+    'de': "Touchdowns, Ballverluste, Field Goals",
+}
+TRANSLATIONS['neuroseason.match.edit_select_placeholder'] = {
+    'en': "Enter or correct stats…",
+    'es': "Ingresa o corrige estadísticas…",
+    'fr': "Saisir ou corriger des stats…",
+    'pt': "Inserir ou corrigir estatísticas…",
+    'de': "Statistiken eingeben oder korrigieren…",
+}
+TRANSLATIONS['neuroseason.match.edit_page_title'] = {
+    'en': "{player}: {page}", 'es': "{player}: {page}", 'fr': "{player} : {page}",
+    'pt': "{player}: {page}", 'de': "{player}: {page}",
+}
+TRANSLATIONS['neuroseason.match.manual_footer'] = {
+    'en': "No screenshot — use the menu to enter each stat. Nothing is saved until you confirm.",
+    'es': "Sin captura — usa el menú para ingresar cada estadística. Nada se guarda hasta que confirmes.",
+    'fr': "Pas de capture — utilisez le menu pour saisir chaque stat. Rien n'est enregistré avant confirmation.",
+    'pt': "Sem captura — use o menu para inserir cada estatística. Nada é salvo até você confirmar.",
+    'de': "Kein Screenshot — gib jede Statistik über das Menü ein. Gespeichert wird erst nach Bestätigung.",
+}
+TRANSLATIONS['neuroseason.err.bad_stat'] = {
+    'en': "⚠️ **{stat}**: `{value}` isn't a whole number. Leave a box empty if you don't have that stat.",
+    'es': "⚠️ **{stat}**: `{value}` no es un número entero. Deja la casilla vacía si no tienes ese dato.",
+    'fr': "⚠️ **{stat}** : `{value}` n'est pas un nombre entier. Laissez la case vide si vous n'avez pas cette stat.",
+    'pt': "⚠️ **{stat}**: `{value}` não é um número inteiro. Deixe a caixa vazia se não tiver esse dado.",
+    'de': "⚠️ **{stat}**: `{value}` ist keine ganze Zahl. Lass das Feld leer, wenn du den Wert nicht hast.",
+}
+TRANSLATIONS['neuroseason.err.negative_stat'] = {
+    'en': "⚠️ **{stat}** can't be negative.",
+    'es': "⚠️ **{stat}** no puede ser negativo.",
+    'fr': "⚠️ **{stat}** ne peut pas être négatif.",
+    'pt': "⚠️ **{stat}** não pode ser negativo.",
+    'de': "⚠️ **{stat}** darf nicht negativ sein.",
+}
+TRANSLATIONS['neuroseason.err.missing_points'] = {
+    'en': "⚠️ Both final scores are needed before this can be saved — the rest of the stats are optional. Use the menu to enter them.",
+    'es': "⚠️ Se necesitan ambos marcadores finales antes de guardar — el resto de las estadísticas son opcionales. Usa el menú para ingresarlos.",
+    'fr': "⚠️ Les deux scores finaux sont requis avant d'enregistrer — le reste des stats est facultatif. Utilisez le menu pour les saisir.",
+    'pt': "⚠️ Ambos os placares finais são necessários antes de salvar — o resto das estatísticas é opcional. Use o menu para inseri-los.",
+    'de': "⚠️ Beide Endstände werden zum Speichern benötigt — die übrigen Statistiken sind optional. Gib sie über das Menü ein.",
+}
+TRANSLATIONS['neuroseason.err.extract_failed_manual'] = {
+    'en': "⚠️ Couldn't read that screenshot ({error}) — enter the stats by hand below instead.",
+    'es': "⚠️ No se pudo leer esa captura ({error}) — ingresa las estadísticas a mano abajo.",
+    'fr': "⚠️ Impossible de lire cette capture ({error}) — saisissez les stats à la main ci-dessous.",
+    'pt': "⚠️ Não foi possível ler essa captura ({error}) — insira as estatísticas à mão abaixo.",
+    'de': "⚠️ Screenshot konnte nicht gelesen werden ({error}) — gib die Statistiken unten von Hand ein.",
+}
+TRANSLATIONS['neuroseason.err.no_scores_manual'] = {
+    'en': "⚠️ Couldn't read both final scores from that screenshot — fill them in with the menu below before confirming.",
+    'es': "⚠️ No se pudieron leer ambos marcadores finales — complétalos con el menú de abajo antes de confirmar.",
+    'fr': "⚠️ Impossible de lire les deux scores finaux — complétez-les avec le menu ci-dessous avant de confirmer.",
+    'pt': "⚠️ Não foi possível ler os dois placares finais — preencha-os com o menu abaixo antes de confirmar.",
+    'de': "⚠️ Beide Endstände konnten nicht gelesen werden — trage sie unten über das Menü nach, bevor du bestätigst.",
+}
+
+TRANSLATIONS['neuroseason.err.no_division'] = {
+    'en': "⚠️ No division called `{division}` in this season. It has: {divisions}.",
+    'es': "⚠️ No existe la división `{division}` en esta temporada. Tiene: {divisions}.",
+    'fr': "⚠️ Pas de division `{division}` dans cette saison. Elle a : {divisions}.",
+    'pt': "⚠️ Nenhuma divisão `{division}` nesta temporada. Ela tem: {divisions}.",
+    'de': "⚠️ Keine Division `{division}` in dieser Saison. Vorhanden: {divisions}.",
+}
+TRANSLATIONS['neuroseason.standings.legend'] = {
+    'en': "Record · Div = division record · Conf = conference record · PF/PA = points for/against",
+    'es': "Registro · Div = registro de división · Conf = registro de conferencia · PF/PC = puntos a favor/en contra",
+    'fr': "Bilan · Div = bilan de division · Conf = bilan de conférence · PP/PC = points pour/contre",
+    'pt': "Campanha · Div = campanha na divisão · Conf = campanha na conferência · PF/PC = pontos pró/contra",
+    'de': "Bilanz · Div = Division-Bilanz · Conf = Conference-Bilanz · PF/PA = Punkte für/gegen",
+}
+
+TRANSLATIONS['neuroseason.err.empty_filter'] = {
+    'en': "⚠️ No members of **{name}** match that — conference `{conference}`, division `{division}`. A division only sits in one conference.",
+    'es': "⚠️ Ningún miembro de **{name}** coincide — conferencia `{conference}`, división `{division}`. Una división pertenece a una sola conferencia.",
+    'fr': "⚠️ Aucun membre de **{name}** ne correspond — conférence `{conference}`, division `{division}`. Une division n'appartient qu'à une seule conférence.",
+    'pt': "⚠️ Nenhum membro de **{name}** corresponde — conferência `{conference}`, divisão `{division}`. Uma divisão pertence a apenas uma conferência.",
+    'de': "⚠️ Kein Mitglied von **{name}** passt dazu — Conference `{conference}`, Division `{division}`. Eine Division gehört zu genau einer Conference.",
 }

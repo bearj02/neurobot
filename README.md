@@ -56,9 +56,9 @@ An NFL-shaped season played by individual members rather than by leagues: up to
 32 sign up, get drawn into two conferences and their divisions, and play 18
 matchups each — division rivals twice, a full division in-conference, a full
 division cross-conference, and the rest filled in. Results are read from the
-Head to Head Arena "Game Stats" screenshot. When the last one is in, a 16-team
-playoff seeds itself and each round generates the next until a champion is
-crowned.
+Head to Head Arena "Game Stats" screenshot, or typed in by hand when nobody
+remembered to take one. When the last one is in, a 16-team playoff seeds
+itself and each round generates the next until a champion is crowned.
 
 | Command | Description |
 | --- | --- |
@@ -66,11 +66,11 @@ crowned.
 | `/neuroseason join` / `leave` | Sign up, or withdraw before kickoff |
 | `/neuroseason start` | **Admin.** Draw the divisions and build the schedule |
 | `/neuroseason list` | Every season and its status |
-| `/neuroseason standings` | Standings by division, with the full tiebreaker chain |
+| `/neuroseason standings` | Standings by division — overall, division and conference records; filter by conference or division |
 | `/neuroseason schedule` | The slate, filterable by player or week |
 | `/neuroseason bracket` | The playoff bracket |
 | `/neuroseason advance` | **Admin.** Fallback if a corrected result left a stage stuck |
-| `/seasonmatch` | Log a played matchup from its result screenshot |
+| `/seasonmatch` | Log a played matchup — from a result screenshot, or entered by hand |
 | `/seasonstats` | A player's stats for one season, or their whole career |
 
 Fewer than 32 signups doesn't change any of that: the layout scales (two

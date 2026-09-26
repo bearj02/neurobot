@@ -1822,6 +1822,75 @@ async def season_member_autocomplete(interaction: discord.Interaction, current: 
     return [app_commands.Choice(name=r['ign'], value=r['ign']) for r in rows]
 
 
+async def season_match_player_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    Just the two players actually in the match already chosen on this same
+    command, read via interaction.namespace (the same mechanism
+    league_player_autocomplete and archive_league_autocomplete use).
+
+    /seasonmatch's left_player and right_player can only ever be those two,
+    so offering the whole season roster invites picking someone who isn't in
+    the match — which the command then has to reject after the fact. season
+    and match are declared before these two parameters, so Discord has
+    already collected both by the time this runs.
+
+    Falls back to the season roster when the match number isn't filled in
+    yet (or isn't a real match), so the field is never mysteriously empty
+    mid-typing — same fallback behaviour as archive_league_autocomplete.
+    """
+    season_id = getattr(interaction.namespace, 'season', None)
+    match_num = getattr(interaction.namespace, 'match', None)
+    if not season_id or not match_num:
+        return await season_member_autocomplete(interaction, current)
+    try:
+        match = await db.get_neuro_season_match(int(season_id), int(match_num))
+    except (TypeError, ValueError):
+        return await season_member_autocomplete(interaction, current)
+    if match is None:
+        return await season_member_autocomplete(interaction, current)
+
+    typed = (current or "").lower()
+    return [
+        app_commands.Choice(name=ign, value=ign)
+        for ign in (match['home_ign'], match['away_ign'])
+        if typed in ign.lower()
+    ]
+
+
+async def season_division_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    The divisions the season chosen on this same command actually drew, read
+    via interaction.namespace.season.
+
+    Deliberately not @app_commands.choices: how many divisions a season has
+    depends on how many people signed up for it (see neuroseason.plan_layout),
+    so a fixed list would offer names that produce an empty table for most
+    seasons. Same reasoning, and same mechanism, as /legacy's per-archive
+    league field.
+
+    Falls back to every name the layout can generate when the season isn't
+    chosen yet or hasn't started, so the field is never mysteriously empty
+    mid-typing.
+    """
+    season_id = getattr(interaction.namespace, 'season', None)
+    divisions: list[str] = []
+    if season_id:
+        try:
+            divisions = await neuroseason.season_divisions(int(season_id))
+        except (TypeError, ValueError):
+            divisions = []
+    if not divisions:
+        divisions = [
+            neuroseason._division_name(conf, i, len(neuroseason.DIVISION_SUFFIXES))
+            for conf in neuroseason.CONFERENCES
+            for i in range(len(neuroseason.DIVISION_SUFFIXES))
+        ]
+
+    typed = (current or "").lower()
+    return [app_commands.Choice(name=d, value=d)
+            for d in divisions if typed in d.lower()][:25]
+
+
 neuroseason_group = app_commands.Group(
     name="neuroseason", description="NFL-style season: signups, schedule, standings, playoffs")
 
@@ -1861,14 +1930,15 @@ async def neuroseason_list_slash(interaction: discord.Interaction):
 
 
 @neuroseason_group.command(name="standings", description="Division-by-division standings for a season")
-@app_commands.describe(season="Which season", conference="Limit to one conference")
-@app_commands.autocomplete(season=season_autocomplete)
+@app_commands.describe(season="Which season", conference="Limit to one conference",
+                       division="Limit to one division")
+@app_commands.autocomplete(season=season_autocomplete, division=season_division_autocomplete)
 @app_commands.choices(conference=[
     app_commands.Choice(name=c, value=c) for c in neuroseason.CONFERENCES
 ])
 async def neuroseason_standings_slash(interaction: discord.Interaction, season: int,
-                                      conference: str = None):
-    await neuroseason.handle_standings(interaction, season, conference)
+                                      conference: str = None, division: str = None):
+    await neuroseason.handle_standings(interaction, season, conference, division)
 
 
 @neuroseason_group.command(name="schedule", description="A season's matchups, optionally for one player or week")
@@ -1908,20 +1978,20 @@ async def neuroseason_advance_slash(interaction: discord.Interaction, season: in
 tree.add_command(neuroseason_group)
 
 
-@tree.command(name="seasonmatch", description="Log a played NeuroSeason matchup from its result screenshot")
+@tree.command(name="seasonmatch", description="Log a played NeuroSeason matchup, from a screenshot or by hand")
 @app_commands.describe(
     season="Which season",
     match="The match number shown in /neuroseason schedule",
-    left_player="The player on the LEFT of the screenshot",
-    right_player="The player on the RIGHT of the screenshot",
-    screenshot="The Head to Head Arena 'Game Stats' screen",
+    left_player="The player on the LEFT of the screenshot (either player, if there's no screenshot)",
+    right_player="The player on the RIGHT of the screenshot (the other player)",
+    screenshot="Optional — the Head to Head Arena 'Game Stats' screen. Leave it off to enter the stats by hand.",
 )
 @app_commands.autocomplete(season=season_autocomplete,
-                           left_player=season_member_autocomplete,
-                           right_player=season_member_autocomplete)
+                           left_player=season_match_player_autocomplete,
+                           right_player=season_match_player_autocomplete)
 async def seasonmatch_slash(interaction: discord.Interaction, season: int, match: int,
                             left_player: str, right_player: str,
-                            screenshot: discord.Attachment):
+                            screenshot: discord.Attachment = None):
     await neuroseason.handle_seasonmatch(interaction, season, match,
                                          left_player, right_player, screenshot)
 
