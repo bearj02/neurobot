@@ -2317,6 +2317,40 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(gates_admin[cmd_name], f"/{cmd_name} is marked Admin in the manual but doesn't call _require_admin")
         self.assertGreater(checked, 20)
 
+    def test_read_only_league_lookups_are_not_admin_gated(self):
+        """The existing cross-check above only catches a command marked Admin
+        in the manual that doesn't gate — it says nothing about a gate nobody
+        asked for. /stats and /dstats are read-only league lookups that
+        anyone in the league can run, so pin that directly: a re-added
+        _require_admin should fail a test rather than quietly locking the
+        commands again.
+
+        Parsed from source with ast for the same reason the cross-check above
+        is: @tree.command mangles the function under this stub, so the real
+        body can't be introspected at runtime.
+        """
+        import ast
+
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            src_text = f.read()
+        tree_ast = ast.parse(src_text)
+        src_lines = src_text.splitlines()
+
+        bodies = {}
+        for node in ast.walk(tree_ast):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name.endswith("_slash"):
+                bodies[node.name] = "\n".join(src_lines[node.lineno - 1:node.end_lineno])
+
+        for name in ("stats_slash", "dstats_slash"):
+            self.assertIn(name, bodies)
+            self.assertNotIn("_require_admin(", bodies[name],
+                             f"/{name[:-6]} is admin-gated but shouldn't be")
+
+        # Sanity check that the parse actually finds gates where they do
+        # exist — otherwise the assertions above would pass on a bad parse.
+        self.assertIn("_require_admin(", bodies["newday_slash"])
+
     # --- on_command_error (prefix commands were fully retired) ---
 
     def _make_ctx(self, guild_locale=None):
@@ -7148,6 +7182,264 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(row, f'{tid} was skipped after an earlier team failed')
 
 
+
+
+# ---------------------------------------------------------------------------
+# Test: defensive reporting (/dstats, /dscores)
+# ---------------------------------------------------------------------------
+
+def _drow(date="2026-08-01", pa=18, d1='6', d2='6', d3='6', ovr=120.0, team='NP'):
+    return {'game_date': date, 'team_id': team, 'points_allowed': pa,
+            'drive1_outcome': d1, 'drive2_outcome': d2, 'drive3_outcome': d3,
+            'avg_off_ovr_faced': ovr}
+
+
+class TestDefensiveSummary(unittest.TestCase):
+    """db.summarize_defense_rows — pure aggregation, shared by the per-player
+    and league-wide paths so both can't drift on what a stat means."""
+
+    def test_totals_and_per_game_averages(self):
+        rows = [_drow(pa=18), _drow(date="2026-08-02", pa=24), _drow(date="2026-08-03", pa=0)]
+        s = db.summarize_defense_rows(rows)
+        self.assertEqual(s['games'], 3)
+        self.assertEqual(s['total_allowed'], 42)
+        self.assertEqual(s['avg_allowed'], 14.0)
+        self.assertEqual(s['best_game'], 0)
+        self.assertEqual(s['worst_game'], 24)
+        self.assertEqual(s['shutout_games'], 1)
+
+    def test_points_per_drive_divides_by_three_drives_a_game(self):
+        """Every game is exactly three drives in this game's ecosystem — the
+        same premise _fumble_adjusted_avg is built on. points_allowed is
+        always recorded while the per-drive outcome columns are newer and can
+        be NULL, so the per-drive average can't depend on them."""
+        rows = [_drow(pa=18), _drow(date="2026-08-02", pa=18)]
+        s = db.summarize_defense_rows(rows)
+        self.assertEqual(s['avg_per_drive'], 6.0)      # 36 points / (2 * 3)
+
+        # Same points, no drive outcomes recorded at all: the per-drive
+        # average is unchanged, and only the drive-detail counts go to zero.
+        bare = [dict(r, drive1_outcome=None, drive2_outcome=None, drive3_outcome=None)
+                for r in rows]
+        s2 = db.summarize_defense_rows(bare)
+        self.assertEqual(s2['avg_per_drive'], 6.0)
+        self.assertEqual(s2['drives_logged'], 0)
+        self.assertEqual(s2['zero_point_drives'], 0)
+
+    def test_turnover_drives_are_counted_by_type_and_in_total(self):
+        rows = [_drow(pa=8, d1='F', d2='I', d3='8'),
+                _drow(date="2026-08-02", pa=6, d1='S', d2='6', d3='I')]
+        s = db.summarize_defense_rows(rows)
+        self.assertEqual((s['fumbles'], s['interceptions'], s['safeties']), (1, 2, 1))
+        self.assertEqual(s['turnovers'], 4)
+        self.assertEqual(s['drives_logged'], 6)
+
+    def test_a_turnover_is_not_also_counted_as_a_scoreless_drive(self):
+        """Both describe a drive that allowed nothing, but they're different
+        achievements: one was held, the other was taken away. Double-counting
+        would inflate the scoreless-drive column on every turnover."""
+        rows = [_drow(pa=8, d1='I', d2='0', d3='8')]
+        s = db.summarize_defense_rows(rows)
+        self.assertEqual(s['turnovers'], 1)
+        self.assertEqual(s['zero_point_drives'], 1)
+
+    def test_no_rows_is_zeros_not_a_crash(self):
+        s = db.summarize_defense_rows([])
+        self.assertEqual(s['games'], 0)
+        self.assertIsNone(s['avg_allowed'])
+        self.assertIsNone(s['avg_per_drive'])
+        self.assertIsNone(s['avg_off_ovr_faced'])
+
+    def test_missing_ovr_is_skipped_rather_than_treated_as_zero(self):
+        rows = [_drow(ovr=120.0), _drow(date="2026-08-02", ovr=None)]
+        s = db.summarize_defense_rows(rows)
+        self.assertEqual(s['avg_off_ovr_faced'], 120.0)
+
+
+class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import optimized_bot
+        self.ob = optimized_bot
+        for ign, team in (("DefA", "NP"), ("DefB", "NP"), ("DefC", "ND")):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, status) VALUES (?,?,'A')", (team, ign))
+        self.ids = {ign: (await db.get_player(ign))['id']
+                    for ign in ("DefA", "DefB", "DefC")}
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _log(self, ign, date, pa, d1='6', d2='6', d3='6', ovr=120.0, team=None):
+        pid = self.ids[ign]
+        if team is None:
+            team = (await db.fetchone("SELECT team_id FROM players WHERE id=?", (pid,)))['team_id']
+        await db.execute(
+            """
+            INSERT INTO defense_scores
+                (player_id, team_id, game_date, points_allowed, avg_off_ovr_faced,
+                 drive1_outcome, drive2_outcome, drive3_outcome)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (pid, team, date, pa, ovr, d1, d2, d3))
+
+    # --- /dstats ---
+
+    async def test_league_dstats_rolls_up_per_player_and_league_wide(self):
+        await self._log("DefA", "2026-08-01", 18)
+        await self._log("DefA", "2026-08-02", 24, d1='8', d2='8', d3='8')
+        await self._log("DefB", "2026-08-01", 6, d1='0', d2='6', d3='0')
+        stats = await db.get_league_dstats("NP")
+
+        rows = {p['ign']: p for p in stats['players']}
+        self.assertEqual(rows['DefA']['games'], 2)
+        self.assertEqual(rows['DefA']['total_allowed'], 42)
+        self.assertEqual(rows['DefB']['zero_point_drives'], 2)
+        self.assertEqual(stats['league']['games'], 3)
+        self.assertEqual(stats['league']['total_allowed'], 48)
+
+    async def test_league_line_pools_games_rather_than_averaging_averages(self):
+        """A player with one game must not weigh as much as one with five.
+        Fixture is built so the two methods genuinely disagree."""
+        for d in range(1, 6):
+            await self._log("DefA", f"2026-08-0{d}", 30)     # five games at 30
+        await self._log("DefB", "2026-08-10", 0)             # one game at 0
+        stats = await db.get_league_dstats("NP")
+        self.assertEqual(stats['league']['avg_allowed'], 25.0)   # 150 / 6 games
+        mean_of_means = 15.0                                     # (30 + 0) / 2
+        self.assertNotEqual(stats['league']['avg_allowed'], mean_of_means)
+
+    async def test_defensive_games_stay_with_the_league_they_were_played_for(self):
+        """The bug class this codebase keeps hitting: filtering on the
+        player's *current* team silently moves (or drops) history the moment
+        someone transfers."""
+        await self._log("DefA", "2026-08-01", 18, team="NP")
+        await db.execute("UPDATE players SET team_id='ND' WHERE id=?", (self.ids["DefA"],))
+
+        old_league = await db.get_league_dstats("NP", include_inactive=True)
+        self.assertEqual(old_league['league']['games'], 1)
+        self.assertIn("DefA", {p['ign'] for p in old_league['players']})
+
+        new_league = await db.get_league_dstats("ND")
+        self.assertEqual(new_league['league']['games'], 0,
+                         "a transfer carried defensive history into the new league")
+
+    async def test_include_inactive_folds_in_former_players_only_when_asked(self):
+        await self._log("DefA", "2026-08-01", 18)
+        await db.execute("UPDATE players SET status='I' WHERE id=?", (self.ids["DefA"],))
+
+        default = await db.get_league_dstats("NP")
+        self.assertNotIn("DefA", {p['ign'] for p in default['players']})
+        self.assertEqual(default['league']['games'], 0)
+
+        with_inactive = await db.get_league_dstats("NP", include_inactive=True)
+        self.assertIn("DefA", {p['ign'] for p in with_inactive['players']})
+        self.assertEqual(with_inactive['league']['games'], 1)
+
+    async def test_players_with_nothing_logged_are_listed_last_not_first(self):
+        """A player with no entries has no average; sorting them as 0.00
+        would put them at the top of a best-defense-first table."""
+        await self._log("DefA", "2026-08-01", 24)
+        stats = await db.get_league_dstats("NP")
+        igns = [p['ign'] for p in stats['players']]
+        self.assertEqual(igns[0], "DefA")
+        self.assertEqual(stats['players'][-1]['games'], 0)
+
+    async def test_best_defense_sorts_first(self):
+        await self._log("DefA", "2026-08-01", 24)
+        await self._log("DefB", "2026-08-01", 6)
+        stats = await db.get_league_dstats("NP")
+        self.assertEqual([p['ign'] for p in stats['players']][:2], ["DefB", "DefA"])
+
+    async def test_unknown_league_returns_nothing_rather_than_an_empty_table(self):
+        self.assertIsNone(await db.get_league_dstats("ZZ"))
+
+    async def test_dstats_image_reports_nothing_to_show_instead_of_dashes(self):
+        """A league whose players have never had /dscore run for them would
+        otherwise render a full table of '--', which reads as a fault."""
+        import sheet_image
+        sent = []
+
+        class Ctx:
+            channel = None
+            async def send(self, *a, **kw):
+                sent.append((a, kw))
+
+        self.assertFalse(await sheet_image.send_dstats_image(Ctx(), "NP"))
+        self.assertEqual(sent, [], "an image was sent for a league with no entries")
+
+        await self._log("DefA", "2026-08-01", 18)
+        self.assertTrue(await sheet_image.send_dstats_image(Ctx(), "NP"))
+        self.assertTrue(sent and sent[0][1].get('file') is not None)
+
+    # --- /dscores ---
+
+    async def test_player_dscores_are_range_filtered_and_ordered(self):
+        await self._log("DefA", "2026-08-05", 18)
+        await self._log("DefA", "2026-08-01", 24)
+        await self._log("DefA", "2026-09-01", 6)
+        rows = await db.get_player_dscores("DefA", "2026-08-01", "2026-08-31")
+        self.assertEqual([r['game_date'] for r in rows], ["2026-08-01", "2026-08-05"])
+
+    async def test_dscores_embed_shows_each_drive_and_a_totals_footer(self):
+        await self._log("DefA", "2026-08-01", 8, d1='F', d2='0', d3='8', ovr=118.0)
+        embed = await self.ob._build_dscores_embed(
+            "DefA", datetime.date(2026, 8, 1), datetime.date(2026, 8, 31), 'en')
+        self.assertIsNotNone(embed)
+        value = embed.add_field.call_args_list[0].kwargs['value']
+        self.assertIn("F·0·8", value)
+        self.assertIn("1 games", value)
+        self.assertIn("turnovers forced", value)
+        self.assertIn("118", value)
+
+    async def test_dscores_embed_is_none_when_the_range_is_empty(self):
+        await self._log("DefA", "2026-08-01", 18)
+        embed = await self.ob._build_dscores_embed(
+            "DefA", datetime.date(2026, 9, 1), datetime.date(2026, 9, 30), 'en')
+        self.assertIsNone(embed)
+
+    async def test_an_unrecorded_drive_shows_a_placeholder_not_a_missing_slot(self):
+        """A partially-entered game has to look partial, not like a
+        two-drive game."""
+        await self._log("DefA", "2026-08-01", 6, d1='6', d2=None, d3=None)
+        embed = await self.ob._build_dscores_embed(
+            "DefA", datetime.date(2026, 8, 1), datetime.date(2026, 8, 31), 'en')
+        value = embed.add_field.call_args_list[0].kwargs['value']
+        self.assertIn("6·-·-", value)
+
+    async def test_dscores_embed_pages_within_the_field_character_limit(self):
+        """1024 characters per embed field is a hard limit that rejects the
+        entire message, not just the field — a season's worth of entries goes
+        well past it."""
+        for day in range(1, 29):
+            await self._log("DefA", f"2026-08-{day:02d}", 18 + (day % 7))
+        embed = await self.ob._build_dscores_embed(
+            "DefA", datetime.date(2026, 8, 1), datetime.date(2026, 8, 31), 'en')
+        calls = embed.add_field.call_args_list
+        self.assertGreater(len(calls), 1, "28 entries should have paged")
+        for c in calls:
+            self.assertLessEqual(len(c.kwargs['value']), 1024)
+
+    async def test_dscores_totals_appear_once_on_the_last_page_only(self):
+        for day in range(1, 29):
+            await self._log("DefA", f"2026-08-{day:02d}", 18)
+        embed = await self.ob._build_dscores_embed(
+            "DefA", datetime.date(2026, 8, 1), datetime.date(2026, 8, 31), 'en')
+        values = [c.kwargs['value'] for c in embed.add_field.call_args_list]
+        self.assertEqual(sum(1 for v in values if "28 games" in v), 1)
+        self.assertIn("28 games", values[-1])
+
+    def test_dscores_legend_explains_every_drive_code_in_every_language(self):
+        """The Drives column is the whole point of the table and it's all
+        single letters — an unexplained 'S' is unreadable."""
+        import i18n as _i18n
+        for lang in _i18n.SUPPORTED_LANGS:
+            legend = _i18n.t('dscores.legend', lang)
+            for code in ('0-8', 'F', 'I', 'S'):
+                self.assertIn(code, legend, f"{code} missing from the {lang} legend")
 
 # ---------------------------------------------------------------------------
 # Test: /manual paging

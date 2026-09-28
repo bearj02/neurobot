@@ -1285,6 +1285,178 @@ async def get_player_dscore_stats(ign: str, conn=None) -> dict | None:
     return row
 
 
+
+# ---------------------------------------------------------------------------
+# Defensive rollups (/dstats, /dscores)
+# ---------------------------------------------------------------------------
+#
+# /dscore and /dscore_multiple have been writing defense_scores for a long
+# time with nothing to read it back except /player's single career line, so
+# everything below is read-only reporting over data that already exists.
+
+DRIVE_OUTCOME_COLUMNS = ('drive1_outcome', 'drive2_outcome', 'drive3_outcome')
+
+# A drive that ended in a turnover rather than in points. Same three codes
+# /dscore accepts, and the same set _parse_dscore_drives excludes from its
+# points-allowed sum — a turnover drive allowed 0 points, which is why it
+# can't just be int()'d like a '0'-'8' drive.
+TURNOVER_OUTCOMES = ('F', 'I', 'S')
+
+# Every game in this game's ecosystem is exactly 3 drives (the same premise
+# _fumble_adjusted_avg is built on).
+DRIVES_PER_GAME = 3
+
+
+def summarize_defense_rows(rows: list[dict]) -> dict:
+    """
+    Aggregate defense_scores rows into totals and averages. Pure — rows in,
+    dict out — so the per-player and league-wide paths share one definition
+    of every stat instead of computing them twice.
+
+    Points allowed per drive divides by `games * 3`, not by however many
+    drive-outcome columns happen to be populated: every game is three drives
+    by the game's own rules, and points_allowed is always recorded while the
+    per-drive outcome columns are newer and can be NULL on older rows. The
+    counts that genuinely need per-drive detail (turnovers forced,
+    zero-point drives) are reported against `drives_logged` instead, so a
+    row with no outcomes recorded lowers neither count's denominator
+    silently.
+
+    A turnover drive allowed no points and counts as a drive that happened —
+    it's the best available defensive outcome, not a missing drive.
+    """
+    games = len(rows)
+    if not games:
+        return {
+            'games': 0, 'total_allowed': 0, 'avg_allowed': None, 'avg_per_drive': None,
+            'drives_logged': 0, 'turnovers': 0, 'fumbles': 0, 'interceptions': 0,
+            'safeties': 0, 'zero_point_drives': 0, 'shutout_games': 0,
+            'best_game': None, 'worst_game': None, 'avg_off_ovr_faced': None,
+        }
+
+    allowed = [int(r['points_allowed'] or 0) for r in rows]
+    total_allowed = sum(allowed)
+
+    drives_logged = 0
+    counts = {'F': 0, 'I': 0, 'S': 0}
+    zero_point_drives = 0
+    for r in rows:
+        for col in DRIVE_OUTCOME_COLUMNS:
+            outcome = r.get(col)
+            if outcome is None or outcome == '':
+                continue
+            drives_logged += 1
+            if outcome in counts:
+                counts[outcome] += 1
+            elif outcome == '0':
+                zero_point_drives += 1
+
+    ovrs = [r['avg_off_ovr_faced'] for r in rows if r.get('avg_off_ovr_faced') is not None]
+
+    return {
+        'games':             games,
+        'total_allowed':     total_allowed,
+        'avg_allowed':       round(total_allowed / games, 2),
+        'avg_per_drive':     round(total_allowed / (games * DRIVES_PER_GAME), 2),
+        'drives_logged':     drives_logged,
+        # A turnover drive is also a zero-point drive, but the two are
+        # counted separately on purpose: 'zero_point_drives' is a drive the
+        # defense held scoreless, 'turnovers' is one it actively took away.
+        'turnovers':         sum(counts.values()),
+        'fumbles':           counts['F'],
+        'interceptions':     counts['I'],
+        'safeties':          counts['S'],
+        'zero_point_drives': zero_point_drives,
+        'shutout_games':     sum(1 for a in allowed if a == 0),
+        'best_game':         min(allowed),
+        'worst_game':        max(allowed),
+        'avg_off_ovr_faced': round(sum(ovrs) / len(ovrs), 2) if ovrs else None,
+    }
+
+
+async def get_player_dscores(ign: str, start_date, end_date, conn=None) -> list[dict]:
+    """
+    One player's defensive entries across a date range, oldest first, for
+    /dscores.
+
+    Deliberately NOT scoped by team_id, matching /history (its offensive
+    counterpart), which also looks a player up by name across a date range
+    without reference to which league they were on. A date range is the
+    scope the caller asked for; silently dropping the days they played for a
+    previous league would make a transfer look like missing data.
+    """
+    return await fetchall(
+        """
+        SELECT ds.* FROM defense_scores ds
+        JOIN players p ON p.id = ds.player_id
+        WHERE p.ign = ? AND ds.game_date >= ? AND ds.game_date <= ?
+        ORDER BY ds.game_date ASC
+        """,
+        (ign, str(start_date), str(end_date)), conn=conn
+    )
+
+
+async def get_league_dstats(team_id: str, include_inactive: bool = False,
+                            conn=None) -> dict | None:
+    """
+    Per-player defensive rollups for /dstats, plus one league-wide line.
+
+    Roster selection mirrors get_league_stats exactly: active players on this
+    team by default, and with include_inactive also anyone who has a
+    historical defense_scores row for this team_id — someone who played a
+    season here before leaving shouldn't vanish from its defensive history.
+
+    Every defense_scores row is matched on **ds.team_id**, never the player's
+    current team, so a transferred player's old defensive games stay with the
+    league they were actually playing for. The league line is aggregated from
+    the pooled rows rather than by averaging the per-player averages, so a
+    player with two games logged doesn't carry the same weight as one with
+    twenty.
+
+    Returns None when the league has no qualifying players at all. A league
+    with players but no defensive entries yet comes back with games=0
+    throughout, which the caller reports as "nothing logged" rather than an
+    error.
+    """
+    if include_inactive:
+        roster = await fetchall(
+            """
+            SELECT id, ign FROM players WHERE team_id=?
+            UNION
+            SELECT p.id, p.ign FROM players p
+            WHERE p.id IN (SELECT DISTINCT player_id FROM defense_scores WHERE team_id=?)
+            """,
+            (team_id, team_id), conn=conn
+        )
+    else:
+        roster = await fetchall(
+            "SELECT id, ign FROM players WHERE team_id=? AND status='A'", (team_id,), conn=conn
+        )
+    if not roster:
+        return None
+
+    rows = await fetchall(
+        "SELECT * FROM defense_scores WHERE team_id=? ORDER BY game_date", (team_id,), conn=conn
+    )
+    by_player: dict[int, list[dict]] = {}
+    for r in rows:
+        by_player.setdefault(r['player_id'], []).append(r)
+
+    known = {p['id'] for p in roster}
+    players = []
+    for p in roster:
+        players.append({'ign': p['ign'], 'player_id': p['id'],
+                        **summarize_defense_rows(by_player.get(p['id'], []))})
+
+    # Best defense first — fewest points allowed per game. Anyone with
+    # nothing logged sorts to the bottom rather than to the top, which is
+    # where a 0.0 average would otherwise put them.
+    players.sort(key=lambda p: (p['games'] == 0, p['avg_allowed'] if p['games'] else 0))
+
+    league = summarize_defense_rows([r for pid, prs in by_player.items()
+                                     if pid in known for r in prs])
+    return {'players': players, 'league': league, 'player_count': len(players)}
+
 # ---------------------------------------------------------------------------
 # Power rank weight helpers
 # ---------------------------------------------------------------------------

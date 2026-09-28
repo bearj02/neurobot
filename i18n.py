@@ -160,6 +160,8 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Record a player's score.\n`/score player:Grizzly points:22`\nUse M for missed drives, E for excused absence. Optional: DEF OVR faced, 4th down stats."),
         ("/dscore", "Record a player's defensive score for a day — for the common case where one opponent faced all 3 drives.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — each drive is 0-8 (points allowed) or F/I/S (fumble/interception/safety). Points allowed is totaled automatically. No modal — the opponent's OVR is entered inline and applied to all 3 drives. For a day where more than one opponent faced the player, use `/dscore_multiple` instead."),
         ("/dscore_multiple", "Record a player's defensive score for a day, drive by drive — for when more than one opponent faced the player across the 3 drives.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — each drive is 0-8 (points allowed) or F/I/S (fumble/interception/safety). Points allowed is totaled automatically. A modal opens for Drive 1 right away (OVR faced, plus down/distance/play/forced-by if it was a turnover); a button then continues to Drive 2, then Drive 3, one modal at a time, ending with a full summary."),
+        ("/dstats", "A league\u2019s defensive totals and averages as an image \u2014 per player, best defense first, plus a league line.\n`/dstats league:NP include_inactive:false`\nPA = points allowed, TO = turnovers forced, 0-Pt Drv = drives held scoreless."),
+        ("/dscores", "A player\u2019s defensive history over a date range.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nOne line per game: each drive\u2019s outcome, points allowed, turnovers forced and the offensive OVR faced, with totals underneath."),
         ("/ovr", "Update a player's OVR.\n`/ovr player:Grizzly`"),
         ("/avg", "Get a player's average.\n`/avg player:Grizzly` → pick type."),
         ("/player", "Full stats card for a player.\n`/player player:Grizzly`"),
@@ -172,6 +174,8 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Registra la puntuación de un jugador.\n`/score player:Grizzly points:22`\nUsa M para drives fallados, E para ausencia justificada. Opcional: DEF OVR enfrentado, estadísticas de 4to down."),
         ("/dscore", "Registra la puntuación defensiva de un jugador para el día — para el caso común donde un solo oponente enfrentó las 3 series.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — cada serie es 0-8 (puntos permitidos) o F/I/S (balón perdido/intercepción/safety). Los puntos totales se calculan automáticamente. Sin modal — el OVR del oponente se ingresa en línea y se aplica a las 3 series. Para un día con más de un oponente, usa `/dscore_multiple`."),
         ("/dscore_multiple", "Registra la puntuación defensiva de un jugador para el día, serie por serie — para cuando más de un oponente enfrentó al jugador en las 3 series.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — cada serie es 0-8 (puntos permitidos) o F/I/S (balón perdido/intercepción/safety). Los puntos totales se calculan automáticamente. Un modal se abre para la Serie 1 de inmediato (OVR enfrentado, más down/distancia/jugada/quién lo forzó si fue un balón perdido); un botón continúa luego a la Serie 2, y a la 3, un modal a la vez, terminando con un resumen completo."),
+        ("/dstats", "Totales y promedios defensivos de una liga como imagen \u2014 por jugador, mejor defensa primero, m\u00e1s una l\u00ednea de liga.\n`/dstats league:NP include_inactive:false`\nPA = puntos concedidos, TO = p\u00e9rdidas forzadas, 0-Pt Drv = drives sin anotar."),
+        ("/dscores", "Historial defensivo de un jugador en un rango de fechas.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUna l\u00ednea por partido: el resultado de cada drive, puntos concedidos, p\u00e9rdidas forzadas y el OVR ofensivo enfrentado, con totales al final."),
         ("/ovr", "Actualiza el OVR de un jugador.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtén el promedio de un jugador.\n`/avg player:Grizzly` → elige el tipo."),
         ("/player", "Ficha completa de estadísticas de un jugador.\n`/player player:Grizzly`"),
@@ -184,6 +188,8 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Enregistre le score d'un joueur.\n`/score player:Grizzly points:22`\nUtilisez M pour un drive manqué, E pour une absence excusée. Optionnel : DEF OVR affronté, statistiques de 4e down."),
         ("/dscore", "Enregistre le score défensif d'un joueur pour la journée — pour le cas courant où un seul adversaire a affronté les 3 séries.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — chaque série vaut 0-8 (points concédés) ou F/I/S (ballon perdu/interception/sécurité). Le total des points est calculé automatiquement. Aucun formulaire — l'OVR de l'adversaire est saisi directement et appliqué aux 3 séries. Pour une journée avec plusieurs adversaires, utilisez `/dscore_multiple`."),
         ("/dscore_multiple", "Enregistre le score défensif d'un joueur pour la journée, série par série — pour quand plusieurs adversaires ont affronté le joueur sur les 3 séries.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — chaque série vaut 0-8 (points concédés) ou F/I/S (ballon perdu/interception/sécurité). Le total des points est calculé automatiquement. Un formulaire s'ouvre pour la Série 1 immédiatement (OVR affronté, plus down/distance/action/qui l'a provoqué si c'était un ballon perdu) ; un bouton continue ensuite vers la Série 2, puis la 3, un formulaire à la fois, avant un résumé complet."),
+        ("/dstats", "Totaux et moyennes d\u00e9fensifs d\u2019une ligue en image \u2014 par joueur, meilleure d\u00e9fense en premier, plus une ligne de ligue.\n`/dstats league:NP include_inactive:false`\nPA = points conc\u00e9d\u00e9s, TO = ballons pris, 0-Pt Drv = drives sans point."),
+        ("/dscores", "Historique d\u00e9fensif d\u2019un joueur sur une p\u00e9riode.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUne ligne par match : le r\u00e9sultat de chaque drive, les points conc\u00e9d\u00e9s, les ballons pris et l\u2019OVR offensif affront\u00e9, avec les totaux en dessous."),
         ("/ovr", "Met à jour l'OVR d'un joueur.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtient la moyenne d'un joueur.\n`/avg player:Grizzly` → choisissez le type."),
         ("/player", "Fiche de statistiques complète d'un joueur.\n`/player player:Grizzly`"),
@@ -196,6 +202,8 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Registra a pontuação de um jogador.\n`/score player:Grizzly points:22`\nUse M para drives perdidos, E para ausência justificada. Opcional: DEF OVR enfrentado, estatísticas de 4th down."),
         ("/dscore", "Registra a pontuação defensiva de um jogador no dia — para o caso comum de um único adversário ter enfrentado as 3 séries.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — cada série é 0-8 (pontos permitidos) ou F/I/S (fumble/interceptação/safety). O total de pontos é calculado automaticamente. Sem modal — o OVR do adversário é inserido diretamente e aplicado às 3 séries. Para um dia com mais de um adversário, use `/dscore_multiple`."),
         ("/dscore_multiple", "Registra a pontuação defensiva de um jogador no dia, série por série — para quando mais de um adversário enfrentou o jogador nas 3 séries.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — cada série é 0-8 (pontos permitidos) ou F/I/S (fumble/interceptação/safety). O total de pontos é calculado automaticamente. Um modal abre para a Série 1 imediatamente (OVR enfrentado, mais down/distância/jogada/quem forçou se foi uma perda de bola); um botão continua então para a Série 2, e a 3, um modal de cada vez, terminando com um resumo completo."),
+        ("/dstats", "Totais e m\u00e9dias defensivas de uma liga como imagem \u2014 por jogador, melhor defesa primeiro, mais uma linha da liga.\n`/dstats league:NP include_inactive:false`\nPA = pontos sofridos, TO = perdas for\u00e7adas, 0-Pt Drv = drives sem pontos."),
+        ("/dscores", "Hist\u00f3rico defensivo de um jogador num intervalo de datas.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUma linha por jogo: o resultado de cada drive, pontos sofridos, perdas for\u00e7adas e o OVR ofensivo enfrentado, com totais no fim."),
         ("/ovr", "Atualiza o OVR de um jogador.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtém a média de um jogador.\n`/avg player:Grizzly` → escolha o tipo."),
         ("/player", "Ficha completa de estatísticas de um jogador.\n`/player player:Grizzly`"),
@@ -208,6 +216,8 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Erfasst den Punktestand eines Spielers.\n`/score player:Grizzly points:22`\nM für verpasste Drives, E für entschuldigtes Fehlen. Optional: gegnerischer DEF OVR, 4th-Down-Statistiken."),
         ("/dscore", "Erfasst die Defensivwertung eines Spielers für einen Tag — für den häufigen Fall, dass ein Gegner alle 3 Drives bestritten hat.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — jeder Drive ist 0-8 (zugelassene Punkte) oder F/I/S (Fumble/Interception/Safety). Die Gesamtpunktzahl wird automatisch berechnet. Kein Formular — der OVR des Gegners wird direkt eingegeben und auf alle 3 Drives angewendet. Für einen Tag mit mehreren Gegnern nutze `/dscore_multiple`."),
         ("/dscore_multiple", "Erfasst die Defensivwertung eines Spielers für einen Tag, Drive für Drive — für wenn mehrere Gegner den Spieler über die 3 Drives hinweg bestritten haben.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — jeder Drive ist 0-8 (zugelassene Punkte) oder F/I/S (Fumble/Interception/Safety). Die Gesamtpunktzahl wird automatisch berechnet. Ein Formular öffnet sich sofort für Drive 1 (gegnerischer OVR, plus Down/Distanz/Spielzug/wer ihn erzwungen hat bei einem Ballverlust); ein Button führt dann weiter zu Drive 2, dann 3, ein Formular nach dem anderen, mit einer abschließenden Zusammenfassung."),
+        ("/dstats", "Defensiv-Summen und -Durchschnitte einer Liga als Bild \u2014 pro Spieler, beste Defensive zuerst, plus eine Liga-Zeile.\n`/dstats league:NP include_inactive:false`\nPA = zugelassene Punkte, TO = erzwungene Ballverluste, 0-Pt Drv = punktlose Drives."),
+        ("/dscores", "Defensiv-Verlauf eines Spielers \u00fcber einen Zeitraum.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nEine Zeile pro Spiel: Ergebnis jedes Drives, zugelassene Punkte, erzwungene Ballverluste und der gegnerische Offensiv-OVR, mit Summen darunter."),
         ("/ovr", "Aktualisiert den OVR eines Spielers.\n`/ovr player:Grizzly`"),
         ("/avg", "Ruft den Durchschnitt eines Spielers ab.\n`/avg player:Grizzly` → Typ auswählen."),
         ("/player", "Vollständige Statistikkarte eines Spielers.\n`/player player:Grizzly`"),
@@ -2860,4 +2870,90 @@ TRANSLATIONS['neuroseason.err.empty_filter'] = {
     'fr': "⚠️ Aucun membre de **{name}** ne correspond — conférence `{conference}`, division `{division}`. Une division n'appartient qu'à une seule conférence.",
     'pt': "⚠️ Nenhum membro de **{name}** corresponde — conferência `{conference}`, divisão `{division}`. Uma divisão pertence a apenas uma conferência.",
     'de': "⚠️ Kein Mitglied von **{name}** passt dazu — Conference `{conference}`, Division `{division}`. Eine Division gehört zu genau einer Conference.",
+}
+
+# -----------------------------------------------------------------------
+# /dstats and /dscores — reading back what /dscore has been logging
+# -----------------------------------------------------------------------
+
+TRANSLATIONS['dstats.no_data'] = {
+    'en': "No defensive entries logged for **{league}** yet. Record some with `/dscore`.",
+    'es': "Aún no hay registros defensivos para **{league}**. Registra algunos con `/dscore`.",
+    'fr': "Aucune donnée défensive enregistrée pour **{league}**. Ajoutez-en avec `/dscore`.",
+    'pt': "Ainda não há registros defensivos para **{league}**. Registre alguns com `/dscore`.",
+    'de': "Noch keine Defensiv-Einträge für **{league}**. Erfasse welche mit `/dscore`.",
+}
+
+TRANSLATIONS['dscores.title'] = {
+    'en': "🛡️ {player} — defense, {start} to {end}",
+    'es': "🛡️ {player} — defensa, {start} a {end}",
+    'fr': "🛡️ {player} — défense, du {start} au {end}",
+    'pt': "🛡️ {player} — defesa, {start} a {end}",
+    'de': "🛡️ {player} — Defensive, {start} bis {end}",
+}
+TRANSLATIONS['dscores.no_data'] = {
+    'en': "No defensive entries for **{player}** between {start} and {end}.",
+    'es': "No hay registros defensivos de **{player}** entre {start} y {end}.",
+    'fr': "Aucune donnée défensive pour **{player}** entre le {start} et le {end}.",
+    'pt': "Nenhum registro defensivo de **{player}** entre {start} e {end}.",
+    'de': "Keine Defensiv-Einträge für **{player}** zwischen {start} und {end}.",
+}
+TRANSLATIONS['dscores.col.date'] = {
+    'en': "Date", 'es': "Fecha", 'fr': "Date", 'pt': "Data", 'de': "Datum",
+}
+TRANSLATIONS['dscores.col.drives'] = {
+    'en': "Drives", 'es': "Drives", 'fr': "Drives", 'pt': "Drives", 'de': "Drives",
+}
+TRANSLATIONS['dscores.col.pa'] = {
+    'en': "PA", 'es': "PC", 'fr': "PC", 'pt': "PC", 'de': "PA",
+}
+TRANSLATIONS['dscores.col.to'] = {
+    'en': "TO", 'es': "PB", 'fr': "BP", 'pt': "PP", 'de': "BV",
+}
+TRANSLATIONS['dscores.col.ovr'] = {
+    'en': "OVR", 'es': "OVR", 'fr': "OVR", 'pt': "OVR", 'de': "OVR",
+}
+TRANSLATIONS['dscores.field.entries'] = {
+    'en': "Entries", 'es': "Registros", 'fr': "Entrées", 'pt': "Registros",
+    'de': "Einträge",
+}
+TRANSLATIONS['dscores.field.paged'] = {
+    'en': "Entries ({page}/{total})", 'es': "Registros ({page}/{total})",
+    'fr': "Entrées ({page}/{total})", 'pt': "Registros ({page}/{total})",
+    'de': "Einträge ({page}/{total})",
+}
+TRANSLATIONS['dscores.footer.totals'] = {
+    'en': "{games} games · {pa} allowed · {avg}/game · {per_drive}/drive",
+    'es': "{games} partidos · {pa} concedidos · {avg}/partido · {per_drive}/drive",
+    'fr': "{games} matchs · {pa} concédés · {avg}/match · {per_drive}/drive",
+    'pt': "{games} jogos · {pa} concedidos · {avg}/jogo · {per_drive}/drive",
+    'de': "{games} Spiele · {pa} zugelassen · {avg}/Spiel · {per_drive}/Drive",
+}
+TRANSLATIONS['dscores.footer.turnovers'] = {
+    'en': "{total} turnovers forced ({fum} fum, {ints} int, {saf} saf)",
+    'es': "{total} pérdidas forzadas ({fum} bal, {ints} int, {saf} saf)",
+    'fr': "{total} ballons pris ({fum} fum, {ints} int, {saf} saf)",
+    'pt': "{total} perdas forçadas ({fum} fum, {ints} int, {saf} saf)",
+    'de': "{total} Ballverluste erzwungen ({fum} Fum, {ints} Int, {saf} Saf)",
+}
+TRANSLATIONS['dscores.footer.held'] = {
+    'en': "{drives} scoreless drives · {games} shutouts · best {best}, worst {worst}",
+    'es': "{drives} drives sin anotar · {games} blanqueadas · mejor {best}, peor {worst}",
+    'fr': "{drives} drives sans point · {games} blanchissages · meilleur {best}, pire {worst}",
+    'pt': "{drives} drives sem pontos · {games} jogos sem sofrer · melhor {best}, pior {worst}",
+    'de': "{drives} punktlose Drives · {games} ohne Gegenpunkte · bestes {best}, schlechtestes {worst}",
+}
+TRANSLATIONS['dscores.footer.ovr'] = {
+    'en': "Avg offensive OVR faced: {ovr}",
+    'es': "OVR ofensivo promedio enfrentado: {ovr}",
+    'fr': "OVR offensif moyen affronté : {ovr}",
+    'pt': "OVR ofensivo médio enfrentado: {ovr}",
+    'de': "Durchschn. gegnerischer Offensiv-OVR: {ovr}",
+}
+TRANSLATIONS['dscores.legend'] = {
+    'en': "Drives: 0-8 = points allowed, F = fumble, I = interception, S = safety, - = not recorded. PA = points allowed, TO = turnovers forced.",
+    'es': "Drives: 0-8 = puntos concedidos, F = balón suelto, I = intercepción, S = safety, - = sin registrar. PC = puntos concedidos, PB = pérdidas forzadas.",
+    'fr': "Drives : 0-8 = points concédés, F = fumble, I = interception, S = safety, - = non enregistré. PC = points concédés, BP = ballons pris.",
+    'pt': "Drives: 0-8 = pontos sofridos, F = fumble, I = interceptação, S = safety, - = não registrado. PC = pontos sofridos, PP = perdas forçadas.",
+    'de': "Drives: 0-8 = zugelassene Punkte, F = Fumble, I = Interception, S = Safety, - = nicht erfasst. PA = zugelassene Punkte, BV = erzwungene Ballverluste.",
 }

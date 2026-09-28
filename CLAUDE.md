@@ -1736,3 +1736,72 @@ A new page needs all three of:
 checks the colour list is long enough, and checks the title counters agree
 with the real page count) — verified by reverting the fix and confirming it
 reproduces the original `IndexError`.
+
+## /dstats and /dscores — reading back what /dscore logs
+
+`/dscore` and `/dscore_multiple` had been writing `defense_scores` since they
+were built with **no way to read any of it back** except the single career
+line on `/player`'s card. These two are the offensive side's mirror:
+`/dstats` is to `/stats` what `/dscores` is to `/history`, down to the
+argument lists (`league` + `include_inactive`; `player` + `start` + `end`).
+
+**None of the four is admin-gated.** `/stats` used to be, and that gate was
+removed along with `/dstats`' at the user's explicit request — they're
+read-only league lookups anyone in the league has a reason to run, same as
+`/rank`. The manual had never marked `/stats` Admin, so the gate had been the
+odd one out. `test_read_only_league_lookups_are_not_admin_gated` pins both
+directly, because the pre-existing manual cross-check only catches the
+opposite mistake (marked Admin but not gated) and would never notice a gate
+being re-added. `/legacy stats` **is** still admin-gated and was deliberately
+left alone — it wasn't part of the request.
+
+**One aggregation function, `db.summarize_defense_rows(rows)`** — pure, rows
+in, dict out — backs both the per-player and league-wide paths, so they can't
+drift on what a stat means. Three judgement calls inside it worth keeping:
+
+- **Points per drive divides by `games * 3`, not by the drive-outcome columns
+  that happen to be populated.** Every game is exactly three drives (the
+  same premise `_fumble_adjusted_avg` rests on), `points_allowed` is always
+  recorded, and the per-drive `drive{N}_outcome` columns are newer and can be
+  NULL on older rows. Counts that genuinely need per-drive detail (turnovers
+  forced, scoreless drives) are reported against `drives_logged` instead, so
+  a row with no outcomes recorded doesn't quietly shrink a denominator it
+  shouldn't.
+- **A turnover drive is a drive that happened and allowed 0 points** — the
+  best available defensive outcome, not a missing drive. `F`/`I`/`S` are the
+  same three codes `/dscore` accepts and the same set
+  `_parse_dscore_drives` excludes from its points sum.
+- **`turnovers` and `zero_point_drives` are counted separately and a turnover
+  is not also a scoreless drive.** Both describe a drive that allowed
+  nothing, but one was held and the other was taken away; double-counting
+  would inflate the scoreless column on every turnover. There's a test.
+
+**The league line is aggregated from the pooled rows, not by averaging the
+per-player averages**, so a player with two games logged doesn't weigh the
+same as one with twenty. The test for this is built so the two methods
+genuinely disagree (25.0 vs 15.0) rather than coincidentally matching.
+
+Every `defense_scores` row is matched on **`ds.team_id`**, never the player's
+current team — the same historical-scoping rule as `game_scores`, so a
+transferred player's old defensive games stay with the league they were
+actually played for. `get_player_dscores` (backing `/dscores`) is
+deliberately **not** team-scoped, matching `/history`: a date range is the
+scope the caller asked for, and dropping the days they played for a previous
+league would make a transfer look like missing data.
+
+A player on the roster with nothing logged shows a row of `--` and **sorts
+last**; sorting them by a 0.00 average would put them at the top of a
+best-defense-first table. A league whose players have never had `/dscore` run
+at all gets a "nothing logged yet" message instead of a full table of
+dashes — `send_dstats_image` returns False for that case (and for an unknown
+league) so the command can say which.
+
+**Real-data finding, worth acting on separately:** 11 of the 117
+`defense_scores` rows with an `avg_off_ovr_faced` hold a value in the
+1100-3400 range against a median of 125 — i.e. somebody entered a *team
+total* OVR where the per-drive *offensive* OVR belongs. It's visible in
+`/dstats` immediately (one NA player reads 2567.3 next to everyone else's
+~120, dragging the league line to 253.0). Nothing in the code is wrong here;
+those specific rows need correcting via `/dscore_multiple`, and the display
+was deliberately left as a plain average rather than quietly switching to a
+median, which would have hidden the problem instead of surfacing it.
