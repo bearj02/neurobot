@@ -917,7 +917,8 @@ async def legacy_rank_slash(interaction: discord.Interaction, year: int, league:
 )
 @app_commands.autocomplete(league=archive_league_autocomplete)
 async def legacy_stats_slash(interaction: discord.Interaction, year: int, league: str, include_inactive: bool = False):
-    if not await _require_admin(interaction): return
+    # Not admin-gated, matching the live /stats it mirrors. The rest of the
+    # /legacy group still is; only this subcommand was opened up.
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
     conn = await db.get_archive_conn(year)

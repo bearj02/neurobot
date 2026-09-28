@@ -1749,11 +1749,23 @@ argument lists (`league` + `include_inactive`; `player` + `start` + `end`).
 removed along with `/dstats`' at the user's explicit request — they're
 read-only league lookups anyone in the league has a reason to run, same as
 `/rank`. The manual had never marked `/stats` Admin, so the gate had been the
-odd one out. `test_read_only_league_lookups_are_not_admin_gated` pins both
-directly, because the pre-existing manual cross-check only catches the
-opposite mistake (marked Admin but not gated) and would never notice a gate
-being re-added. `/legacy stats` **is** still admin-gated and was deliberately
-left alone — it wasn't part of the request.
+odd one out. `/legacy stats` was opened up
+alongside them, so the archive mirror matches its live counterpart.
+`test_read_only_league_lookups_are_not_admin_gated` pins all three directly,
+because the pre-existing manual cross-check only catches the opposite
+mistake (marked Admin but not gated) and would never notice a gate being
+re-added.
+
+**The `/legacy` group's gating was already mixed and still is** — checked
+rather than assumed, after a test written on the assumption that the whole
+group gated failed immediately. As it stands: `/legacy rank` and
+`/legacy scores` gate; `/legacy stats`, `/legacy player`, `/legacy history`
+and `/legacy show_ladder` don't. On the live side `/rank` and `/scores` gate
+while `/stats`, `/player`, `/history`, `/dstats` and `/dscores` don't — so
+each archive subcommand now matches its live counterpart, which is at least
+a consistent *rule*, even if which commands are admin-only looks arbitrary
+on its own. The same test pins the four that do gate, so any further change
+there is a deliberate one.
 
 **One aggregation function, `db.summarize_defense_rows(rows)`** — pure, rows
 in, dict out — backs both the per-player and league-wide paths, so they can't

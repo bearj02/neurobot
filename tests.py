@@ -2342,7 +2342,7 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
             if isinstance(node, ast.AsyncFunctionDef) and node.name.endswith("_slash"):
                 bodies[node.name] = "\n".join(src_lines[node.lineno - 1:node.end_lineno])
 
-        for name in ("stats_slash", "dstats_slash"):
+        for name in ("stats_slash", "dstats_slash", "legacy_stats_slash"):
             self.assertIn(name, bodies)
             self.assertNotIn("_require_admin(", bodies[name],
                              f"/{name[:-6]} is admin-gated but shouldn't be")
@@ -2350,6 +2350,14 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         # Sanity check that the parse actually finds gates where they do
         # exist — otherwise the assertions above would pass on a bad parse.
         self.assertIn("_require_admin(", bodies["newday_slash"])
+        # The gating that remains, pinned as-is rather than assumed: /rank
+        # and /scores gate on both the live and archive side, and /legacy
+        # rank/scores follow their live counterparts. Nothing here is a
+        # claim that this split is principled — it's what the commands
+        # actually do, so a change to any of it is a deliberate one.
+        for name in ("rank_slash", "scores_slash", "legacy_rank_slash", "legacy_scores_slash"):
+            self.assertIn("_require_admin(", bodies[name],
+                          f"/{name[:-6]} lost its admin gate")
 
     # --- on_command_error (prefix commands were fully retired) ---
 
