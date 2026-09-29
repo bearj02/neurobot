@@ -450,19 +450,56 @@ async def get_player(ign: str, conn=None) -> dict | None:
     )
 
 
-async def get_player_by_real_ign(real_ign: str) -> dict | None:
+async def get_player_by_real_ign(real_ign: str, team_id: str | None = None) -> dict | None:
     """
     Look up a player by their real in-game name (used by the AI agent).
-    Matches real_ign column exactly first; falls back to ign if real_ign is NULL.
+    Matches real_ign exactly first; falls back to ign if real_ign is NULL.
+
+    **Pass team_id whenever the caller is working within one league.**
+    `real_ign` is deliberately not unique (several players can share one),
+    and without a team_id this matches across every league and every status
+    — which handed /ladder a player who wasn't on the league's active roster
+    at all. The live data has exactly that case: real_ign '317-Elite'
+    belongs both to an inactive ND player nicknamed '317-Elite' and to an
+    active NX player nicknamed 'AnyGivenSunday'. /ladder's player pool is
+    `team_id=? AND status='A'`, so the ND row came back as a selection with
+    no button to render or untick it (see ladder_flow.sanitize_selection).
+
+    With team_id the match is scoped to that league's active roster and
+    **does not fall back** to a cross-league or inactive row: a name that
+    only matches elsewhere is not a match for this league's ladder, and the
+    caller's own unmatched-name handling (/ladder's manual-match flow, whose
+    select is already scoped to the same roster) is the right place to
+    resolve it — a human picking from the right roster beats an arbitrary
+    row from the wrong one.
+
+    Without team_id the old unscoped behaviour is kept for any caller that
+    genuinely wants a league-agnostic lookup, but ordered by id so a shared
+    real_ign resolves to the same row every time instead of whichever one
+    SQLite happened to scan first.
     """
+    if team_id is not None:
+        row = await fetchone(
+            "SELECT * FROM players WHERE real_ign=? AND team_id=? AND status='A' "
+            "ORDER BY id LIMIT 1",
+            (real_ign, team_id)
+        )
+        if row:
+            return row
+        return await fetchone(
+            "SELECT * FROM players WHERE ign=? AND real_ign IS NULL AND team_id=? "
+            "AND status='A' ORDER BY id LIMIT 1",
+            (real_ign, team_id)
+        )
+
     row = await fetchone(
-        "SELECT * FROM players WHERE real_ign=? LIMIT 1", (real_ign,)
+        "SELECT * FROM players WHERE real_ign=? ORDER BY id LIMIT 1", (real_ign,)
     )
     if row:
         return row
     # Fall back: player whose ign matches and has no real_ign set
     return await fetchone(
-        "SELECT * FROM players WHERE ign=? AND real_ign IS NULL LIMIT 1", (real_ign,)
+        "SELECT * FROM players WHERE ign=? AND real_ign IS NULL ORDER BY id LIMIT 1", (real_ign,)
     )
 
 

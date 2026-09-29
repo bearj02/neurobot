@@ -1817,3 +1817,62 @@ total* OVR where the per-drive *offensive* OVR belongs. It's visible in
 those specific rows need correcting via `/dscore_multiple`, and the display
 was deliberately left as a plain average rather than quietly switching to a
 median, which would have hidden the problem instead of surfacing it.
+
+## /ladder step 1: "15 ticked, count says 16" — a real_ign lookup crossing leagues
+
+Reported symptom: step 1 pre-ticks 15 players but the Next button reads
+16/16, unticking one drops it to 15, and the count could climb past 16.
+
+**Root cause: `db.get_player_by_real_ign()` matched on `real_ign` alone — no
+`team_id`, no `status`** — while step 1's pool (`get_team_stats`) is
+`team_id=? AND status='A'`. `real_ign` is explicitly not unique, so
+`/ladder`'s extraction could match a screenshot name to a player in a
+different league, or an inactive one, and append **that** ign to
+`preselected`. The step-1 count is `len(state.selected)` while each tick
+comes from `ign in state.selected` *for players in the pool*, so an ign that
+isn't in the pool is counted with no button to render or untick it.
+
+**Confirmed on the live database, not theorised:** `real_ign` `'317-Elite'`
+belongs both to an inactive ND player nicknamed `317-Elite` and to an
+**active NX player nicknamed `AnyGivenSunday`**. `WHERE real_ign=? LIMIT 1`
+with no `ORDER BY` returned the ND row. Simulating an NX ladder whose
+screenshot includes that player reproduced `count=16, ticks=15` exactly;
+with the lookup scoped it's `16/16`. (The other live collision is `Qmoney`,
+two inactive rows.)
+
+**Three fixes, because the count must not be able to lie regardless of how
+the selection was built:**
+1. **`get_player_by_real_ign(real_ign, team_id=None)`** — with `team_id` it
+   scopes to that league's active roster and **deliberately does not fall
+   back** to a cross-league or inactive row: a name that only matches
+   elsewhere isn't a match for this ladder, and `/ladder`'s manual-match
+   flow (whose select is already scoped to the same roster) is the right
+   place for a human to resolve it. `/ladder` passes `team_id=league`. The
+   unscoped path is kept for other callers but is now `ORDER BY id`, so a
+   shared `real_ign` resolves the same way every time.
+2. **`ladder_flow.sanitize_selection(selected, players)`** — drops anything
+   not in the pool, dedupes, caps at `MATCHUP_SIZE`, returns
+   `(clean, dropped)` and logs what it dropped. Called both at
+   `start_ladder_flow` and in `PlayerToggleView.__init__`, since the view is
+   what renders the count and is reachable from more than one path.
+   Extraction appended a match per extracted name with **no dedup, no pool
+   check and no cap**, and the 16-cap lives only in the toggle callback,
+   which never runs for a pre-populated list — that's how a count could
+   exceed 16.
+3. **`state.selected` is no longer the caller's list object.** The
+   OVR-sanity and manual-match views keep appending to their own
+   `self.preselected` as batches resolve, so sharing it let a stale click on
+   an earlier message mutate a live ladder's selection. (Reassignment inside
+   the view also breaks the alias, so this one is belt-and-braces.)
+
+**Testing notes.** `TestLadderSelectionCount` asserts the *invariant* — the
+count on the button equals the number of ticked buttons across all pages —
+rather than any single implementation detail, which is why it catches all
+three causes. The call-site fix is pinned by an **ast scan** asserting
+`/ladder`'s lookup passes `team_id`, because `ladder_slash` is
+`@tree.command`-decorated and can't be called directly; a db-level test of
+`get_player_by_real_ign` passes happily with an unscoped call site, which is
+how the root-cause fix was briefly untested. The `ORDER BY` is likewise
+pinned by source inspection: SQLite returns the lowest rowid first for a
+small table, so a behavioural test stays green with the clause removed —
+verified by removing it.

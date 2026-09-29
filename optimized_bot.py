@@ -2845,7 +2845,7 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
         if not real_ign:
             continue
 
-        row = await db.get_player_by_real_ign(real_ign)
+        row = await db.get_player_by_real_ign(real_ign, team_id=league)
 
         if row is None:
             missing.append(p)

@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 import random
+import re
 from collections import Counter, defaultdict
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7191,6 +7192,273 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Test: /ladder step 1 selection count matching what's actually selected
+# ---------------------------------------------------------------------------
+
+class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
+    """
+    Reported bug: /ladder step 1 shows 15 players ticked but a count of 16,
+    and the count can then climb past 16 entirely.
+
+    The count is len(state.selected) while the ticks come from
+    `ign in state.selected` per player *in the pool*, so anything in
+    `selected` that isn't in the pool — or is in it twice — makes the two
+    disagree. A pre-selected list from screenshot extraction is where that
+    comes from.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import ladder_flow
+        self.lf = ladder_flow
+        # A full 18-player active pool for NP, on top of the 3 seeded ones.
+        for i in range(15):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, def_ovr, total_ovr) "
+                "VALUES ('NP',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _state(self, preselected=None):
+        players = await db.get_team_stats("NP")
+        state = self.lf.LadderState("NP", "2026-09-29", MagicMock(), lang='en')
+        state.players = [dict(p) for p in players]
+        if preselected is not None:
+            state.selected = preselected
+        return state
+
+    def _ticked(self, view):
+        """The player buttons showing as selected, across every page — this is
+        what the admin actually sees ticked."""
+        ticked = set()
+        pages = max(1, (len(view.state.players) - 1) // self.lf.PLAYERS_PER_PAGE + 1)
+        original = view.page
+        for page in range(pages):
+            view.page = page
+            view._rebuild()
+            for child in view.children:
+                label = getattr(child, 'label', None) or ""
+                if label.startswith("✅ "):
+                    ticked.add(label[2:])
+        view.page = original
+        view._rebuild()
+        return ticked
+
+    def _shown_count(self, view):
+        """The number the Next button reports."""
+        for child in view.children:
+            label = getattr(child, 'label', None) or ""
+            m = re.search(r"(\d+)\s*/\s*(\d+)", label)
+            if m:
+                return int(m.group(1))
+        raise AssertionError("no count found on any button")
+
+    async def test_count_matches_what_is_ticked_for_a_normal_start(self):
+        state = await self._state()
+        view = self.lf.PlayerToggleView(state)
+        self.assertEqual(self._shown_count(view), len(self._ticked(view)))
+        self.assertEqual(self._shown_count(view), self.lf.MATCHUP_SIZE)
+
+    async def test_a_preselected_player_not_in_the_pool_is_not_counted(self):
+        """The reported symptom exactly: extraction matched a real_ign to a
+        player who isn't on this league's active roster, so the ign lands in
+        `selected` with no button to tick — 15 ticks, a count of 16, and no
+        way to clear the phantom because nothing renders it."""
+        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        preselected = pool[:15] + ["SomeoneElsesPlayer"]
+        state = await self._state(preselected)
+        view = self.lf.PlayerToggleView(state)
+
+        self.assertEqual(len(self._ticked(view)), 15)
+        self.assertEqual(self._shown_count(view), 15,
+                         "the count includes a player who has no button to untick")
+
+    async def test_a_duplicated_preselection_is_counted_once(self):
+        """Three screenshots can show the same player twice, and the
+        extraction loop appends every match with no dedup."""
+        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        state = await self._state(pool[:15] + [pool[0]])
+        view = self.lf.PlayerToggleView(state)
+
+        self.assertEqual(len(self._ticked(view)), 15)
+        self.assertEqual(self._shown_count(view), 15)
+
+    async def test_more_than_sixteen_preselected_is_capped(self):
+        """Nothing enforced the 16-player cap on the pre-populated list — the
+        guard lives only in the toggle callback, which never runs for it. A
+        count above 16 is how the reported '17' becomes reachable."""
+        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        self.assertGreater(len(pool), self.lf.MATCHUP_SIZE)
+        state = await self._state(list(pool))
+        view = self.lf.PlayerToggleView(state)
+
+        self.assertEqual(self._shown_count(view), self.lf.MATCHUP_SIZE)
+        self.assertEqual(len(self._ticked(view)), self.lf.MATCHUP_SIZE)
+
+    async def test_toggling_keeps_the_count_and_the_ticks_in_step(self):
+        """The whole reported sequence: untick one, tick another, and the
+        count has to track the ticks at every step."""
+        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        state = await self._state(pool[:15] + ["SomeoneElsesPlayer"])
+        view = self.lf.PlayerToggleView(state)
+        inter = MagicMock()
+        inter.response = MagicMock()
+        inter.response.edit_message = AsyncMock()
+        inter.response.send_message = AsyncMock()
+
+        async def toggle(ign):
+            await view._make_toggle(ign)(inter)
+
+        self.assertEqual(self._shown_count(view), len(self._ticked(view)))
+        await toggle(pool[0])                      # untick a real one
+        self.assertEqual(self._shown_count(view), len(self._ticked(view)))
+        self.assertEqual(self._shown_count(view), 14)
+        await toggle(pool[16])                     # tick someone new
+        self.assertEqual(self._shown_count(view), len(self._ticked(view)))
+        self.assertEqual(self._shown_count(view), 15)
+        await toggle(pool[17])
+        self.assertEqual(self._shown_count(view), 16)
+        # At the cap, one more has to be refused rather than reaching 17.
+        await toggle(pool[0])
+        self.assertEqual(self._shown_count(view), 16)
+        self.assertLessEqual(self._shown_count(view), self.lf.MATCHUP_SIZE)
+
+    async def test_start_ladder_flow_does_not_alias_the_callers_list(self):
+        """state.selected used to BE the caller's list. The match/sanity views
+        keep appending to their own copy as batches resolve, so a stale click
+        on one of those earlier messages could mutate a live ladder's
+        selection out from under it."""
+        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        callers_list = pool[:16]
+
+        inter = MagicMock()
+        inter.response = MagicMock()
+        inter.response.is_done = MagicMock(return_value=False)
+        inter.response.send_message = AsyncMock()
+        inter.followup = MagicMock()
+        inter.followup.send = AsyncMock()
+        inter.channel = MagicMock()
+        inter.locale = discord.Locale.american_english
+
+        await self.lf.start_ladder_flow(inter, "NP", "2026-09-29", preselected=callers_list)
+        sent_view = (inter.response.send_message.call_args
+                     or inter.followup.send.call_args).kwargs['view']
+
+        callers_list.append("LateAddition")
+        self.assertNotIn("LateAddition", sent_view.state.selected)
+
+
+class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
+    """
+    db.get_player_by_real_ign matched on real_ign alone — no team, no status
+    — while /ladder's player pool is `team_id=? AND status='A'`. real_ign is
+    explicitly not unique, so the lookup could hand /ladder a player from
+    another league (or an inactive one), which is where the phantom
+    selection came from.
+
+    This is the live data's own case: real_ign '317-Elite' belongs to both
+    an inactive ND player nicknamed '317-Elite' and an active NX player
+    nicknamed 'AnyGivenSunday'.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        # The seeded teams table only has NP and ND.
+        await db.execute("INSERT INTO teams VALUES ('NX','NeuroChristians','NeuroChristians')")
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('ND','317-Elite','317-Elite','I')")
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('NX','AnyGivenSunday','317-Elite','A')")
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def test_team_scoped_lookup_finds_that_league_active_player(self):
+        row = await db.get_player_by_real_ign("317-Elite", team_id="NX")
+        self.assertIsNotNone(row)
+        self.assertEqual(row['ign'], "AnyGivenSunday")
+
+    async def test_team_scoped_lookup_does_not_reach_into_another_league(self):
+        """Returning the ND player to an NX ladder is the actual bug: that
+        ign has no button in NX's pool, so it can be counted but never
+        unticked."""
+        self.assertIsNone(await db.get_player_by_real_ign("317-Elite", team_id="NP"))
+
+    async def test_team_scoped_lookup_skips_inactive_players(self):
+        self.assertIsNone(await db.get_player_by_real_ign("317-Elite", team_id="ND"))
+
+    async def test_unscoped_lookup_keeps_working_for_other_callers(self):
+        row = await db.get_player_by_real_ign("317-Elite")
+        self.assertIsNotNone(row)
+
+    def test_every_real_ign_query_is_explicitly_ordered(self):
+        """`LIMIT 1` with no `ORDER BY` lets SQLite return whichever row it
+        happened to scan first, which for a shared real_ign makes the result
+        arbitrary — and unreasonable to debug from a bug report.
+
+        Checked against the source rather than by calling it twice: SQLite
+        does return the lowest rowid first for a small table, so a
+        behavioural test passes with or without the ORDER BY and proves
+        nothing. Confirmed that directly — removing the clause left such a
+        test green.
+        """
+        import inspect
+        # Quotes stripped and whitespace collapsed first, since these queries
+        # are written as adjacent string literals across several lines.
+        source = inspect.getsource(db.get_player_by_real_ign)
+        flat = re.sub(r"\s+", " ", source.replace('"', ""))
+        queries = re.findall(r"SELECT \* FROM players.*?LIMIT 1", flat)
+        self.assertEqual(len(queries), 4, "query count changed; recheck this test")
+        for q in queries:
+            self.assertIn("ORDER BY id", q, f"unordered LIMIT 1: {q}")
+
+    async def test_the_ladder_extraction_scopes_its_lookup_to_the_league(self):
+        """The actual root cause, pinned at the call site.
+
+        ladder_slash is @tree.command-decorated, so it can't be called
+        directly under this stub (the decorator mangles it) — hence this
+        reads the source, the same approach the admin-gating cross-check
+        uses. Without the team_id argument the lookup searches every league
+        and every status, which is what put a player with no button into the
+        selection.
+        """
+        import ast
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            tree_ast = ast.parse(f.read())
+
+        calls = []
+        for node in ast.walk(tree_ast):
+            if not (isinstance(node, ast.AsyncFunctionDef) and node.name == "ladder_slash"):
+                continue
+            for inner in ast.walk(node):
+                if (isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Attribute)
+                        and inner.func.attr == "get_player_by_real_ign"):
+                    calls.append(inner)
+
+        self.assertEqual(len(calls), 1, "expected exactly one lookup in /ladder")
+        kwargs = {k.arg for k in calls[0].keywords}
+        self.assertIn("team_id", kwargs,
+                      "/ladder's real_ign lookup isn't scoped to the league")
+
+    async def test_fallback_to_ign_still_works_when_real_ign_is_null(self):
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('NP','NoRealIgn',NULL,'A')")
+        row = await db.get_player_by_real_ign("NoRealIgn")
+        self.assertIsNotNone(row)
+        self.assertEqual(row['ign'], "NoRealIgn")
+        scoped = await db.get_player_by_real_ign("NoRealIgn", team_id="NP")
+        self.assertIsNotNone(scoped)
+        self.assertEqual(scoped['ign'], "NoRealIgn")
 
 # ---------------------------------------------------------------------------
 # Test: defensive reporting (/dstats, /dscores)

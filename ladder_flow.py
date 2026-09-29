@@ -62,6 +62,45 @@ class LadderState:
         self.our_rank:              int | None = None
 
 
+def sanitize_selection(selected: list[str], players: list[dict]) -> tuple[list[str], list[str]]:
+    """
+    Force `selected` into something the step-1 screen can actually render:
+    only players who are in the pool, each at most once, at most
+    MATCHUP_SIZE of them. Returns (clean, dropped).
+
+    This exists because of a real bug. Step 1 shows a count of
+    `len(state.selected)` while the tick on each player comes from
+    `ign in state.selected` **for the players in the pool** — so anything in
+    the list that isn't in the pool is counted but has no button, and
+    anything in it twice is counted twice but ticks once. The reported
+    symptom was 15 players ticked above a count of 16, with the phantom
+    impossible to clear because nothing rendered it.
+
+    The list arrives pre-populated from /ladder's screenshot extraction,
+    which appended a match per extracted name with no dedup, no pool check
+    and no cap — and the 16-player cap is enforced only inside the toggle
+    callback, which never runs for a pre-populated list. That's how a count
+    could start at 16 with 15 ticks and climb past 16 from there.
+
+    Order is preserved: /ladder sorts the pre-selection by ladder_rank
+    before handing it over, and that order decides the default slot order in
+    step 3.
+    """
+    pool = {p['ign'] for p in players}
+    clean: list[str] = []
+    dropped: list[str] = []
+    for ign in selected:
+        if ign in clean:
+            dropped.append(ign)          # same player matched twice
+        elif ign not in pool:
+            dropped.append(ign)          # not on this league's active roster
+        elif len(clean) >= MATCHUP_SIZE:
+            dropped.append(ign)          # past the cap
+        else:
+            clean.append(ign)
+    return clean, dropped
+
+
 # ---------------------------------------------------------------------------
 # Step 1 — Player toggle: choosing who plays this ladder (vs. rests) from
 # the league's full active/rostered pool
@@ -74,6 +113,17 @@ class PlayerToggleView(View):
         self.page  = 0
         if not self.state.selected:
             self.state.selected = [p['ign'] for p in state.players[:MATCHUP_SIZE]]
+        # Enforced here as well as at the entry point: this view renders the
+        # count, so it's the last place the count and the ticks can be made
+        # to agree no matter which path built the state. Idempotent on an
+        # already-clean list.
+        self.state.selected, dropped = sanitize_selection(
+            self.state.selected, self.state.players)
+        if dropped:
+            logger.warning(
+                f"Ladder selection for {self.state.team_id} dropped "
+                f"{len(dropped)} unusable pre-selection(s): {dropped}"
+            )
         self._rebuild()
 
     def _page_players(self):
@@ -721,9 +771,18 @@ async def start_ladder_flow(interaction: discord.Interaction,
     state.event_type           = event_type
     state.our_rank              = our_rank
 
-    # Pre-populate from agent if provided
+    # Pre-populate from agent if provided. Sanitized into a NEW list rather
+    # than assigned: the caller's list is still held (and still appended to)
+    # by the OVR-sanity and manual-match views as their batches resolve, so
+    # sharing the object let a stale click on one of those earlier messages
+    # mutate a live ladder's selection.
     if preselected:
-        state.selected = preselected
+        state.selected, dropped = sanitize_selection(list(preselected), state.players)
+        if dropped:
+            logger.warning(
+                f"/ladder pre-selection for {team_id} dropped {len(dropped)} "
+                f"name(s) not usable as a selection: {dropped}"
+            )
     else:
         state.selected = [p['ign'] for p in state.players[:MATCHUP_SIZE]]
 
