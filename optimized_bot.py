@@ -25,6 +25,7 @@ import db
 import ladder_flow
 from ladder_flow import start_ladder_flow
 import siege
+import neuroseason
 import i18n
 from status import get_status
 import sheet_image
@@ -1781,6 +1782,227 @@ async def siegehistory_slash(interaction: discord.Interaction, league: str):
     await siege.handle_siegehistory(interaction, league)
 
 
+# ============================================================================
+# NEUROSEASON — NFL-style season gamemode (logic lives in neuroseason.py)
+# ============================================================================
+
+async def season_autocomplete(interaction: discord.Interaction, current: str):
+    """Seasons by id, newest first, labelled with their name and status so an
+    admin picking one doesn't have to remember which number is which."""
+    seasons = await db.list_neuro_seasons()
+    out = []
+    for s in seasons:
+        label = f"#{s['id']} {s['name']} ({s['status']})"
+        if current and current not in label and not str(s['id']).startswith(current):
+            continue
+        out.append(app_commands.Choice(name=label[:100], value=s['id']))
+    return out[:25]
+
+
+async def season_member_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    The roster of the season already chosen in this same command, read via
+    interaction.namespace.season — the same mechanism league_player_autocomplete
+    uses. Scoped for the same reason too: the global player list is 140+ deep
+    with a hard 25-result cap, so a specific member can silently fall off the
+    end of it, while a season's own roster is at most 32.
+    """
+    season_id = getattr(interaction.namespace, 'season', None)
+    if not season_id:
+        return []
+    rows = await db.fetchall(
+        """
+        SELECT p.ign FROM neuro_season_members m
+        JOIN players p ON p.id = m.player_id
+        WHERE m.season_id=? AND p.ign LIKE ?
+        ORDER BY p.ign LIMIT 25
+        """,
+        (season_id, f"{current}%")
+    )
+    return [app_commands.Choice(name=r['ign'], value=r['ign']) for r in rows]
+
+
+async def season_match_player_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    Just the two players actually in the match already chosen on this same
+    command, read via interaction.namespace (the same mechanism
+    league_player_autocomplete and archive_league_autocomplete use).
+
+    /seasonmatch's left_player and right_player can only ever be those two,
+    so offering the whole season roster invites picking someone who isn't in
+    the match — which the command then has to reject after the fact. season
+    and match are declared before these two parameters, so Discord has
+    already collected both by the time this runs.
+
+    Falls back to the season roster when the match number isn't filled in
+    yet (or isn't a real match), so the field is never mysteriously empty
+    mid-typing — same fallback behaviour as archive_league_autocomplete.
+    """
+    season_id = getattr(interaction.namespace, 'season', None)
+    match_num = getattr(interaction.namespace, 'match', None)
+    if not season_id or not match_num:
+        return await season_member_autocomplete(interaction, current)
+    try:
+        match = await db.get_neuro_season_match(int(season_id), int(match_num))
+    except (TypeError, ValueError):
+        return await season_member_autocomplete(interaction, current)
+    if match is None:
+        return await season_member_autocomplete(interaction, current)
+
+    typed = (current or "").lower()
+    return [
+        app_commands.Choice(name=ign, value=ign)
+        for ign in (match['home_ign'], match['away_ign'])
+        if typed in ign.lower()
+    ]
+
+
+async def season_division_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    The divisions the season chosen on this same command actually drew, read
+    via interaction.namespace.season.
+
+    Deliberately not @app_commands.choices: how many divisions a season has
+    depends on how many people signed up for it (see neuroseason.plan_layout),
+    so a fixed list would offer names that produce an empty table for most
+    seasons. Same reasoning, and same mechanism, as /legacy's per-archive
+    league field.
+
+    Falls back to every name the layout can generate when the season isn't
+    chosen yet or hasn't started, so the field is never mysteriously empty
+    mid-typing.
+    """
+    season_id = getattr(interaction.namespace, 'season', None)
+    divisions: list[str] = []
+    if season_id:
+        try:
+            divisions = await neuroseason.season_divisions(int(season_id))
+        except (TypeError, ValueError):
+            divisions = []
+    if not divisions:
+        divisions = [
+            neuroseason._division_name(conf, i, len(neuroseason.DIVISION_SUFFIXES))
+            for conf in neuroseason.CONFERENCES
+            for i in range(len(neuroseason.DIVISION_SUFFIXES))
+        ]
+
+    typed = (current or "").lower()
+    return [app_commands.Choice(name=d, value=d)
+            for d in divisions if typed in d.lower()][:25]
+
+
+neuroseason_group = app_commands.Group(
+    name="neuroseason", description="NFL-style season: signups, schedule, standings, playoffs")
+
+
+@neuroseason_group.command(name="create", description="Open signups for a new NeuroSeason")
+@app_commands.describe(name="Season name, e.g. 'NeuroSeason 1'")
+async def neuroseason_create_slash(interaction: discord.Interaction, name: str):
+    if not await _require_admin(interaction): return
+    await neuroseason.handle_create(interaction, name)
+
+
+@neuroseason_group.command(name="join", description="Sign up for a season that's taking signups")
+@app_commands.describe(season="Which season", player="Player IGN")
+@app_commands.autocomplete(season=season_autocomplete, player=player_autocomplete)
+async def neuroseason_join_slash(interaction: discord.Interaction, season: int, player: str):
+    await neuroseason.handle_join(interaction, season, player)
+
+
+@neuroseason_group.command(name="leave", description="Withdraw from a season before it starts")
+@app_commands.describe(season="Which season", player="Player IGN")
+@app_commands.autocomplete(season=season_autocomplete, player=season_member_autocomplete)
+async def neuroseason_leave_slash(interaction: discord.Interaction, season: int, player: str):
+    await neuroseason.handle_leave(interaction, season, player)
+
+
+@neuroseason_group.command(name="start", description="Close signups, draw the divisions and build the schedule")
+@app_commands.describe(season="Which season")
+@app_commands.autocomplete(season=season_autocomplete)
+async def neuroseason_start_slash(interaction: discord.Interaction, season: int):
+    if not await _require_admin(interaction): return
+    await neuroseason.handle_start(interaction, season)
+
+
+@neuroseason_group.command(name="list", description="Every NeuroSeason and its status")
+async def neuroseason_list_slash(interaction: discord.Interaction):
+    await neuroseason.handle_list(interaction)
+
+
+@neuroseason_group.command(name="standings", description="Division-by-division standings for a season")
+@app_commands.describe(season="Which season", conference="Limit to one conference",
+                       division="Limit to one division")
+@app_commands.autocomplete(season=season_autocomplete, division=season_division_autocomplete)
+@app_commands.choices(conference=[
+    app_commands.Choice(name=c, value=c) for c in neuroseason.CONFERENCES
+])
+async def neuroseason_standings_slash(interaction: discord.Interaction, season: int,
+                                      conference: str = None, division: str = None):
+    await neuroseason.handle_standings(interaction, season, conference, division)
+
+
+@neuroseason_group.command(name="schedule", description="A season's matchups, optionally for one player or week")
+@app_commands.describe(season="Which season", player="Only this player's matchups",
+                       week="Only this week")
+@app_commands.autocomplete(season=season_autocomplete, player=season_member_autocomplete)
+async def neuroseason_schedule_slash(interaction: discord.Interaction, season: int,
+                                     player: str = None, week: int = None):
+    await neuroseason.handle_schedule(interaction, season, player, week)
+
+
+@neuroseason_group.command(name="bracket", description="The playoff bracket for a season")
+@app_commands.describe(season="Which season")
+@app_commands.autocomplete(season=season_autocomplete)
+async def neuroseason_bracket_slash(interaction: discord.Interaction, season: int):
+    await neuroseason.handle_bracket(interaction, season)
+
+
+@neuroseason_group.command(name="advance", description="Force a season to move on if a finished round didn't")
+@app_commands.describe(season="Which season")
+@app_commands.autocomplete(season=season_autocomplete)
+async def neuroseason_advance_slash(interaction: discord.Interaction, season: int):
+    """
+    Manual fallback only. The playoffs open themselves when the last regular
+    season match is reported, and each round generates the next one the same
+    way — this exists for the case where that automatic step didn't happen
+    (a result corrected after the fact, say), and is a no-op when the current
+    stage still has matches outstanding.
+    """
+    if not await _require_admin(interaction): return
+    lang = i18n.resolve_lang(interaction)
+    await interaction.response.defer()
+    note = await neuroseason.advance_season(season, lang)
+    await interaction.followup.send(note or i18n.t('neuroseason.advance.nothing', lang))
+
+
+tree.add_command(neuroseason_group)
+
+
+@tree.command(name="seasonmatch", description="Log a played NeuroSeason matchup, from a screenshot or by hand")
+@app_commands.describe(
+    season="Which season",
+    match="The match number shown in /neuroseason schedule",
+    left_player="The player on the LEFT of the screenshot (either player, if there's no screenshot)",
+    right_player="The player on the RIGHT of the screenshot (the other player)",
+    screenshot="Optional — the Head to Head Arena 'Game Stats' screen. Leave it off to enter the stats by hand.",
+)
+@app_commands.autocomplete(season=season_autocomplete,
+                           left_player=season_match_player_autocomplete,
+                           right_player=season_match_player_autocomplete)
+async def seasonmatch_slash(interaction: discord.Interaction, season: int, match: int,
+                            left_player: str, right_player: str,
+                            screenshot: discord.Attachment = None):
+    await neuroseason.handle_seasonmatch(interaction, season, match,
+                                         left_player, right_player, screenshot)
+
+
+@tree.command(name="seasonstats", description="A player's NeuroSeason stats, for one season or their whole career")
+@app_commands.describe(player="Player IGN", season="Leave blank for every season")
+@app_commands.autocomplete(player=player_autocomplete, season=season_autocomplete)
+async def seasonstats_slash(interaction: discord.Interaction, player: str, season: int = None):
+    await neuroseason.handle_seasonstats(interaction, player, season)
+
+
 class RegisterModal(Modal, title="Register New Player"):
     def __init__(self, team_id: str, lang: str = 'en'):
         super().__init__()
@@ -3099,9 +3321,16 @@ async def weights_slash(interaction: discord.Interaction,
 # /manual — ephemeral command reference
 # ============================================================================
 
+# One colour per manual page. This list is indexed by page number, so it
+# MUST have at least as many entries as i18n.MANUAL_PAGE_KEYS — a page with
+# no colour raised IndexError inside _build_embed(), which meant the Next
+# button's interaction never got a response at all and the bot simply
+# appeared to freeze rather than erroring visibly. The modulo below makes a
+# future page short of a colour wrap around instead of killing the command;
+# the test that walks every page in every language is the real guard.
 MANUAL_PAGE_COLORS = [
     discord.Color.blue(), discord.Color.green(), discord.Color.dark_red(),
-    discord.Color.orange(), discord.Color.purple(),
+    discord.Color.orange(), discord.Color.purple(), discord.Color.teal(),
 ]
 
 
@@ -3136,7 +3365,7 @@ class ManualView(View):
         embed    = discord.Embed(
             title=i18n.t(f'{page_key}.title', self.lang),
             description=i18n.t('manual.nav.footer', self.lang, page=self.page + 1, total=total),
-            color=MANUAL_PAGE_COLORS[self.page]
+            color=MANUAL_PAGE_COLORS[self.page % len(MANUAL_PAGE_COLORS)]
         )
         for name, value in i18n.tlist(f'{page_key}.fields', self.lang):
             embed.add_field(name=f"`{name}`", value=value, inline=False)

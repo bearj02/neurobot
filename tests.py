@@ -16,6 +16,8 @@ import os
 import sys
 import tempfile
 import unittest
+import random
+from collections import Counter, defaultdict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # DB_PATH is set per-test in setup_db() — do NOT set it here at module level
@@ -216,6 +218,10 @@ sys.modules["discord.errors"]            = _discord.errors
 sys.modules["discord.gateway"]           = _discord.gateway
 sys.modules["aiohttp"]                   = _types.ModuleType("aiohttp")
 sys.modules["aiohttp"].ClientConnectorError = Exception
+# agent.py annotates with aiohttp.ClientSession at import time, so the stub
+# needs the name to exist even though no test ever opens a real session —
+# without it, importing agent.py at all raises AttributeError.
+sys.modules["aiohttp"].ClientSession = MagicMock
 import discord  # noqa: E402  (must come after stub registration above)
 from discord.ext import commands  # noqa: E402
 
@@ -527,6 +533,16 @@ async def setup_db():
     os.environ["DB_PATH"] = ":memory:"
     await _patched_init()
     for stmt in SCHEMA.strip().split(";"):
+        s = stmt.strip()
+        if s:
+            await db.execute(s)
+    # The neuroseason tables come straight from db.NEUROSEASON_SCHEMA rather
+    # than being copied into SCHEMA above. That constant is what actually
+    # creates them in production (there's no shell access to create a table
+    # any other way), so building the test database from the same string is
+    # the only way a schema change can't silently pass tests while breaking
+    # the live bot.
+    for stmt in db.NEUROSEASON_SCHEMA.strip().split(";"):
         s = stmt.strip()
         if s:
             await db.execute(s)
@@ -7130,6 +7146,1206 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
             row = await db.fetchone(
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
             self.assertIsNotNone(row, f'{tid} was skipped after an earlier team failed')
+
+
+
+# ---------------------------------------------------------------------------
+# Test: /manual paging
+# ---------------------------------------------------------------------------
+
+class TestManualPages(unittest.TestCase):
+    """Every page has to actually build.
+
+    A sixth page was added without extending MANUAL_PAGE_COLORS, which is
+    indexed by page number — so paging onto it raised IndexError inside the
+    Next button's callback. An exception there means the interaction never
+    gets a response at all, so the symptom wasn't an error message, it was
+    the bot going silent. Nothing in the suite walked the pages, so nothing
+    caught it.
+    """
+
+    def test_every_page_builds_an_embed_in_every_language(self):
+        import optimized_bot
+        import i18n
+        for lang in i18n.SUPPORTED_LANGS:
+            view = optimized_bot.ManualView(lang)
+            for page in range(len(i18n.MANUAL_PAGE_KEYS)):
+                view.page = page
+                view._rebuild()          # the nav buttons for this page
+                view._build_embed()      # IndexError lives here
+
+    def test_there_is_a_colour_for_every_page(self):
+        """The modulo in _build_embed stops a missing colour from being fatal,
+        but a page silently reusing page 1's colour is still wrong."""
+        import optimized_bot
+        import i18n
+        self.assertGreaterEqual(len(optimized_bot.MANUAL_PAGE_COLORS),
+                                len(i18n.MANUAL_PAGE_KEYS))
+
+    def test_page_titles_agree_with_how_many_pages_there_are(self):
+        """Each title carries its own '(n/total)' counter, which has to be
+        renumbered whenever a page is added — an easy thing to miss."""
+        import i18n
+        total = len(i18n.MANUAL_PAGE_KEYS)
+        for n, key in enumerate(i18n.MANUAL_PAGE_KEYS, start=1):
+            for lang in i18n.SUPPORTED_LANGS:
+                title = i18n.TRANSLATIONS[f'{key}.title'][lang]
+                self.assertIn(f"({n}/{total})", title,
+                              f"{key} [{lang}] says {title!r}, expected ({n}/{total})")
+
+    def test_no_page_exceeds_discord_embed_limits(self):
+        import i18n
+        for key in i18n.MANUAL_PAGE_KEYS:
+            for lang in i18n.SUPPORTED_LANGS:
+                fields = i18n.TRANSLATIONS[f'{key}.fields'][lang]
+                self.assertLessEqual(len(fields), 25, f"{key} [{lang}] has too many fields")
+                for name, value in fields:
+                    self.assertLessEqual(len(name), 256, f"{key} [{lang}] {name}")
+                    self.assertLessEqual(len(value), 1024, f"{key} [{lang}] {name}")
+
+
+# ---------------------------------------------------------------------------
+# Test: NeuroSeason gamemode
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    """
+    A hand-written interaction response, NOT a MagicMock.
+
+    A MagicMock auto-creates any attribute you touch, which is exactly how a
+    real AttributeError crash in the /ladder manual-match flow got through a
+    passing test suite (see CLAUDE.md). This stub defines only what a real
+    InteractionResponse actually has, so touching something that doesn't
+    exist genuinely raises.
+    """
+    def __init__(self):
+        self._done = False
+        self.messages = []
+        self.modals = []
+        self.edits = []
+
+    def is_done(self):
+        return self._done
+
+    async def defer(self, **kwargs):
+        self._done = True
+
+    async def send_message(self, content=None, *, embed=None, view=None, ephemeral=False):
+        self._done = True
+        self.messages.append({'content': content, 'embed': embed, 'view': view})
+
+    async def send_modal(self, modal):
+        self._done = True
+        self.modals.append(modal)
+
+    async def edit_message(self, *, content=None, embed=None, view=None):
+        self.edits.append({'content': content, 'embed': embed, 'view': view})
+
+
+class _FakeFollowup:
+    """Mirrors discord.Webhook's surface for this flow — send() and nothing
+    else. Notably it has no is_done(); code that mistakes a followup for a
+    response object has to fail here the way it would in production."""
+    def __init__(self):
+        self.messages = []
+
+    async def send(self, content=None, *, embed=None, view=None, ephemeral=False):
+        self.messages.append({'content': content, 'embed': embed, 'view': view})
+
+
+class _FakeInteraction:
+    def __init__(self):
+        self.response = _FakeResponse()
+        self.followup = _FakeFollowup()
+        self.locale = discord.Locale.american_english
+        # A real namespace object, not a MagicMock: a MagicMock invents any
+        # attribute you ask it for, so an autocomplete reading a parameter
+        # the user hasn't filled in yet would get a truthy mock instead of
+        # the miss it gets in production.
+        self.namespace = types.SimpleNamespace()
+        self.data = {}
+        self.channel = MagicMock()
+
+    def texts(self):
+        """Every user-visible string this interaction produced, in order."""
+        out = []
+        for m in self.response.messages + self.followup.messages + self.response.edits:
+            if m.get('content'):
+                out.append(m['content'])
+        return out
+
+
+def _members(n):
+    return [{'player_id': i + 1, 'ign': f'P{i + 1}'} for i in range(n)]
+
+
+def _placed(n, seed=1):
+    import neuroseason as ns
+    layout = ns.plan_layout(n)
+    return layout, ns.place_members(_members(n), layout, random.Random(seed))
+
+
+class TestNeuroSeasonLogic(unittest.TestCase):
+    """The pure scheduling/standings/seeding rules — no database, no Discord."""
+
+    def setUp(self):
+        import neuroseason
+        self.ns = neuroseason
+
+    # --- layout ---
+
+    def test_thirty_two_members_gives_the_nfl_layout(self):
+        layout = self.ns.plan_layout(32)
+        self.assertEqual(layout['divisions_per_conf'], 4)
+        self.assertEqual(len(layout['conferences']), 2)
+        for conf in layout['conferences']:
+            self.assertEqual([d['size'] for d in conf['divisions']], [4, 4, 4, 4])
+
+    def test_layout_scales_down_without_making_a_division_of_two(self):
+        """Fewer signups means fewer divisions, not thinner ones — a division
+        of two has only one rival in it, which makes the division schedule
+        and the division tiebreaker close to meaningless."""
+        for n in range(6, 33):
+            layout = self.ns.plan_layout(n)
+            sizes = [d['size'] for c in layout['conferences'] for d in c['divisions']]
+            self.assertGreaterEqual(min(sizes), 3, f"n={n} produced a division of {min(sizes)}")
+            self.assertEqual(sum(sizes), n, f"n={n} lost or invented members")
+
+    def test_layout_splits_an_odd_field_as_evenly_as_possible(self):
+        layout = self.ns.plan_layout(31)
+        sizes = [sum(d['size'] for d in c['divisions']) for c in layout['conferences']]
+        self.assertEqual(sorted(sizes), [15, 16])
+
+    def test_too_small_a_field_is_refused_rather_than_fudged(self):
+        with self.assertRaises(ValueError):
+            self.ns.plan_layout(3)
+
+    # --- schedule ---
+
+    def test_every_member_plays_exactly_eighteen_at_every_field_size(self):
+        """The whole point of the chosen sub-32 policy: 18 games each, no
+        matter how many actually signed up."""
+        for n in (4, 5, 6, 8, 10, 12, 16, 17, 20, 24, 28, 31, 32):
+            layout, placed = _placed(n, seed=n)
+            schedule = self.ns.build_schedule(placed, games=18, rng=random.Random(n))
+            played = Counter()
+            for m in schedule:
+                played[m['home_player_id']] += 1
+                played[m['away_player_id']] += 1
+            self.assertEqual(len(played), n, f"n={n}: not every member got a schedule")
+            self.assertEqual(set(played.values()), {18},
+                             f"n={n}: game counts were {sorted(set(played.values()))}")
+
+    def test_full_field_follows_the_requested_six_four_four_two_two_shape(self):
+        """At 32 the structure is exactly as specified: division rivals twice
+        (6), a full division in-conference (4) plus two more conference games,
+        and a full division cross-conference (4) plus two more."""
+        layout, placed = _placed(32, seed=7)
+        schedule = self.ns.build_schedule(placed, games=18, rng=random.Random(7))
+        conf = {m['player_id']: m['conference'] for m in placed}
+        div = {m['player_id']: m['division'] for m in placed}
+
+        for member in placed:
+            pid = member['player_id']
+            opponents = []
+            for m in schedule:
+                if m['home_player_id'] == pid:
+                    opponents.append(m['away_player_id'])
+                elif m['away_player_id'] == pid:
+                    opponents.append(m['home_player_id'])
+            counts = Counter(
+                'div' if div[o] == div[pid] else
+                ('conf' if conf[o] == conf[pid] else 'cross')
+                for o in opponents
+            )
+            self.assertEqual(counts['div'], 6, f"{pid} played {counts['div']} division games")
+            self.assertEqual(counts['conf'], 6, f"{pid} played {counts['conf']} other conference games")
+            self.assertEqual(counts['cross'], 6, f"{pid} played {counts['cross']} cross-conference games")
+            # Every division rival, home and away — not one of them three times
+            # while another goes unplayed.
+            rivals = Counter(o for o in opponents if div[o] == div[pid])
+            self.assertEqual(sorted(rivals.values()), [2, 2, 2])
+
+    def test_nobody_is_booked_twice_in_the_same_week(self):
+        for n in (8, 17, 32):
+            layout, placed = _placed(n, seed=n)
+            schedule = self.ns.build_schedule(placed, games=18, rng=random.Random(n))
+            by_week = defaultdict(set)
+            for m in schedule:
+                for pid in (m['home_player_id'], m['away_player_id']):
+                    self.assertNotIn(pid, by_week[m['week']],
+                                     f"n={n}: {pid} plays twice in week {m['week']}")
+                    by_week[m['week']].add(pid)
+
+    def test_the_same_season_always_generates_the_same_schedule(self):
+        """Seeded off the season id, like the seeded background art in
+        sheet_image — an unseeded version would produce a different schedule
+        every time the same season was regenerated."""
+        layout, placed = _placed(20, seed=3)
+        first = self.ns.build_schedule(placed, games=18, rng=self.ns._season_rng(42))
+        second = self.ns.build_schedule(placed, games=18, rng=self.ns._season_rng(42))
+        self.assertEqual(first, second)
+
+    def test_schedule_refuses_rather_than_overshooting_the_game_count(self):
+        """A field big enough that the structured rounds alone exceed the
+        requested game count has to say so, not quietly hand someone 22
+        games in an 18-game season."""
+        layout, placed = _placed(32, seed=1)
+        with self.assertRaises(ValueError):
+            self.ns.build_schedule(placed, games=10, rng=random.Random(1))
+
+    # --- standings and tiebreakers ---
+
+    def _match(self, num, home, away, hs=None, as_=None, week=1):
+        return {'match_num': num, 'week': week, 'stage': 'regular', 'round': None,
+                'home_player_id': home, 'away_player_id': away,
+                'home_score': hs, 'away_score': as_,
+                'winner_player_id': (home if (hs or 0) > (as_ or 0) else
+                                     away if (as_ or 0) > (hs or 0) else None),
+                'status': 'complete' if hs is not None else 'pending'}
+
+    def test_standings_count_division_and_conference_records_separately(self):
+        members = [
+            {'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
+            {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
+            {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro North'},
+            {'player_id': 4, 'ign': 'D', 'conference': 'Verse', 'division': 'Verse East'},
+        ]
+        matches = [
+            self._match(1, 1, 2, 24, 6),   # division win for A
+            self._match(2, 1, 3, 10, 20),  # conference (non-division) loss
+            self._match(3, 1, 4, 30, 0),   # cross-conference win
+            self._match(4, 2, 3, 7, 7),    # a tie, for B and C
+        ]
+        rows = {r['player_id']: r for r in self.ns.compute_standings(members, matches)}
+        a = rows[1]
+        self.assertEqual((a['wins'], a['losses'], a['ties']), (2, 1, 0))
+        self.assertEqual((a['div_wins'], a['div_losses']), (1, 0))
+        self.assertEqual((a['conf_wins'], a['conf_losses']), (1, 1))
+        self.assertEqual((a['points_for'], a['points_against']), (64, 26))
+        self.assertEqual((rows[2]['ties'], rows[2]['conf_ties']), (1, 1))
+
+    def test_unplayed_matches_are_not_losses(self):
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'}]
+        rows = self.ns.compute_standings(members, [self._match(1, 1, 2)])
+        self.assertEqual([r['games'] for r in rows], [0, 0])
+
+    def test_head_to_head_breaks_a_tie_before_points_for(self):
+        """Both 1-1, but B beat A, so B is ahead even though A scored far
+        more points across the two games."""
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro North'}]
+        matches = [
+            self._match(1, 1, 2, 0, 3),     # B beats A head-to-head
+            self._match(2, 1, 3, 60, 0),    # A piles on points elsewhere
+            self._match(3, 2, 3, 0, 40),
+        ]
+        standings = [r for r in self.ns.compute_standings(members, matches)
+                     if r['player_id'] in (1, 2)]
+        ranked = self.ns.rank_rows(standings, matches)
+        self.assertEqual([r['ign'] for r in ranked], ['B', 'A'])
+
+    def test_division_record_breaks_a_tie_when_head_to_head_is_level(self):
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro East'}]
+        matches = [
+            self._match(1, 1, 2, 10, 3),   # A beats B
+            self._match(2, 2, 1, 10, 3),   # B beats A — head-to-head level
+            self._match(3, 1, 3, 20, 0),   # A's extra division win
+            self._match(4, 3, 2, 20, 0),   # B's matching division loss
+        ]
+        standings = [r for r in self.ns.compute_standings(members, matches)
+                     if r['player_id'] in (1, 2)]
+        ranked = self.ns.rank_rows(standings, matches)
+        self.assertEqual([r['ign'] for r in ranked], ['A', 'B'])
+
+    def test_points_for_is_the_last_resort(self):
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro North'}]
+        matches = [self._match(1, 1, 2, 30, 24), self._match(2, 2, 1, 30, 29)]
+        ranked = self.ns.rank_rows(self.ns.compute_standings(members, matches), matches)
+        self.assertEqual([r['ign'] for r in ranked], ['A', 'B'])  # 59 points to 54
+
+    # --- playoffs ---
+
+    def test_playoff_field_is_sixteen_whenever_the_field_can_hold_it(self):
+        for n in (16, 17, 20, 24, 31, 32):
+            self.assertEqual(self.ns.playoff_field_size(n), 16, f"n={n}")
+
+    def test_a_field_under_sixteen_gets_the_largest_clean_bracket(self):
+        """16 teams cannot be drawn out of 12, and padding the bracket with
+        ghosts would put fake byes in a real round."""
+        self.assertEqual(self.ns.playoff_field_size(12), 8)
+        self.assertEqual(self.ns.playoff_field_size(8), 8)
+        self.assertEqual(self.ns.playoff_field_size(7), 4)
+        self.assertEqual(self.ns.playoff_field_size(4), 4)
+
+    def test_division_winners_seed_above_better_wildcards(self):
+        """NFL rule, and the reason seeding isn't just 'sort the conference by
+        record': P1 wins the East at 1-2 while P4 misses the North at 2-1, so
+        P1 must still be seeded above P4. Sorting the conference purely on
+        record would put P4 second, which is the bug this pins."""
+        members = [
+            {'player_id': 1, 'ign': 'P1', 'conference': 'Neuro', 'division': 'Neuro East'},
+            {'player_id': 2, 'ign': 'P2', 'conference': 'Neuro', 'division': 'Neuro East'},
+            {'player_id': 3, 'ign': 'P3', 'conference': 'Neuro', 'division': 'Neuro North'},
+            {'player_id': 4, 'ign': 'P4', 'conference': 'Neuro', 'division': 'Neuro North'},
+            {'player_id': 9, 'ign': 'V1', 'conference': 'Verse', 'division': 'Verse East'},
+            {'player_id': 10, 'ign': 'V2', 'conference': 'Verse', 'division': 'Verse East'},
+        ]
+        matches = [
+            self._match(1, 3, 4, 21, 0),    # P3 3-0, wins the North
+            self._match(2, 3, 9, 21, 0),
+            self._match(3, 3, 10, 21, 0),
+            self._match(4, 4, 9, 17, 0),    # P4 2-1 — better record than P1
+            self._match(5, 4, 10, 17, 0),
+            self._match(6, 1, 2, 10, 0),    # P1 1-2, but wins the East
+            self._match(7, 9, 1, 24, 0),
+            self._match(8, 10, 1, 24, 0),
+            self._match(9, 9, 2, 24, 0),    # P2 0-3
+            self._match(10, 10, 2, 24, 0),
+        ]
+        standings = self.ns.compute_standings(members, matches)
+        by_record = self.ns.rank_rows([r for r in standings if r['conference'] == 'Neuro'], matches)
+        self.assertEqual([r['ign'] for r in by_record], ['P3', 'P4', 'P1', 'P2'],
+                         "fixture no longer discriminates: P4 must out-record P1")
+
+        seeded = self.ns.compute_seeds(standings, matches, playoff_teams=8)
+        self.assertEqual([r['ign'] for r in seeded['Neuro']], ['P3', 'P1', 'P4', 'P2'])
+        self.assertEqual([r['seed'] for r in seeded['Neuro']], [1, 2, 3, 4])
+
+    def test_bracket_reseeds_best_against_worst(self):
+        remaining = {'Neuro': [{'player_id': i, 'seed': i} for i in range(1, 9)],
+                     'Verse': [{'player_id': 10 + i, 'seed': i} for i in range(1, 9)]}
+        matches = self.ns.build_playoff_round(remaining)
+        self.assertEqual(len(matches), 8)
+        self.assertTrue(all(m['round'] == 'wildcard' for m in matches))
+        neuro = [(m['home_player_id'], m['away_player_id'])
+                 for m in matches if m['conference'] == 'Neuro']
+        self.assertEqual(neuro, [(1, 8), (2, 7), (3, 6), (4, 5)])
+
+    def test_last_one_standing_in_each_conference_meet_in_the_final(self):
+        matches = self.ns.build_playoff_round(
+            {'Neuro': [{'player_id': 1, 'seed': 1}], 'Verse': [{'player_id': 2, 'seed': 3}]})
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['round'], 'final')
+        self.assertIsNone(matches[0]['conference'])
+
+
+class TestNeuroSeasonDB(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import neuroseason
+        self.ns = neuroseason
+        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('NP','SeasonA','A')")
+        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('ND','SeasonB','A')")
+        self.a = (await db.get_player('SeasonA'))['id']
+        self.b = (await db.get_player('SeasonB'))['id']
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def test_schema_creation_is_idempotent(self):
+        """It runs on every single startup forever — rerunning it must be a
+        no-op, not an error, and must not wipe anything already there."""
+        season = await db.create_neuro_season("Rerun")
+        for stmt in db.NEUROSEASON_SCHEMA.strip().split(";"):
+            if stmt.strip():
+                await db.execute(stmt.strip())
+        self.assertIsNotNone(await db.get_neuro_season(season['id']))
+
+    async def test_signing_up_twice_is_reported_not_duplicated(self):
+        season = await db.create_neuro_season("S")
+        self.assertTrue(await db.add_neuro_season_member(season['id'], self.a, 'NP'))
+        self.assertFalse(await db.add_neuro_season_member(season['id'], self.a, 'NP'))
+        self.assertEqual(len(await db.get_neuro_season_members(season['id'])), 1)
+
+    async def test_member_keeps_the_league_they_joined_under(self):
+        """Same historical-attribution principle as game_scores.team_id: a
+        transfer after signup must not rewrite which league the player was
+        representing when they joined."""
+        season = await db.create_neuro_season("S")
+        await db.add_neuro_season_member(season['id'], self.a, 'NP')
+        await db.execute("UPDATE players SET team_id='ND' WHERE id=?", (self.a,))
+        member = await db.get_neuro_season_member(season['id'], self.a)
+        self.assertEqual(member['team_id'], 'NP')
+
+    async def test_recording_a_result_writes_both_sides_and_the_winner(self):
+        season = await db.create_neuro_season("S")
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
+        await db.record_neuro_season_result(
+            season['id'], 1,
+            {'points': 24, 'rushing_yds': 19, 'passing_yds': 203, 'kick_return_yds': 51,
+             'touchdowns': 3, 'turnovers': 0, 'field_goals': 0},
+            {'points': 6, 'rushing_yds': 0, 'passing_yds': 52, 'kick_return_yds': 33,
+             'touchdowns': 1, 'turnovers': 2, 'field_goals': 0})
+
+        match = await db.get_neuro_season_match(season['id'], 1)
+        self.assertEqual((match['home_score'], match['away_score']), (24, 6))
+        self.assertEqual(match['winner_player_id'], self.a)
+        self.assertEqual(match['status'], 'complete')
+
+        stats = await db.get_neuro_season_player_stats(season['id'], self.a)
+        self.assertEqual(stats['wins'], 1)
+        self.assertEqual(stats['passing_yds'], 203)
+        self.assertEqual(stats['points_against'], 6)
+        loser = await db.get_neuro_season_player_stats(season['id'], self.b)
+        self.assertEqual((loser['losses'], loser['turnovers']), (1, 2))
+
+    async def test_re_reporting_a_match_replaces_it_instead_of_doubling_it(self):
+        """The duplicate-row bug this codebase has now hit twice (game_scores,
+        siege_scores). A corrected screenshot must overwrite the first
+        reading, not add a second one that inflates every total."""
+        season = await db.create_neuro_season("S")
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
+        await db.record_neuro_season_result(season['id'], 1, {'points': 24}, {'points': 6})
+        await db.record_neuro_season_result(season['id'], 1, {'points': 14}, {'points': 6})
+
+        rows = await db.fetchall(
+            "SELECT * FROM neuro_season_stats WHERE season_id=? AND player_id=?",
+            (season['id'], self.a))
+        self.assertEqual(len(rows), 1)
+        stats = await db.get_neuro_season_player_stats(season['id'], self.a)
+        self.assertEqual((stats['games'], stats['points']), (1, 14))
+
+    async def test_a_corrected_result_can_flip_the_winner(self):
+        season = await db.create_neuro_season("S")
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
+        await db.record_neuro_season_result(season['id'], 1, {'points': 24}, {'points': 6})
+        await db.record_neuro_season_result(season['id'], 1, {'points': 6}, {'points': 24})
+        match = await db.get_neuro_season_match(season['id'], 1)
+        self.assertEqual(match['winner_player_id'], self.b)
+        self.assertEqual((await db.get_neuro_season_player_stats(season['id'], self.a))['wins'], 0)
+
+    async def test_a_tie_has_no_winner_and_counts_as_a_tie(self):
+        season = await db.create_neuro_season("S")
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
+        await db.record_neuro_season_result(season['id'], 1, {'points': 7}, {'points': 7})
+        match = await db.get_neuro_season_match(season['id'], 1)
+        self.assertIsNone(match['winner_player_id'])
+        self.assertEqual((await db.get_neuro_season_player_stats(season['id'], self.a))['ties'], 1)
+
+    async def test_playoff_matches_continue_the_regular_season_numbering(self):
+        """A match number is what a player types into /seasonmatch, so it has
+        to identify exactly one match across the whole season."""
+        season = await db.create_neuro_season("S")
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1},
+            {'home_player_id': self.b, 'away_player_id': self.a, 'week': 2}])
+        await db.insert_neuro_season_matches(season['id'], [
+            {'home_player_id': self.a, 'away_player_id': self.b,
+             'stage': 'playoff', 'round': 'final'}])
+        nums = [m['match_num'] for m in await db.get_neuro_season_matches(season['id'])]
+        self.assertEqual(sorted(nums), [1, 2, 3])
+
+    async def test_career_stats_span_seasons(self):
+        for name in ("One", "Two"):
+            season = await db.create_neuro_season(name)
+            await db.insert_neuro_season_matches(season['id'], [
+                {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
+            await db.record_neuro_season_result(
+                season['id'], 1, {'points': 21, 'touchdowns': 3}, {'points': 0})
+        career = await db.get_neuro_season_player_career(self.a)
+        self.assertEqual(len(career), 2)
+        self.assertEqual([row['wins'] for row in career], [1, 1])
+        self.assertEqual({row['season_name'] for row in career}, {"One", "Two"})
+
+
+class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
+    """The handlers and the automatic stage advancement, end to end."""
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import neuroseason
+        self.ns = neuroseason
+        self.player_ids = []
+        for i in range(8):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+            self.player_ids.append((await db.get_player(f"NS{i}"))['id'])
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _season_with(self, count, name="Test Season"):
+        inter = _FakeInteraction()
+        await self.ns.handle_create(inter, name)
+        season = (await db.list_neuro_seasons())[0]
+        for i in range(count):
+            join = _FakeInteraction()
+            await self.ns.handle_join(join, season['id'], f"NS{i}")
+        return season
+
+    async def test_join_then_start_places_everyone_and_builds_a_schedule(self):
+        season = await self._season_with(8)
+        inter = _FakeInteraction()
+        await self.ns.handle_start(inter, season['id'])
+
+        members = await db.get_neuro_season_members(season['id'])
+        self.assertEqual(len(members), 8)
+        self.assertTrue(all(m['conference'] and m['division'] for m in members))
+        matches = await db.get_neuro_season_matches(season['id'])
+        self.assertEqual(len(matches), 8 * 18 // 2)
+        fresh = await db.get_neuro_season(season['id'])
+        self.assertEqual(fresh['status'], 'active')
+        self.assertEqual(fresh['playoff_teams'], 8)
+
+    async def test_signups_close_once_the_season_starts(self):
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        inter = _FakeInteraction()
+        await self.ns.handle_join(inter, season['id'], "NS0")
+        self.assertIn("closed", " ".join(inter.texts()).lower())
+
+    async def test_starting_with_too_few_members_is_refused(self):
+        season = await self._season_with(2)
+        inter = _FakeInteraction()
+        await self.ns.handle_start(inter, season['id'])
+        self.assertIn("at least", " ".join(inter.texts()))
+        self.assertEqual((await db.get_neuro_season(season['id']))['status'], 'signups')
+
+    async def test_a_full_season_creates_playoffs_then_crowns_a_champion(self):
+        """The whole arc: play every regular-season match, watch the bracket
+        appear on its own, play it out, and end with a champion recorded."""
+        season = await self._season_with(4)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        sid = season['id']
+
+        regular = await db.get_neuro_season_matches(sid, stage='regular')
+        for n, m in enumerate(regular):
+            # Deterministic, lopsided results so the standings have a clear
+            # order rather than a pile of ties to break.
+            home_pts = 30 if m['home_player_id'] % 2 == 0 else 3
+            await db.record_neuro_season_result(sid, m['match_num'],
+                                                {'points': home_pts}, {'points': 30 - home_pts})
+            if n < len(regular) - 1:
+                self.assertIsNone(await self.ns.advance_season(sid),
+                                  "playoffs opened before the regular season finished")
+
+        note = await self.ns.advance_season(sid)
+        self.assertIsNotNone(note)
+        fresh = await db.get_neuro_season(sid)
+        self.assertEqual(fresh['status'], 'playoffs')
+        seeded = [m for m in await db.get_neuro_season_members(sid) if m['seed']]
+        self.assertEqual(len(seeded), 4)
+
+        # Play the bracket out, round by round, letting each round generate
+        # the next one.
+        for _ in range(4):
+            pending = [m for m in await db.get_neuro_season_matches(sid, stage='playoff')
+                       if m['status'] != 'complete']
+            if not pending:
+                break
+            for m in pending:
+                await db.record_neuro_season_result(sid, m['match_num'],
+                                                    {'points': 21}, {'points': 7})
+            await self.ns.advance_season(sid)
+
+        done = await db.get_neuro_season(sid)
+        self.assertEqual(done['status'], 'complete')
+        self.assertIsNotNone(done['champion_player_id'])
+        final = [m for m in await db.get_neuro_season_matches(sid, stage='playoff')
+                 if m['round'] == 'final']
+        self.assertEqual(len(final), 1)
+        self.assertEqual(done['champion_player_id'], final[0]['winner_player_id'])
+
+    async def test_seasonmatch_rejects_players_who_arent_in_that_match(self):
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        match = (await db.get_neuro_season_matches(season['id']))[0]
+        outsider = next(ign for ign in (f"NS{i}" for i in range(8))
+                        if ign not in (match['home_ign'], match['away_ign']))
+
+        inter = _FakeInteraction()
+        await self.ns.handle_seasonmatch(inter, season['id'], match['match_num'],
+                                         match['home_ign'], outsider, MagicMock())
+        self.assertIn(str(match['match_num']), " ".join(inter.texts()))
+        # Rejected before ever deferring, so no screenshot was fetched and no
+        # result was written.
+        self.assertEqual((await db.get_neuro_season_match(
+            season['id'], match['match_num']))['status'], 'pending')
+
+    async def test_confirm_view_saves_the_left_and_right_columns_to_the_right_players(self):
+        """left/right describe the screenshot, not the fixture — if the away
+        player happens to be on the left, their column still has to land on
+        them."""
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        match = (await db.get_neuro_season_matches(season['id']))[0]
+        home = await db.get_player(match['home_ign'])
+        away = await db.get_player(match['away_ign'])
+
+        # Away player is the LEFT column, and wins.
+        view = self.ns.SeasonMatchConfirmView(
+            await db.get_neuro_season(season['id']), match, away, home,
+            {'points': 31, 'touchdowns': 4}, {'points': 10, 'touchdowns': 1})
+        await view._on_confirm(_FakeInteraction())
+
+        saved = await db.get_neuro_season_match(season['id'], match['match_num'])
+        self.assertEqual((saved['home_score'], saved['away_score']), (10, 31))
+        self.assertEqual(saved['winner_player_id'], away['id'])
+        self.assertEqual(
+            (await db.get_neuro_season_player_stats(season['id'], away['id']))['touchdowns'], 4)
+
+    async def test_the_score_can_be_corrected_before_anything_is_written(self):
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        match = (await db.get_neuro_season_matches(season['id']))[0]
+        home = await db.get_player(match['home_ign'])
+        away = await db.get_player(match['away_ign'])
+
+        view = self.ns.SeasonMatchConfirmView(
+            await db.get_neuro_season(season['id']), match, home, away,
+            {'points': 82}, {'points': 6})          # a misread leading digit
+        modal = self.ns.SeasonStatEditModal(view, 'left', 'score')
+        modal.inputs['points'].value = "32"
+        await modal.on_submit(_FakeInteraction())
+        self.assertEqual(view.left_stats['points'], 32)
+
+        # Still nothing saved — correcting the score is not confirming it.
+        self.assertEqual((await db.get_neuro_season_match(
+            season['id'], match['match_num']))['status'], 'pending')
+        await view._on_confirm(_FakeInteraction())
+        self.assertEqual((await db.get_neuro_season_match(
+            season['id'], match['match_num']))['home_score'], 32)
+
+    async def _pending_match(self, members=8):
+        """A started season plus its first pending match and both players."""
+        season = await self._season_with(members)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        match = (await db.get_neuro_season_matches(season['id']))[0]
+        return (await db.get_neuro_season(season['id']), match,
+                await db.get_player(match['home_ign']),
+                await db.get_player(match['away_ign']))
+
+    async def test_seasonmatch_without_a_screenshot_opens_the_editor_with_every_stat_blank(self):
+        """Players forget to screenshot. The match still happened, so it still
+        has to be reportable — with no picture to read, the same editor opens
+        with nothing filled in."""
+        season, match, home, away = await self._pending_match()
+        inter = _FakeInteraction()
+
+        import agent
+        called = []
+        real = agent.extract_season_match_from_screenshot
+        agent.extract_season_match_from_screenshot = lambda *a, **k: called.append(a)
+        try:
+            await self.ns.handle_seasonmatch(inter, season['id'], match['match_num'],
+                                             match['home_ign'], match['away_ign'], None)
+        finally:
+            agent.extract_season_match_from_screenshot = real
+
+        self.assertEqual(called, [], "the vision model was called with no screenshot to read")
+        sent = inter.followup.messages[0]
+        # No warning either: there was nothing to fail at reading, so an
+        # error note here would mean the extraction path ran anyway and
+        # tripped over the missing attachment.
+        self.assertIsNone(sent['content'], "an error note appeared for a screenshot never supplied")
+        view = sent['view']
+        self.assertIsInstance(view, self.ns.SeasonMatchConfirmView)
+        self.assertEqual(view.source, 'manual')
+        for field in db.SEASON_STAT_FIELDS:
+            self.assertIsNone(view.left_stats[field], field)
+            self.assertIsNone(view.right_stats[field], field)
+
+    async def test_every_stat_can_be_entered_by_hand_and_reaches_the_database(self):
+        """All seven stats for both players, typed in, with no screenshot
+        anywhere in the flow."""
+        season, match, home, away = await self._pending_match()
+        view = self.ns.SeasonMatchConfirmView(
+            season, match, home, away,
+            self.ns.blank_stats(), self.ns.blank_stats(), source='manual')
+
+        typed = {
+            'left':  {'points': '24', 'rushing_yds': '19', 'passing_yds': '203',
+                      'kick_return_yds': '51', 'touchdowns': '3', 'turnovers': '0',
+                      'field_goals': '0'},
+            'right': {'points': '6', 'rushing_yds': '0', 'passing_yds': '52',
+                      'kick_return_yds': '33', 'touchdowns': '1', 'turnovers': '2',
+                      'field_goals': '0'},
+        }
+        for side, values in typed.items():
+            for page_key, fields in self.ns.STAT_PAGES:
+                # Go through the select the way a user does, not by
+                # constructing the modal directly.
+                inter = _FakeInteraction()
+                inter.data = {'values': [f"{side}:{page_key}"]}
+                await view._on_edit_select(inter)
+                modal = inter.response.modals[0]
+                for field in fields:
+                    modal.inputs[field].value = values[field]
+                await modal.on_submit(_FakeInteraction())
+
+        await view._on_confirm(_FakeInteraction())
+
+        saved = await db.get_neuro_season_match(season['id'], match['match_num'])
+        self.assertEqual(saved['status'], 'complete')
+        self.assertEqual((saved['home_score'], saved['away_score']), (24, 6))
+        stats = await db.get_neuro_season_player_stats(season['id'], home['id'])
+        self.assertEqual(stats['passing_yds'], 203)
+        self.assertEqual(stats['kick_return_yds'], 51)
+        self.assertEqual(stats['touchdowns'], 3)
+        loser = await db.get_neuro_season_player_stats(season['id'], away['id'])
+        self.assertEqual((loser['turnovers'], loser['passing_yds']), (2, 52))
+
+    async def test_a_blank_box_stores_nothing_rather_than_a_zero(self):
+        """0 is a real value on this screen — 0 turnovers is a clean game. A
+        stat nobody entered must stay unknown, not become a fabricated 0."""
+        season, match, home, away = await self._pending_match()
+        view = self.ns.SeasonMatchConfirmView(
+            season, match, home, away,
+            self.ns.blank_stats(), self.ns.blank_stats(), source='manual')
+
+        modal = self.ns.SeasonStatEditModal(view, 'left', 'score')
+        modal.inputs['points'].value = "24"
+        modal.inputs['rushing_yds'].value = "0"     # genuinely zero
+        modal.inputs['passing_yds'].value = ""      # genuinely unknown
+        modal.inputs['kick_return_yds'].value = "  "
+        await modal.on_submit(_FakeInteraction())
+
+        self.assertEqual(view.left_stats['rushing_yds'], 0)
+        self.assertIsNone(view.left_stats['passing_yds'])
+        self.assertIsNone(view.left_stats['kick_return_yds'])
+
+    async def test_a_typo_in_one_box_rejects_the_page_without_half_applying_it(self):
+        season, match, home, away = await self._pending_match()
+        view = self.ns.SeasonMatchConfirmView(
+            season, match, home, away,
+            self.ns.blank_stats(), self.ns.blank_stats(), source='manual')
+
+        modal = self.ns.SeasonStatEditModal(view, 'left', 'score')
+        modal.inputs['points'].value = "24"
+        modal.inputs['rushing_yds'].value = "19"
+        modal.inputs['passing_yds'].value = "2o3"   # letter o, not a zero
+        inter = _FakeInteraction()
+        await modal.on_submit(inter)
+
+        self.assertIn("2o3", " ".join(inter.texts()))
+        self.assertIsNone(view.left_stats['points'], "an earlier box was applied anyway")
+        self.assertIsNone(view.left_stats['rushing_yds'])
+
+    async def test_a_negative_stat_is_refused(self):
+        season, match, home, away = await self._pending_match()
+        view = self.ns.SeasonMatchConfirmView(
+            season, match, home, away,
+            self.ns.blank_stats(), self.ns.blank_stats(), source='manual')
+        modal = self.ns.SeasonStatEditModal(view, 'left', 'counts')
+        modal.inputs['touchdowns'].value = "-2"
+        inter = _FakeInteraction()
+        await modal.on_submit(inter)
+        self.assertTrue(inter.texts())
+        self.assertIsNone(view.left_stats['touchdowns'])
+
+    async def test_confirm_refuses_until_both_scores_are_entered(self):
+        """Saving with a score missing would record it as 0 and hand someone a
+        loss they didn't play."""
+        season, match, home, away = await self._pending_match()
+        view = self.ns.SeasonMatchConfirmView(
+            season, match, home, away,
+            dict(self.ns.blank_stats(), points=24), self.ns.blank_stats(), source='manual')
+
+        inter = _FakeInteraction()
+        await view._on_confirm(inter)
+        self.assertTrue(inter.texts())
+        self.assertEqual((await db.get_neuro_season_match(
+            season['id'], match['match_num']))['status'], 'pending')
+
+        # Fill the missing side in and it saves.
+        modal = self.ns.SeasonStatEditModal(view, 'right', 'score')
+        modal.inputs['points'].value = "6"
+        await modal.on_submit(_FakeInteraction())
+        await view._on_confirm(_FakeInteraction())
+        self.assertEqual((await db.get_neuro_season_match(
+            season['id'], match['match_num']))['status'], 'complete')
+
+    async def test_an_unreadable_screenshot_falls_back_to_manual_entry(self):
+        """A transient API failure must not mean 'you can't report this match
+        at all' when there's a perfectly good manual path one message away."""
+        season, match, home, away = await self._pending_match()
+
+        import agent
+        real = agent.extract_season_match_from_screenshot
+
+        async def boom(*a, **k):
+            raise ValueError("Haiku API error 529")
+
+        agent.extract_season_match_from_screenshot = boom
+        inter = _FakeInteraction()
+        try:
+            await self.ns.handle_seasonmatch(inter, season['id'], match['match_num'],
+                                             match['home_ign'], match['away_ign'], MagicMock())
+        finally:
+            agent.extract_season_match_from_screenshot = real
+
+        sent = inter.followup.messages[0]
+        self.assertIsInstance(sent['view'], self.ns.SeasonMatchConfirmView)
+        self.assertEqual(sent['view'].source, 'manual')
+        self.assertIn("529", sent['content'])
+
+    async def test_a_screenshot_missing_a_score_still_opens_the_editor(self):
+        """Half-read is not unusable — keep what was read and ask for the
+        rest, rather than throwing the whole extraction away."""
+        season, match, home, away = await self._pending_match()
+
+        import agent
+        real = agent.extract_season_match_from_screenshot
+
+        async def half(*a, **k):
+            return {'left': {'points': 24, 'touchdowns': 3},
+                    'right': {'points': None, 'touchdowns': 1}}
+
+        agent.extract_season_match_from_screenshot = half
+        inter = _FakeInteraction()
+        try:
+            await self.ns.handle_seasonmatch(inter, season['id'], match['match_num'],
+                                             match['home_ign'], match['away_ign'], MagicMock())
+        finally:
+            agent.extract_season_match_from_screenshot = real
+
+        sent = inter.followup.messages[0]
+        view = sent['view']
+        self.assertEqual(view.left_stats['points'], 24)
+        self.assertEqual(view.right_stats['touchdowns'], 1)
+        self.assertIsNotNone(sent['content'], "no prompt to fill in the missing score")
+
+    async def test_left_and_right_autocomplete_offer_only_the_match_two_players(self):
+        """Those are the only two values the command can accept, so offering
+        the whole roster just invites a pick the command then rejects."""
+        import optimized_bot
+        season, match, home, away = await self._pending_match()
+
+        inter = _FakeInteraction()
+        inter.namespace.season = season['id']
+        inter.namespace.match = match['match_num']
+        choices = await optimized_bot.season_match_player_autocomplete(inter, "")
+        self.assertEqual({c.value for c in choices}, {match['home_ign'], match['away_ign']})
+
+        # And it still filters as they type.
+        typed = await optimized_bot.season_match_player_autocomplete(
+            inter, match['home_ign'][:3])
+        self.assertIn(match['home_ign'], {c.value for c in typed})
+
+    async def test_player_autocomplete_falls_back_to_the_roster_before_a_match_is_picked(self):
+        """Discord asks for the parameters in order, but a user can still be
+        mid-typing — an empty list here would look like the season has no
+        members at all."""
+        import optimized_bot
+        season, match, home, away = await self._pending_match()
+
+        inter = _FakeInteraction()
+        inter.namespace.season = season['id']
+        inter.namespace.match = None
+        choices = await optimized_bot.season_match_player_autocomplete(inter, "")
+        self.assertGreater(len(choices), 2)
+
+        inter.namespace.match = 99999        # a match number that doesn't exist
+        choices = await optimized_bot.season_match_player_autocomplete(inter, "")
+        self.assertGreater(len(choices), 2)
+
+    def test_stat_modal_labels_and_titles_fit_discord_limits_in_every_language(self):
+        """discord.ui.Label caps at 45 characters and a modal title at 45.
+        German runs longest, so English-only checking proves nothing."""
+        import i18n as _i18n
+        for lang in _i18n.SUPPORTED_LANGS:
+            for field in db.SEASON_STAT_FIELDS:
+                label = self.ns._stat_label(field, lang)
+                self.assertLessEqual(len(label), 45, f"{field} [{lang}]: {label}")
+            for page_key, _fields in self.ns.STAT_PAGES:
+                title = _i18n.t('neuroseason.match.edit_page_title', lang,
+                                player="a" * 20,
+                                page=_i18n.t(f'neuroseason.match.page_{page_key}', lang))
+                # The code slices to 45; this checks the slice isn't eating a
+                # meaningful amount of a realistic title.
+                self.assertLessEqual(len(title[:45]), 45)
+                self.assertLess(len(_i18n.t(f'neuroseason.match.page_{page_key}', lang)), 30,
+                                f"page label too long to survive the slice [{lang}]")
+
+    def test_every_stat_is_reachable_from_the_edit_menu(self):
+        """A stat that isn't on any page can never be entered by hand — it
+        would silently only ever come from a screenshot."""
+        paged = [f for _key, fields in self.ns.STAT_PAGES for f in fields]
+        self.assertEqual(sorted(paged), sorted(db.SEASON_STAT_FIELDS))
+        for _key, fields in self.ns.STAT_PAGES:
+            # A modal takes at most five top-level components.
+            self.assertLessEqual(len(fields), 5)
+
+    async def test_a_playoff_match_cannot_be_saved_as_a_tie(self):
+        season = await self._season_with(4)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        sid = season['id']
+        for m in await db.get_neuro_season_matches(sid, stage='regular'):
+            await db.record_neuro_season_result(sid, m['match_num'],
+                                                {'points': 20}, {'points': 3})
+        await self.ns.advance_season(sid)
+        playoff = (await db.get_neuro_season_matches(sid, stage='playoff'))[0]
+        home = await db.get_player(playoff['home_ign'])
+        away = await db.get_player(playoff['away_ign'])
+
+        view = self.ns.SeasonMatchConfirmView(
+            await db.get_neuro_season(sid), playoff, home, away,
+            {'points': 14}, {'points': 14})
+        inter = _FakeInteraction()
+        await view._on_confirm(inter)
+        self.assertIn("tied", " ".join(inter.texts()).lower())
+        self.assertEqual((await db.get_neuro_season_match(
+            sid, playoff['match_num']))['status'], 'pending')
+
+    async def test_a_member_who_goes_inactive_can_still_be_reported_on(self):
+        """db.get_player() hides inactive players, which is right for live
+        league commands and wrong here — a season roster is frozen at signup,
+        so someone going inactive in week 9 still has nine matchups left that
+        have to be loggable."""
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        await db.execute("UPDATE players SET status='I' WHERE ign='NS0'")
+
+        inter = _FakeInteraction()
+        resolved = await self.ns._resolve_player(inter, "NS0", 'en')
+        self.assertIsNotNone(resolved, "an inactive member became unreportable")
+        self.assertEqual(inter.texts(), [])
+        # A genuinely unknown name still errors rather than silently passing.
+        inter = _FakeInteraction()
+        self.assertIsNone(await self.ns._resolve_player(inter, "NotAPlayer", 'en'))
+        self.assertIn("NotAPlayer", " ".join(inter.texts()))
+
+    def _embed_fields(self, inter):
+        """(name, value) per add_field call. The stub's Embed doesn't keep a
+        real .fields list — add_field is a plain mock, so .fields is always
+        empty no matter what was passed."""
+        embed = (inter.response.messages + inter.followup.messages)[0]['embed']
+        return [(c.kwargs.get('name'), c.kwargs.get('value'))
+                for c in embed.add_field.call_args_list]
+
+    async def _played_season(self, members=16):
+        """A started season with every regular-season match played, so the
+        standings have real division and conference records in them."""
+        season = await self._season_with(members)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        sid = season['id']
+        for m in await db.get_neuro_season_matches(sid, stage='regular'):
+            home_pts = 30 if m['home_player_id'] % 2 == 0 else 3
+            await db.record_neuro_season_result(sid, m['match_num'],
+                                                {'points': home_pts},
+                                                {'points': 30 - home_pts})
+        return await db.get_neuro_season(sid)
+
+    async def test_standings_show_division_and_conference_records_per_row(self):
+        """The three records that decide the order are now all on the row —
+        previously only the overall one was, so the tiebreaker footer talked
+        about numbers nobody could see."""
+        season = await self._played_season()
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'])
+
+        rows = [v for _name, v in self._embed_fields(inter)]
+        self.assertTrue(rows)
+        for value in rows:
+            for line in value.splitlines():
+                self.assertIn("Div ", line, line)
+                self.assertIn("Conf ", line, line)
+                self.assertIn("PF ", line, line)
+
+        # And the numbers are the real ones, not placeholders.
+        members = await db.get_neuro_season_members(season['id'])
+        matches = await db.get_neuro_season_matches(season['id'], stage='regular')
+        standings = {r['ign']: r for r in self.ns.compute_standings(members, matches)}
+        joined = "\n".join(rows)
+        sample = next(iter(standings.values()))
+        expected = self.ns._fmt_record(sample['div_wins'], sample['div_losses'],
+                                       sample['div_ties'])
+        self.assertIn(f"Div {expected}", joined)
+
+    def test_record_formatting_hides_ties_only_when_there_are_none(self):
+        self.assertEqual(self.ns._fmt_record(4, 2, 0), "4-2")
+        self.assertEqual(self.ns._fmt_record(4, 2, 1), "4-2-1")
+        self.assertEqual(self.ns._fmt_record(0, 0, 0), "0-0")
+
+    async def test_standings_can_be_limited_to_one_division(self):
+        season = await self._played_season()
+        divisions = await self.ns.season_divisions(season['id'])
+        self.assertGreater(len(divisions), 1, "fixture needs more than one division")
+        target = divisions[0]
+
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'], None, target)
+        names = [n for n, _v in self._embed_fields(inter)]
+        self.assertTrue(names)
+        for name in names:
+            self.assertTrue(name.startswith(target), f"{name!r} is not {target!r}")
+
+        # Everyone shown really is in that division, and everyone in it is shown.
+        members = await db.get_neuro_season_members(season['id'])
+        in_division = {m['ign'] for m in members if m['division'] == target}
+        shown = "\n".join(v for _n, v in self._embed_fields(inter))
+        for ign in in_division:
+            self.assertIn(ign, shown)
+        for m in members:
+            if m['division'] != target:
+                self.assertNotIn(f"**{m['ign']}**", shown)
+
+    async def test_division_filter_is_case_insensitive(self):
+        """Autocomplete only suggests — a hand-typed 'neuro east' is
+        unambiguously the same division and shouldn't be an error."""
+        season = await self._played_season()
+        target = (await self.ns.season_divisions(season['id']))[0]
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'], None, target.lower())
+        self.assertTrue(self._embed_fields(inter))
+        self.assertEqual(inter.texts(), [])
+
+    async def test_an_unknown_division_says_which_ones_exist(self):
+        season = await self._played_season()
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'], None, "Neuro Atlantic")
+        message = " ".join(inter.texts())
+        self.assertIn("Neuro Atlantic", message)
+        for division in await self.ns.season_divisions(season['id']):
+            self.assertIn(division, message)
+
+    async def test_conference_and_division_filters_combine(self):
+        season = await self._played_season()
+        members = await db.get_neuro_season_members(season['id'])
+        target = next(m for m in members if m['conference'] == self.ns.CONFERENCES[0])
+
+        # The division does belong to the conference: both filters pass it.
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'],
+                                       target['conference'], target['division'])
+        self.assertTrue(self._embed_fields(inter))
+
+        # The division is in the *other* conference: nothing matches, and it
+        # says so rather than quietly ignoring one of the two filters — and
+        # specifically not by claiming the season hasn't started, which would
+        # send someone off to fix something that isn't broken.
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'],
+                                       self.ns.CONFERENCES[1], target['division'])
+        sent = (inter.response.messages + inter.followup.messages)[0]
+        self.assertIsNone(sent['embed'])
+        message = " ".join(inter.texts())
+        self.assertIn(target['division'], message)
+        self.assertNotIn("start", message.lower())
+
+    async def test_season_divisions_lists_only_what_that_season_drew(self):
+        """A 16-member season draws four divisions, not the eight a 32-member
+        one does — offering names a season never used just produces empty
+        tables."""
+        small = await self._played_season(members=8)
+        small_divisions = await self.ns.season_divisions(small['id'])
+        members = await db.get_neuro_season_members(small['id'])
+        self.assertEqual(sorted(small_divisions),
+                         sorted({m['division'] for m in members}))
+
+    async def test_division_autocomplete_is_scoped_to_the_chosen_season(self):
+        import optimized_bot
+        season = await self._played_season()
+        inter = _FakeInteraction()
+        inter.namespace.season = season['id']
+        choices = await optimized_bot.season_division_autocomplete(inter, "")
+        self.assertEqual({c.value for c in choices},
+                         set(await self.ns.season_divisions(season['id'])))
+
+    async def test_division_autocomplete_falls_back_before_a_season_is_picked(self):
+        import optimized_bot
+        inter = _FakeInteraction()
+        inter.namespace.season = None
+        choices = await optimized_bot.season_division_autocomplete(inter, "")
+        self.assertTrue(choices, "the field would look empty mid-typing")
+        self.assertLessEqual(len(choices), 25)
+
+    async def test_standings_rows_still_fit_discord_field_limit_with_three_records(self):
+        """Each row got noticeably longer; 1024 characters per field is a hard
+        limit that rejects the entire message, not just the field."""
+        for i in range(8, 32):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+        season = await self._played_season(members=32)
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'])
+        for _name, value in self._embed_fields(inter):
+            self.assertLessEqual(len(value), 1024)
+
+    async def test_standings_before_kickoff_say_so_instead_of_inventing_a_table(self):
+        season = await self._season_with(8)
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'])
+        self.assertIn("start", " ".join(inter.texts()).lower())
+
+    async def test_advance_is_a_no_op_while_matches_are_outstanding(self):
+        season = await self._season_with(8)
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+        self.assertIsNone(await self.ns.advance_season(season['id']))
+        self.assertEqual((await db.get_neuro_season(season['id']))['status'], 'active')
+
+    async def test_standings_and_schedule_render_for_a_full_thirty_two_season(self):
+        """32 members is 288 matchups and eight divisions — comfortably enough
+        to blow past Discord's 1024-characters-per-field limit, which rejects
+        the entire message rather than truncating the field."""
+        for i in range(8, 32):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+        season = await self._season_with(32, name="Big")
+        await self.ns.handle_start(_FakeInteraction(), season['id'])
+
+        inter = _FakeInteraction()
+        await self.ns.handle_standings(inter, season['id'])
+        embed = (inter.response.messages + inter.followup.messages)[0]['embed']
+        values = [c.kwargs.get('value') for c in embed.add_field.call_args_list]
+        self.assertTrue(values)
+        for v in values:
+            self.assertLessEqual(len(v), 1024)
+
+        inter = _FakeInteraction()
+        await self.ns.handle_schedule(inter, season['id'], week=1)
+        embed = (inter.response.messages + inter.followup.messages)[0]['embed']
+        for call in embed.add_field.call_args_list:
+            self.assertLessEqual(len(call.kwargs.get('value')), 1024)
+
+
+class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
+    """agent.extract_season_match_from_screenshot's parsing half — the network
+    half can't run here, so the API call itself is stubbed and what's tested
+    is what happens to the model's reply."""
+
+    def setUp(self):
+        import agent
+        self.agent = agent
+
+    def test_units_and_numeric_strings_are_coerced(self):
+        self.assertEqual(self.agent._coerce_int("203 YDs"), 203)
+        self.assertEqual(self.agent._coerce_int(24), 24)
+        self.assertEqual(self.agent._coerce_int("0"), 0)
+        self.assertIsNone(self.agent._coerce_int(None))
+        self.assertIsNone(self.agent._coerce_int(""))
+        self.assertIsNone(self.agent._coerce_int("—"))
+
+    def test_an_unreadable_stat_stays_none_rather_than_becoming_zero(self):
+        """A zero is a real, meaningful value on this screen (0 turnovers is
+        a clean game). Silently turning 'couldn't read it' into 0 would put a
+        fabricated stat into the season record."""
+        self.assertIsNone(self.agent._coerce_int(None))
+        self.assertNotEqual(self.agent._coerce_int(None), 0)
+
+    def test_the_prompt_pins_the_left_right_order_to_the_screen(self):
+        """The screenshot shows NFL team logos, never player names, so the
+        only thing tying a column to a player is which side it's on. A model
+        that reordered by score would silently swap the two players'
+        stats."""
+        prompt = self.agent.SEASON_MATCH_SYSTEM_PROMPT
+        self.assertIn("left", prompt.lower())
+        self.assertIn("Do not reorder", prompt)
 
 
 # ---------------------------------------------------------------------------
