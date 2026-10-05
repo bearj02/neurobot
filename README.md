@@ -6,7 +6,7 @@ Built for the Reborn league system.
 
 > **Branch note.** This is `reborn_main`, the branch the Reborn bot deploys from. It is the same repository and the same code as Neuroverse's `main` — only this file and [CLAUDE.md](CLAUDE.md) differ. Reborn runs its own Discord server, bot application, token, host and database; the code is shared deliberately so a fix lands once. Land changes on `main`, then merge `main` into `reborn_main`. See [CLAUDE.md](CLAUDE.md) → "The Reborn fork: what actually differs" for the deployment delta.
 
-The bot is built as a multi-league system and still is — Reborn simply has one league in it (`NX`). The league list is read from the database's `teams` table at startup, never hardcoded, so adding a second league is a row, not a code change.
+The bot is built as a multi-league system and still is — Reborn simply has one league in it: **`RX` — CHRISTiansReborn** (formerly `NX` / NeuroChristians, renamed on the way out of Neuroverse). The league list is read from the database's `teams` table at startup, never hardcoded, so adding a second league is a row, not a code change.
 
 ---
 

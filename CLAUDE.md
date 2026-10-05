@@ -7,10 +7,11 @@ don't let it go stale.
 ## Read this first: which branch you are on
 
 This file lives on **`reborn_main`**, the branch that the **Reborn** league
-system deploys from. Reborn is NeuroChristians, split out of the original
-Neuroverse system in Oct 2026 and running as its own thing: its own Discord
-server, its own bot application and token, its own bot-hosting.net server,
-and its own database.
+system deploys from. Reborn is the league formerly known as NeuroChristians,
+split out of the original Neuroverse system in Oct 2026 and running as its
+own thing: its own Discord server, its own bot application and token, its own
+bot-hosting.net server, and its own database. It renamed on the way out —
+it is **`RX` / CHRISTiansReborn** now, not `NX` / NeuroChristians.
 
 **It is the same repository and the same code as Neuroverse's `main`.** The
 only intentional differences on this branch are this file and `README.md`.
@@ -23,7 +24,7 @@ Everything else is byte-identical, and should stay that way:
   of any module to maintain. The league list is read from the `teams` table
   at startup (see "League list comes from the teams table" below), which is
   the entire mechanism that lets one codebase serve both systems.
-- If you find yourself about to write `if league == 'NX'` anywhere, stop.
+- If you find yourself about to write `if league == 'RX'` anywhere, stop.
   That's the drift this arrangement exists to avoid.
 
 See "The Reborn fork: what actually differs" below for the full deployment
@@ -32,7 +33,7 @@ delta and the things that genuinely behave differently on this server.
 ## What this is
 
 A Discord bot for a Madden Mobile league system. On this branch it serves a
-single league: **NX (NeuroChristians)**, the whole of Reborn.
+single league: **`RX` — CHRISTiansReborn**, the whole of Reborn.
 
 The bot is still built as a *multi*-league system and nothing about that was
 stripped out — Reborn simply has one row in `teams` where Neuroverse has
@@ -41,12 +42,19 @@ immediately, with no code change. **Don't hardcode the league list
 anywhere**; the `teams` table is the source of truth, and this branch
 deliberately keeps the same machinery Neuroverse uses for it.
 
-(For context when reading older notes below: the Neuroverse side runs NP
+**`RX` is a Reborn-only id.** In the Neuroverse database this league is still
+`NX` / NeuroChristians, and that is what **every note further down this file
+calls it** — the `/ladder` `real_ign` collision, the MySQL-dump note, all of
+it. Those notes describe things that happened on the Neuroverse database
+before the split and are left as they were written; read `NX` there as "this
+league, under its old id". Anything describing `reborn.db` itself says `RX`.
+
+(For context when reading those older notes: the Neuroverse side runs NP
 (NeuroPerverse), ND (NeuroDiverse), NA (NeuroAdverse), NR (NeuroReverse),
 NC (NeuroChaos), NT (NeuroTraverse) and NL (NeuroLax). NI (NeuroInverse)
-existed earlier and was deleted. Note that **NC is NeuroChaos, not
-NeuroChristians** — NeuroChristians is `NX`. That pair is genuinely easy to
-transpose and getting it wrong means operating on the wrong league's data.)
+existed earlier and was deleted. Note that **NC is NeuroChaos**, and was
+never NeuroChristians — that pair is genuinely easy to transpose and getting
+it wrong means operating on the wrong league's data.)
 
 **Stack:** discord.py 2.7+, SQLite via `aiosqlite`, hosted on bot-hosting.net
 (new panel). Fully localized in 5 languages (en, es, fr, pt, de).
@@ -164,10 +172,11 @@ somewhere in the source instead.
 
 ## The Reborn fork: what actually differs (Oct 2026)
 
-NeuroChristians left the Neuroverse system and now runs as Reborn: separate
-Discord server, separate bot application and token, separate bot-hosting.net
-server, separate database — but the **same GitHub repository**, with this
-server tracking `reborn_main` and the Neuroverse server tracking `main`.
+NeuroChristians left the Neuroverse system, renamed itself
+**CHRISTiansReborn** (`RX`), and now runs as Reborn: separate Discord server,
+separate bot application and token, separate bot-hosting.net server,
+separate database — but the **same GitHub repository**, with this server
+tracking `reborn_main` and the Neuroverse server tracking `main`.
 
 Nothing in the Python branches on which system it is running under, and
 nothing should start to. Everything below is configuration or data, not code.
@@ -236,39 +245,57 @@ it's a no-op, and the panel's env tab is the real source.
 ### How `reborn.db` was built (Oct 2026)
 
 From a fresh export of the live `neuroverse.db`, copied and then stripped
-down to NX rather than rebuilt from scratch — so the schema, indexes and all
-their accumulated quirks are preserved byte-for-byte, and player ids are
-unchanged (nothing was remapped, so every `player_id` foreign key still
-points where it did).
+down to the NX rows rather than rebuilt from scratch — so the schema, indexes
+and all their accumulated quirks are preserved byte-for-byte, and player ids
+are unchanged (nothing was remapped, so every `player_id` foreign key still
+points where it did). The league was then renamed `NX` → `RX` as the last
+step, after the stripping, which is why everything below describes the
+selection in terms of NX.
 
 What it contains: 41 players, 874 `game_scores` rows, 62 `matchup_day` rows,
-896 `matchup_ladder` rows, 7 `defense_scores` rows, 1 `teams` row (NX), 11
-`pwr_rank_weights` rows. `PRAGMA integrity_check` is `ok` and
-`PRAGMA foreign_key_check` is empty.
+896 `matchup_ladder` rows, 7 `defense_scores` rows, 1 `teams` row (`RX` /
+CHRISTiansReborn), 11 `pwr_rank_weights` rows. `PRAGMA integrity_check` is
+`ok` and `PRAGMA foreign_key_check` is empty.
+
+**The rename touched ten tables, not one.** `teams.id` is a plain `TEXT`
+primary key and `team_id` is carried on `players`, `game_scores`,
+`defense_scores`, `matchup_day`, `matchup_ladder`, `ladder_matchups`,
+`siege_matches`, `pwr_rank_weights` and `neuro_season_members`. There is no
+`ON UPDATE CASCADE` anywhere in this schema, so every one of those columns
+had to be updated by hand alongside `teams`. Miss one and you get either a
+league with no data or data belonging to no league — and since the bot runs
+with `PRAGMA foreign_keys=ON`, the latter starts failing inserts later rather
+than at startup. If this is ever done again, `PRAGMA foreign_key_check` with
+the FK pragma on is the check that actually catches it.
+
+Player and opponent names containing "NX" or "Christ" (`Meridius_NX`,
+`ChristMadeDJ`, `XCh0sEnX0nEx`, `Paulomorunx`) were deliberately **not**
+touched — those are people's handles, not league references, and `/nick` is
+the right tool if anyone wants theirs changed.
 
 Four decisions in there that aren't obvious from the row counts:
 
-- **Every surviving player's `players.team_id` was rewritten to `NX`,**
-  including the five who had already transferred out to other leagues
+- **Every surviving player's `players.team_id` was rewritten to the league
+  id,** including the five who had already transferred out to other leagues
   (TheKnight→NA, Ico→NP, Zotar→NT, Jerry→NC, VictoryInJesus→NP). This is
   not cosmetic: `get_player_stats(pid, team_id)` is scoped by the team_id its
   caller reads off the `players` row, so leaving `team_id='NP'` on a player
   in a database that has no NP would scope their stats to a league with zero
-  rows and silently hide their entire NX history.
+  rows and silently hide their entire history here.
 - **Only their NX rows came across.** Those five keep exactly the games they
-  played *for* NeuroChristians (21, 16, 9, 5, 24 respectively) and none of
+  played *for* this league (21, 16, 9, 5, 24 respectively) and none of
   what they played elsewhere — the same historical-attribution rule
   `game_scores.team_id` enforces everywhere else in this codebase.
-- **The 18 currently-active NX players are `status='A'`; the other 23 are
-  `status='I'`.** Note what inactive means for visibility: `get_player()`
-  filters `status != 'I'`, and so does `player_autocomplete`, so those 23
-  are not reachable from `/player`, `/rank` or `/history`. Their data is all
-  still there and surfaces through `/stats include_inactive:true` and
-  `/dstats`. That's the same semantics inactive players have always had on
-  the Neuroverse side, not something new.
+- **The 18 players active at the time of the split are `status='A'`; the
+  other 23 are `status='I'`.** Note what inactive means for visibility:
+  `get_player()` filters `status != 'I'`, and so does `player_autocomplete`,
+  so those 23 are not reachable from `/player`, `/rank` or `/history`. Their
+  data is all still there and surfaces through `/stats include_inactive:true`
+  and `/dstats`. That's the same semantics inactive players have always had
+  on the Neuroverse side, not something new.
 - **Other leagues' `pwr_rank_weights` overrides were deleted**, keeping only
-  the 11 global (`team_id IS NULL`) rows. NX never had an override of its
-  own. This matters more than it looks: `get_player_stats` reads
+  the 11 global (`team_id IS NULL`) rows. This league never had an override
+  of its own. This matters more than it looks: `get_player_stats` reads
   `SELECT label, weight FROM pwr_rank_weights WHERE category=?` with **no
   team_id filter at all**, then collapses to `{label: weight}` — so a
   leftover ND or NP override would have silently reweighted Reborn's
@@ -276,7 +303,8 @@ Four decisions in there that aren't obvious from the row counts:
   pre-existing bug on the Neuroverse side too, where several leagues *do*
   have overrides. Not fixed here; flagged in case it comes up.)
 
-Dropped entirely: all siege data (NX had no siege matches at all), all
+Dropped entirely: all siege data (this league had no siege matches at all
+under NX), all
 tournament data (both tables were already empty), and **all NeuroSeason
 data**. That last one is a judgement call worth knowing about — season 1 was
 `active` with 32 members drawn from six different leagues and 288 matches,
