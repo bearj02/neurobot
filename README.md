@@ -9,6 +9,7 @@ Built for the Neuroverse league system
 ## Highlights
 
 - **Score tracking** — per-player, per-day scoring with proper handling of excused absences, forfeited drives, and genuine 0-point games as distinct states.
+- **Defensive tracking** — `/dscore` logs points allowed per drive, turnovers forced (fumble/interception/safety) and the offensive OVR faced; `/dstats` and `/dscores` read it back as a league table and a per-player history.
 - **Rendered image output** — `/rank`, `/scores`, `/stats`, and `/show_ladder` produce PNG tables via Pillow (with bundled fonts, so rendering doesn't depend on host OS font packages). `/show_ladder` ships 25 visual styles: `classic`, `neon`, `clean`, `scoreboard`, `tactical`, `varsity`, `arcade`, `street`, `carnival`, `gridiron`, `blueprint`, `newsprint`, `terminal`, `gators`, `ledboard`, `dossier`, `gameboy`, `cyberdeck`, `starfield`, `hazard`, `bubble`, `sketch`, `prestige`, `paper`, and `heatmap`. Each ladder row shows our player's offensive OVR, the opponent's defensive OVR, and the difference between them in a middle column.
 - **Configurable rankings** — power rank and ladder rank are weighted formulas over dozens of stat factors, tunable per league through `/weights` and inspectable via `/factors`. Every average has a *fumble-adjusted* counterpart (fumbles excluded from the denominator rather than counted as a scored drive).
 - **Ladder builder with screenshot extraction** — `/ladder` can read a League vs League screenshot through Claude Haiku vision to pull the opponent roster, league name, division, and rank. Names that can't be matched exactly are handed back to an admin for manual matching rather than silently dropped, and suspicious OVR changes (relative to that player's own previous value) are held for review before they're applied.
@@ -29,6 +30,8 @@ Run `/manual` in Discord for the full, localized, paginated reference. Summary:
 | `/score` | Record a player's score for a day |
 | `/dscore` | Record a defensive score — one opponent faced all 3 drives |
 | `/dscore_multiple` | Record a defensive score drive-by-drive (different opponents) |
+| `/dstats` | A league's defensive totals and averages (image) |
+| `/dscores` | A player's defensive history over a date range |
 | `/avg` | A player's average (plain and fumble-adjusted), by window or division |
 | `/streak` | Current consecutive-game streaks (24+ scoring, and no-dropped-drive) |
 | `/history` | A player's score history over a date range |

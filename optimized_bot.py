@@ -792,7 +792,9 @@ async def rank_slash(interaction: discord.Interaction, league: str):
 )
 @app_commands.choices(league=LEAGUE_CHOICES)
 async def stats_slash(interaction: discord.Interaction, league: str, include_inactive: bool = False):
-    if not await _require_admin(interaction): return
+    # Not admin-gated: league averages are a read-only lookup anyone in the
+    # league has a reason to run, same as /rank. (The manual never marked it
+    # Admin either — the gate was the odd one out.)
     await interaction.response.defer()
 
     class InteractionCtx:
@@ -915,7 +917,8 @@ async def legacy_rank_slash(interaction: discord.Interaction, year: int, league:
 )
 @app_commands.autocomplete(league=archive_league_autocomplete)
 async def legacy_stats_slash(interaction: discord.Interaction, year: int, league: str, include_inactive: bool = False):
-    if not await _require_admin(interaction): return
+    # Not admin-gated, matching the live /stats it mirrors. The rest of the
+    # /legacy group still is; only this subcommand was opened up.
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
     conn = await db.get_archive_conn(year)
@@ -1685,6 +1688,172 @@ async def dscore_multiple_slash(interaction: discord.Interaction, player: str, d
 # ============================================================================
 
 SIEGE_MOD_CHOICES = [app_commands.Choice(name=m, value=m) for m in siege.SIEGE_MODS]
+
+
+# ============================================================================
+# /dstats — a league's defensive totals and averages
+# /dscores — a player's defensive history over a date range
+# ============================================================================
+#
+# /dscore and /dscore_multiple had been writing defense_scores with no way to
+# read any of it back except the single career line on /player's card. These
+# two are the offensive side's mirror: /dstats is to /stats what /dscores is
+# to /history, down to the argument lists.
+
+
+@tree.command(name="dstats", description="View a league's defensive totals and averages")
+@app_commands.describe(
+    league="League code",
+    include_inactive="Include inactive/former players in this league (default: false)"
+)
+@app_commands.choices(league=LEAGUE_CHOICES)
+async def dstats_slash(interaction: discord.Interaction, league: str, include_inactive: bool = False):
+    # Not admin-gated, matching /stats — a read-only defensive rollup.
+    lang = i18n.resolve_lang(interaction)
+    try:
+        league = _validate_league(league, lang)
+    except ValueError as e:
+        await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
+        return
+    await interaction.response.defer()
+
+    class InteractionCtx:
+        channel = interaction.channel
+        async def send(self, *args, **kwargs):
+            await interaction.followup.send(*args, **kwargs)
+
+    sent = await sheet_image.send_dstats_image(
+        InteractionCtx(), league, include_inactive=include_inactive)
+    if not sent:
+        await interaction.followup.send(
+            i18n.t('dstats.no_data', lang, league=LEAGUE_NAMES.get(league, league))
+        )
+
+
+@tree.command(name="dscores", description="View a player's defensive history over a date range")
+@app_commands.describe(
+    player="Player IGN",
+    start="Start date (YYYY-MM-DD)",
+    end="End date (YYYY-MM-DD), defaults to today",
+)
+@app_commands.autocomplete(player=player_autocomplete)
+async def dscores_slash(interaction: discord.Interaction, player: str, start: str, end: str = None):
+    lang = i18n.resolve_lang(interaction)
+    await interaction.response.defer()
+
+    # The date-range errors are /history's own keys, reused rather than
+    # duplicated in five languages: this is the same start/end range on the
+    # same kind of command, and the messages don't mention scores either way.
+    try:
+        start_date = datetime.date.fromisoformat(start)
+    except ValueError:
+        await interaction.followup.send(i18n.t('history.err.start_date', lang), ephemeral=True)
+        return
+
+    if end is None:
+        end_date = datetime.date.today()
+    else:
+        try:
+            end_date = datetime.date.fromisoformat(end)
+        except ValueError:
+            await interaction.followup.send(i18n.t('history.err.end_date', lang), ephemeral=True)
+            return
+
+    if end_date < start_date:
+        await interaction.followup.send(i18n.t('history.err.end_before_start', lang), ephemeral=True)
+        return
+
+    embed = await _build_dscores_embed(player, start_date, end_date, lang)
+    if embed is None:
+        await interaction.followup.send(
+            i18n.t('dscores.no_data', lang, player=player, start=start_date, end=end_date)
+        )
+        return
+    await interaction.followup.send(embed=embed)
+
+
+def _drive_cell(row: dict) -> str:
+    """The three drive outcomes as one column, e.g. '6·0·I'.
+
+    A drive with nothing recorded shows '-' rather than being dropped, so
+    the cell always has three slots and a partially-entered game is visibly
+    partial instead of looking like a two-drive game."""
+    return "·".join((row.get(col) or '-') for col in db.DRIVE_OUTCOME_COLUMNS)
+
+
+async def _build_dscores_embed(player: str, start_date, end_date, lang: str,
+                               conn=None, season_label: str | None = None) -> discord.Embed | None:
+    """
+    /dscores' embed: one monospaced line per defensive entry plus a totals
+    footer. Paged the same way /history is — 15 rows per field keeps every
+    code block inside Discord's 1024-character-per-field limit, which
+    rejects the whole message rather than truncating the field.
+
+    Returns None when there's nothing in range, so the caller can send the
+    "no entries" message instead of an empty table.
+    """
+    rows = await db.get_player_dscores(player, start_date, end_date, conn=conn)
+    if not rows:
+        return None
+
+    totals = db.summarize_defense_rows(rows)
+
+    col_date = i18n.t('dscores.col.date', lang)
+    col_drv  = i18n.t('dscores.col.drives', lang)
+    col_pa   = i18n.t('dscores.col.pa', lang)
+    col_to   = i18n.t('dscores.col.to', lang)
+    col_ovr  = i18n.t('dscores.col.ovr', lang)
+    header = f"{col_date:<12} {col_drv:<9} {col_pa:>3} {col_to:>3} {col_ovr:>6}"
+    sep    = "─" * len(header)
+
+    data_lines = []
+    for r in rows:
+        drives = _drive_cell(r)
+        turnovers = sum(
+            1 for col in db.DRIVE_OUTCOME_COLUMNS if r.get(col) in db.TURNOVER_OUTCOMES)
+        ovr = r.get('avg_off_ovr_faced')
+        ovr_s = f"{ovr:.0f}" if ovr is not None else "—"
+        data_lines.append(
+            f"{r['game_date']:<12} {drives:<9} {r['points_allowed'] or 0:>3} "
+            f"{turnovers:>3} {ovr_s:>6}"
+        )
+
+    footer = [sep, i18n.t('dscores.footer.totals', lang,
+                          games=totals['games'], pa=totals['total_allowed'],
+                          avg=totals['avg_allowed'], per_drive=totals['avg_per_drive'])]
+    if totals['turnovers']:
+        footer.append(i18n.t('dscores.footer.turnovers', lang,
+                             total=totals['turnovers'], fum=totals['fumbles'],
+                             ints=totals['interceptions'], saf=totals['safeties']))
+    footer.append(i18n.t('dscores.footer.held', lang,
+                         drives=totals['zero_point_drives'],
+                         games=totals['shutout_games'],
+                         best=totals['best_game'], worst=totals['worst_game']))
+    if totals['avg_off_ovr_faced'] is not None:
+        footer.append(i18n.t('dscores.footer.ovr', lang, ovr=totals['avg_off_ovr_faced']))
+
+    PAGE = 15
+    title = i18n.t('dscores.title', lang, player=player, start=start_date, end=end_date)
+    if season_label:
+        title += f"  {season_label}"
+    embed = discord.Embed(title=title, color=discord.Color.dark_teal())
+
+    pages = [data_lines[i:i + PAGE] for i in range(0, len(data_lines), PAGE)]
+    for idx, page in enumerate(pages):
+        block_lines = [header, sep] + page
+        if idx == len(pages) - 1:
+            block_lines += footer
+        value = "```\n" + "\n".join(block_lines) + "\n```"
+        if len(value) > 1020:
+            value = "```\n" + "\n".join(block_lines[:15]) + "\n...```"
+        embed.add_field(
+            name=(i18n.t('dscores.field.paged', lang, page=idx + 1, total=len(pages))
+                  if len(pages) > 1 else i18n.t('dscores.field.entries', lang)),
+            value=value,
+            inline=False
+        )
+    embed.set_footer(text=i18n.t('dscores.legend', lang))
+    return embed
 
 
 @tree.command(name="siege", description="Start a new siege match for a league")
@@ -2676,7 +2845,7 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
         if not real_ign:
             continue
 
-        row = await db.get_player_by_real_ign(real_ign)
+        row = await db.get_player_by_real_ign(real_ign, team_id=league)
 
         if row is None:
             missing.append(p)

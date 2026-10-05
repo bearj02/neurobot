@@ -363,6 +363,94 @@ async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, seas
         await ctx.send(f"Error generating stats table: {e}")
 
 
+async def send_dstats_image(ctx, team_id, include_inactive=False, conn=None,
+                            season_label=None, league_name=None):
+    """
+    League defensive stats as a PNG — one row per player, best defense
+    (fewest points allowed per game) first, plus a LEAGUE TOTAL row.
+
+    Same layout and the same _render_table as send_stats_image; the numbers
+    come from db.get_league_dstats. Headers stay English here, as every
+    other rendered table in this file does — only the command's own
+    messages go through i18n.
+
+    Returns True if an image was sent, False if there was nothing to show
+    (no such league, or no defensive entries logged for it yet) so the
+    caller can say which.
+    """
+    try:
+        stats = await db.get_league_dstats(team_id, include_inactive=include_inactive, conn=conn)
+        if not stats:
+            return False
+        if not stats['league']['games']:
+            # Players, but nobody has ever run /dscore for them. An empty
+            # table of dashes would look like a rendering fault.
+            return False
+
+        league  = league_name or LEAGUE_NAMES.get(team_id, team_id)
+        headers = ['#', 'Player', 'Gms', 'PA', 'PA/G', 'PA/Drv', 'TO',
+                   'Fum', 'Int', 'Saf', '0-Pt Drv', 'OVR Faced']
+        aligns  = ['R', 'L', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R']
+
+        def num(v, digits=2):
+            return '--' if v is None else f"{v:.{digits}f}"
+
+        def count(v):
+            # 0 is a real, meaningful count here (0 turnovers forced), so it
+            # prints as 0 — only a player with no games at all shows '--'.
+            return '--' if v is None else str(v)
+
+        rows = []
+        for i, p in enumerate(stats['players'], 1):
+            if not p['games']:
+                rows.append([str(i), str(p['ign'] or ''), '--', '--', '--', '--',
+                             '--', '--', '--', '--', '--', '--'])
+                continue
+            rows.append([
+                str(i),
+                str(p['ign'] or ''),
+                count(p['games']),
+                count(p['total_allowed']),
+                num(p['avg_allowed']),
+                num(p['avg_per_drive']),
+                count(p['turnovers']),
+                count(p['fumbles']),
+                count(p['interceptions']),
+                count(p['safeties']),
+                count(p['zero_point_drives']),
+                num(p['avg_off_ovr_faced'], 1),
+            ])
+
+        lg = stats['league']
+        rows.append([
+            '', 'LEAGUE TOTAL',
+            count(lg['games']),
+            count(lg['total_allowed']),
+            num(lg['avg_allowed']),
+            num(lg['avg_per_drive']),
+            count(lg['turnovers']),
+            count(lg['fumbles']),
+            count(lg['interceptions']),
+            count(lg['safeties']),
+            count(lg['zero_point_drives']),
+            num(lg['avg_off_ovr_faced'], 1),
+        ])
+
+        scope = "  (incl. inactive)" if include_inactive else ""
+        title = f"{league} — Defensive Stats{scope}"
+        if season_label:
+            title += f"  {season_label}"
+        buf = _render_table(title, headers, rows, aligns)
+        await ctx.send(file=discord.File(buf, filename=f"{team_id}_dstats.png"))
+        logger.info(f"Defensive stats image sent for {team_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in send_dstats_image for {team_id}: {e}", exc_info=True)
+        await ctx.send(f"Error generating defensive stats table: {e}")
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Ladder table
 # ---------------------------------------------------------------------------
