@@ -1,8 +1,12 @@
-# Neuroverse Bot
+# Reborn Bot
 
-A Discord bot for running a multi-league **Madden Mobile** league system: score tracking, power rankings, ladder matchups, defensive stats, siege tracking and stats, NFL-style member seasons, tournaments, and archived past seasons — all as slash commands, fully localized in five languages.
+A Discord bot for running a **Madden Mobile** league system: score tracking, power rankings, ladder matchups, defensive stats, siege tracking and stats, NFL-style member seasons, tournaments, and archived past seasons — all as slash commands, fully localized in five languages.
 
-Built for the Neuroverse league system
+Built for the Reborn league system.
+
+> **Branch note.** This is `reborn_main`, the branch the Reborn bot deploys from. It is the same repository and the same code as Neuroverse's `main` — only this file and [CLAUDE.md](CLAUDE.md) differ. Reborn runs its own Discord server, bot application, token, host and database; the code is shared deliberately so a fix lands once. Land changes on `main`, then merge `main` into `reborn_main`. See [CLAUDE.md](CLAUDE.md) → "The Reborn fork: what actually differs" for the deployment delta.
+
+The bot is built as a multi-league system and still is — Reborn simply has one league in it (`NX`). The league list is read from the database's `teams` table at startup, never hardcoded, so adding a second league is a row, not a code change.
 
 ---
 
@@ -115,18 +119,24 @@ pip install -r requirements.txt
 
 **Environment** (a `.env` file in the project root works):
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `DISCORD_TOKEN` | yes | Bot token |
-| `ANTHROPIC_API_KEY` | for `/ladder` screenshots | Claude vision extraction |
-| `DB_PATH` | no | SQLite path, defaults to `neuroverse.db` |
-| `DEV` | no | Development mode flag |
+| Variable | Required | Purpose | Reborn value |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | yes | Bot token | Reborn's own bot application — not a second copy of Neuroverse's |
+| `DB_PATH` | **yes, here** | SQLite path, defaults to `neuroverse.db` | `reborn.db` |
+| `DEV` | for scheduled tasks | Enables the daily new-day and daily backup loops when set to `production` | `production` |
+| `ANTHROPIC_API_KEY` | for `/ladder` and `/seasonmatch` screenshots | Claude vision extraction | set (both commands have manual fallbacks without it) |
+
+On bot-hosting.net these live on the panel's environment tab, not in a `.env` file.
+
+**`DB_PATH` is the one that fails quietly.** Leave it unset and the bot ignores `reborn.db`, creates an empty `neuroverse.db` beside it, migrates it cleanly and starts with no leagues, no players and no history — no error, just an empty bot and a `No leagues loaded from the teams table` line in the log. (Renaming the uploaded file to `neuroverse.db` works just as well as setting the variable.)
 
 ```bash
 python optimized_bot.py
 ```
 
-The schema is created and migrated automatically on every startup — there is no separate migration step or schema file to apply. Archived seasons are expected as `neuroverse_<year>.db` next to the live database. Bundled fonts live in `fonts/` and must sit alongside `sheet_image.py`.
+The schema is created and migrated automatically on every startup — there is no separate migration step or schema file to apply. Archived seasons are expected as `neuroverse_<year>.db` next to the live database: that prefix is a hardcoded literal in `db._archive_path()` and does **not** follow `DB_PATH`, so an archive on this server must still be named `neuroverse_<year>.db` for `/legacy` to find it. Bundled fonts live in `fonts/` and must sit alongside `sheet_image.py`.
+
+**GIFs are not in the repo.** `.gitignore` excludes `*.gif`, so a server deployed purely from Git has no `gifs*` folders. Score GIFs degrade gracefully (no GIF is sent), but the `Kobe!`, `Brunson!` and `bingbong` chat triggers log an `IndexError` instead of doing nothing, and `/addgif` fails until the target folder exists. Create the folders on the server and upload GIFs through `/addgif` if they're wanted.
 
 ### Backups
 
@@ -135,6 +145,8 @@ The schema is created and migrated automatically on every startup — there is n
 ### Replacing the database file
 
 The database runs in WAL mode. **Stop the bot, delete any leftover `.db-wal` / `.db-shm`, then upload/replace the `.db`, then start again.** Swapping the file under a running process races with the live writer and can corrupt it or silently lose recent transactions.
+
+This applies to the very first upload of `reborn.db` too — upload it with the bot stopped, set `DB_PATH=reborn.db`, then start. The database is `.gitignore`d, so a GitHub sync never touches it; keep the sync strategy on **Merge**, since "Replace all files" would delete it along with everything else on the server that isn't tracked in the repo.
 
 ---
 

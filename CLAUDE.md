@@ -1,21 +1,55 @@
-# CLAUDE.md — Neuroverse Discord Bot
+# CLAUDE.md — Reborn Discord Bot
 
 This file exists so a future session (with none of this conversation's context)
 can pick this project up quickly. Update it as new important context is learned —
 don't let it go stale.
 
+## Read this first: which branch you are on
+
+This file lives on **`reborn_main`**, the branch that the **Reborn** league
+system deploys from. Reborn is NeuroChristians, split out of the original
+Neuroverse system in Oct 2026 and running as its own thing: its own Discord
+server, its own bot application and token, its own bot-hosting.net server,
+and its own database.
+
+**It is the same repository and the same code as Neuroverse's `main`.** The
+only intentional differences on this branch are this file and `README.md`.
+Everything else is byte-identical, and should stay that way:
+
+- A bug fixed on one branch is a bug on the other. Land it on `main`, then
+  merge `main` into `reborn_main` (or cherry-pick) — don't fix it twice and
+  let the two drift.
+- Nothing in the Python is league-specific, so there is no "Reborn version"
+  of any module to maintain. The league list is read from the `teams` table
+  at startup (see "League list comes from the teams table" below), which is
+  the entire mechanism that lets one codebase serve both systems.
+- If you find yourself about to write `if league == 'NX'` anywhere, stop.
+  That's the drift this arrangement exists to avoid.
+
+See "The Reborn fork: what actually differs" below for the full deployment
+delta and the things that genuinely behave differently on this server.
+
 ## What this is
 
-A Discord bot (`TittyBot#0428`) for a multi-league Madden Mobile league system.
-Leagues as of Sept 2026: NP (NeuroPerverse), ND (NeuroDiverse),
-NA (NeuroAdverse), NR (NeuroReverse), NC (NeuroChaos), NT (NeuroTraverse),
-NX (NeuroChristians). NI (NeuroInverse) existed earlier and has been deleted.
-**Don't treat that list as fixed — and don't hardcode it anywhere.** The
-`teams` table is the source of truth; see "League list comes from the teams
-table" below.
+A Discord bot for a Madden Mobile league system. On this branch it serves a
+single league: **NX (NeuroChristians)**, the whole of Reborn.
+
+The bot is still built as a *multi*-league system and nothing about that was
+stripped out — Reborn simply has one row in `teams` where Neuroverse has
+several. A second league added to the `teams` table here would work
+immediately, with no code change. **Don't hardcode the league list
+anywhere**; the `teams` table is the source of truth, and this branch
+deliberately keeps the same machinery Neuroverse uses for it.
+
+(For context when reading older notes below: the Neuroverse side runs NP
+(NeuroPerverse), ND (NeuroDiverse), NA (NeuroAdverse), NR (NeuroReverse),
+NC (NeuroChaos), NT (NeuroTraverse) and NL (NeuroLax). NI (NeuroInverse)
+existed earlier and was deleted. Note that **NC is NeuroChaos, not
+NeuroChristians** — NeuroChristians is `NX`. That pair is genuinely easy to
+transpose and getting it wrong means operating on the wrong league's data.)
 
 **Stack:** discord.py 2.7+, SQLite via `aiosqlite`, hosted on bot-hosting.net
-(Pterodactyl panel). Fully localized in 5 languages (en, es, fr, pt, de).
+(new panel). Fully localized in 5 languages (en, es, fr, pt, de).
 
 **Files:**
 - `optimized_bot.py` — main bot, most slash commands
@@ -45,7 +79,7 @@ one if it's ever mentioned again. This still shapes everything below:
   (`db.py`'s `_migrate_schema()`, called on every startup). There is no other
   way to apply a DB change. Every migration must be idempotent (safe to rerun
   forever) since it runs on literally every restart.
-- **The database runs in WAL mode.** Replacing `neuroverse.db` on the server
+- **The database runs in WAL mode.** Replacing `reborn.db` on the server
   while the bot is still running causes a real race condition — the live
   process is still writing to the file at the same time the replacement
   happens. This produces exactly the failure mode hit repeatedly early on:
@@ -55,7 +89,7 @@ one if it's ever mentioned again. This still shapes everything below:
   `.db-wal`/`.db-shm` → upload the new `.db` → start the bot.** This risk is
   specifically about manually replacing the database file (e.g. restoring
   from a backup) — it's unrelated to the GitHub deploy workflow below, since
-  `neuroverse.db` is `.gitignore`d and never touched by a code sync at all.
+  `reborn.db` is `.gitignore`d and never touched by a code sync at all.
 - When diagnosing "the file I delivered doesn't match what's live," always
   ask for a fresh export **including `.db-wal` and `.db-shm`**, not just the
   bare `.db` — a plain file can be missing transactions still sitting in the
@@ -77,8 +111,12 @@ live server is now connected to a real GitHub repo.
 
 **How a deploy actually happens, confirmed by direct, live testing (not
 assumed from the panel's own docs, which were ambiguous on this point):**
-1. Commit and push a change to the repo's default branch (`main`, after
-   the initial `migration` branch was merged in).
+1. Commit and push a change to the branch this server is pointed at.
+   **For the Reborn server that is `reborn_main`, not `main`** — the panel
+   lets each server track a specific branch, which is the whole mechanism
+   that lets Neuroverse and Reborn share one repository. Pushing a fix to
+   `main` alone changes nothing on this server until it reaches
+   `reborn_main`.
 2. Restart the bot from the panel.
 3. That restart **both** pulls the latest commit from GitHub **and**
    starts the process — "auto-pull at restart" is a real, confirmed-working
@@ -93,7 +131,7 @@ assumed from the panel's own docs, which were ambiguous on this point):**
    replacing manual file-manager uploads entirely.
 
 **Sync strategy is Merge, never "Replace all files."** Replace would wipe
-`neuroverse.db` and anything else present on the server but not tracked in
+`reborn.db` and anything else present on the server but not tracked in
 the repo (since those aren't in Git at all, Replace has no way to know
 they should survive). Merge only touches files that exist in the repo,
 leaving everything else — the database, its `-wal`/`-shm` siblings, the
@@ -123,6 +161,129 @@ risk of the token ending up in a `git add .` by accident — but it's still
 worth a visual check of anywhere a bot client or API key gets constructed
 before trusting that no token is hardcoded as a literal fallback
 somewhere in the source instead.
+
+## The Reborn fork: what actually differs (Oct 2026)
+
+NeuroChristians left the Neuroverse system and now runs as Reborn: separate
+Discord server, separate bot application and token, separate bot-hosting.net
+server, separate database — but the **same GitHub repository**, with this
+server tracking `reborn_main` and the Neuroverse server tracking `main`.
+
+Nothing in the Python branches on which system it is running under, and
+nothing should start to. Everything below is configuration or data, not code.
+
+### Per-server environment variables (the panel's env tab, not a file)
+
+| Variable | Neuroverse server | Reborn server | What breaks if it's wrong here |
+| --- | --- | --- | --- |
+| `DISCORD_TOKEN` | Neuroverse bot | **Reborn bot** | Two processes on one token: Discord closes one or both connections, and they fight over the same gateway session. Must be a different application, not just a reset token. |
+| `DB_PATH` | unset (→ `neuroverse.db`) | **`reborn.db`** | **This is the one to get right.** `db.py` line 15 is `DB_PATH = os.getenv("DB_PATH", "neuroverse.db")`. Leave it unset on the Reborn server and the bot ignores `reborn.db` entirely and creates an **empty** `neuroverse.db` next to it — schema migrates cleanly, so there's no error, just a bot with no leagues, no players and no history. The only visible symptom is the startup log line `No leagues loaded from the teams table` and every league picker coming up empty. Alternative, if you'd rather not set an env var: rename the uploaded file to `neuroverse.db` on the server. |
+| `DEV` | `production` | **`production`** | Gates `scheduled_newday` and `scheduled_backup` in `on_ready` (`if DEV == 'production':`). Unset, the bot runs fine but **never** creates the daily `matchup_day` placeholder rows (`/status` has nothing to show at the start of a game day until someone runs `/newday` by hand) and **never** takes a daily backup. The startup backup still runs regardless, so this fails quietly. |
+| `ANTHROPIC_API_KEY` | set | **set** | `/ladder` screenshot extraction and `/seasonmatch` screenshot extraction raise `ValueError: ANTHROPIC_API_KEY is not set`. Both commands still have working manual paths, so this degrades rather than breaks. Use a separate key if you want the two systems' usage billed separately. |
+
+`load_dotenv()` is called at import, but there is no `.env` on either server —
+it's a no-op, and the panel's env tab is the real source.
+
+### Things that genuinely behave differently on the Reborn server
+
+- **The `gifs*` folders don't exist here.** `.gitignore` excludes `*.gif`, so
+  they were never in the repo and a GitHub sync cannot create them — they
+  only exist on the Neuroverse server because they were uploaded there by
+  hand, years of them. `load_gif_folder()` handles the missing directory
+  correctly (logs a warning, returns `[]`), and `get_score_gif()` plus the
+  `gif_triggers` loop in `on_message` both guard on an empty pool. **Three
+  branches in `on_message` do not:** `'Kobe!'`, `'Brunson!'` and `'bingbong'`
+  each call `random.choice()` on an unguarded list, so any member typing one
+  of those raises `IndexError: Cannot choose from an empty sequence`. It's
+  swallowed by discord.py's event-handler logging rather than crashing the
+  bot, but it also skips the `await bot.process_commands(message)` at the end
+  of the handler (harmless today — prefix commands are retired) and spams the
+  log. **`/addgif` is also broken on a fresh server**: it calls
+  `gif.save(save_path)` with no `os.makedirs(folder_path, exist_ok=True)`
+  first, so uploading the first GIF into a folder that doesn't exist yet
+  fails with `FileNotFoundError`. Both are pre-existing latent bugs that only
+  a server without the folders exposes. If they get fixed, fix them on
+  `main` and merge — they're not Reborn-specific.
+- **Backups are still named `neuroverse_{timestamp}.db`.** `backup_database()`
+  builds that name from a literal, not from `DB_PATH`, and `_prune_old_backups()`
+  only deletes files matching that same `neuroverse_` prefix. It works
+  correctly — backups are taken and pruned on schedule — the filenames are
+  just misleading. Don't "fix" it by changing only the backup name: the prune
+  filter has to change with it or old backups stop being pruned, and the same
+  edit has to land on both branches.
+- **`/legacy` archives**: see the hardcoded `neuroverse_{year}.db` note in the
+  multi-season archive section below.
+- **`/transfer` is a no-op with one league.** `TransferLeagueView` builds its
+  select from every entry in `LEAGUE_NAMES` *including* the current one, so
+  with a single league it renders one option and the handler replies "already
+  there". No crash, no empty-select error — it just has nothing to do.
+- **Siege still works normally.** `opp_league` is a free-text modal field, not
+  a picker over `LEAGUE_NAMES`, so Reborn can siege any outside league by
+  name exactly as before.
+- **NeuroSeason still works, at a smaller field size.** It draws from
+  individual members, not leagues, and already auto-scales: two conferences
+  always, as many divisions as fit at 3+ members each capped at 4, everyone
+  still playing 18. With Reborn's 18 active players the playoff field drops
+  from 16 to 8 (largest power of two that fits), which is the designed
+  behaviour, not a failure.
+- **The gamemode is still called NeuroSeason** (`/neuroseason`,
+  `neuroseason.py`, every `season.*` i18n key). It was deliberately not
+  renamed — the command name, the module and ~5 languages of strings would
+  all have to move together, and that's exactly the kind of change that makes
+  the two branches diverge in code rather than in docs. Worth doing properly
+  on `main` for both systems if it's wanted, not unilaterally here.
+
+### How `reborn.db` was built (Oct 2026)
+
+From a fresh export of the live `neuroverse.db`, copied and then stripped
+down to NX rather than rebuilt from scratch — so the schema, indexes and all
+their accumulated quirks are preserved byte-for-byte, and player ids are
+unchanged (nothing was remapped, so every `player_id` foreign key still
+points where it did).
+
+What it contains: 41 players, 874 `game_scores` rows, 62 `matchup_day` rows,
+896 `matchup_ladder` rows, 7 `defense_scores` rows, 1 `teams` row (NX), 11
+`pwr_rank_weights` rows. `PRAGMA integrity_check` is `ok` and
+`PRAGMA foreign_key_check` is empty.
+
+Four decisions in there that aren't obvious from the row counts:
+
+- **Every surviving player's `players.team_id` was rewritten to `NX`,**
+  including the five who had already transferred out to other leagues
+  (TheKnight→NA, Ico→NP, Zotar→NT, Jerry→NC, VictoryInJesus→NP). This is
+  not cosmetic: `get_player_stats(pid, team_id)` is scoped by the team_id its
+  caller reads off the `players` row, so leaving `team_id='NP'` on a player
+  in a database that has no NP would scope their stats to a league with zero
+  rows and silently hide their entire NX history.
+- **Only their NX rows came across.** Those five keep exactly the games they
+  played *for* NeuroChristians (21, 16, 9, 5, 24 respectively) and none of
+  what they played elsewhere — the same historical-attribution rule
+  `game_scores.team_id` enforces everywhere else in this codebase.
+- **The 18 currently-active NX players are `status='A'`; the other 23 are
+  `status='I'`.** Note what inactive means for visibility: `get_player()`
+  filters `status != 'I'`, and so does `player_autocomplete`, so those 23
+  are not reachable from `/player`, `/rank` or `/history`. Their data is all
+  still there and surfaces through `/stats include_inactive:true` and
+  `/dstats`. That's the same semantics inactive players have always had on
+  the Neuroverse side, not something new.
+- **Other leagues' `pwr_rank_weights` overrides were deleted**, keeping only
+  the 11 global (`team_id IS NULL`) rows. NX never had an override of its
+  own. This matters more than it looks: `get_player_stats` reads
+  `SELECT label, weight FROM pwr_rank_weights WHERE category=?` with **no
+  team_id filter at all**, then collapses to `{label: weight}` — so a
+  leftover ND or NP override would have silently reweighted Reborn's
+  `pwr_rank`/`ladder_rank`, last row winning. (That missing filter is a real
+  pre-existing bug on the Neuroverse side too, where several leagues *do*
+  have overrides. Not fixed here; flagged in case it comes up.)
+
+Dropped entirely: all siege data (NX had no siege matches at all), all
+tournament data (both tables were already empty), and **all NeuroSeason
+data**. That last one is a judgement call worth knowing about — season 1 was
+`active` with 32 members drawn from six different leagues and 288 matches,
+but **zero results had been reported**, so nothing was lost by clearing it.
+Carrying it over would have left 27 members pointing at `players` rows that
+don't exist in this database. Reborn starts a fresh season with
+`/neuroseason create`.
 
 ## Database gotchas (each one cost real time to find — don't relearn these)
 
@@ -399,6 +560,11 @@ explicit ask was for a manual-match capability, not a smarter automatic one.
 
 ## Known historical data facts (context for future data questions)
 
+**These are Neuroverse-side facts, kept because they explain *why* parts of
+the schema and the backup system look the way they do.** The NP/NA/etc. data
+they refer to is not in `reborn.db` — none of those leagues exist here. The
+reasoning still applies; the row counts don't.
+
 - NP's `event_type`: confirmed `E2` for 2026-07-13 through 07-19, `E1` for
   07-20 through 07-26 (per-team, per-week; divisions are not shared
   league-wide). Other teams have older, more scattered `event_type` gaps that
@@ -469,9 +635,16 @@ Added at the 2026→2027 season transition. Two pieces:
   function: `db.get_league_stats()`.
 
 - **`/legacy <rank|player|stats|history|scores|show_ladder> year:YYYY`** —
-  read-only lookups against an archived past season's database
-  (`neuroverse_{year}.db`, expected to sit alongside the live `neuroverse.db`
-  on the server). Each subcommand takes exactly the same arguments as its
+  read-only lookups against an archived past season's database, expected to
+  sit alongside the live database on the server. **The archive filename is
+  hardcoded as `neuroverse_{year}.db`** in `db._archive_path()` — it is built
+  from a string literal, *not* from `DB_PATH`, so it does not become
+  `reborn_{year}.db` just because this server's live file is `reborn.db`. An
+  archive dropped on the Reborn server must therefore still be named
+  `neuroverse_2026.db` or `/legacy` will report "no archive for that year".
+  Reborn has no archive yet, so this costs nothing today; the first time one
+  is cut, either name it that way or change `_archive_path()` on **both**
+  branches. Each subcommand takes exactly the same arguments as its
   live counterpart, plus `year`. `/legacy opp` was deliberately never built —
   `/opp` has no existing date argument (it's always "today"), so "same
   arguments + year" doesn't map onto it cleanly, and the live command
@@ -1481,6 +1654,18 @@ future test opens a source file, pass the encoding explicitly.
   data — this project's Discord library version has changed meaningfully
   during this conversation (Components V2 modal system, `discord.ui.Label`)
   and stale assumptions have caused real bugs before.
+- **Keeping `reborn_main` and `main` in step is part of finishing a code
+  change, not a separate chore.** Land code on `main`, merge `main` into
+  `reborn_main`, push both. The only files expected to conflict are
+  `CLAUDE.md` and `README.md` — if a merge wants to change a `.py` file in a
+  way that differs between the branches, that's the drift this setup exists
+  to prevent, and it should be resolved by making the code work for both
+  systems rather than by keeping two versions.
+- **No Python interpreter on the current dev machine**, so `tests.py` can't
+  be run locally — the suite has to be exercised somewhere that has one, or
+  via `/test` from inside Discord after deploying. Query the database
+  directly through `winsqlite3.dll` (PowerShell P/Invoke) when a data
+  question comes up; there's no `sqlite3.exe` either.
 
 
 ## NeuroSeason — the NFL-shaped season gamemode (`neuroseason.py`)
