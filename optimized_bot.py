@@ -1,5 +1,5 @@
 """
-optimized_bot.py — Neuroverse Discord bot with SQLite backend.
+optimized_bot.py — Reborn Discord bot with SQLite backend.
 
 All commands upgraded to use discord.ui (buttons, modals, select menus,
 autocomplete) where it improves the UX. Administrator operations use slash commands
@@ -25,7 +25,7 @@ import db
 import ladder_flow
 from ladder_flow import start_ladder_flow
 import siege
-import neuroseason
+import rebornseason
 import i18n
 from status import get_status
 import sheet_image
@@ -61,7 +61,7 @@ def game_day() -> datetime.date:
 
 # The league list comes straight from the db's teams table — there is
 # deliberately no hardcoded default to fall back on, so a league added,
-# renamed, or deleted there (NI/NeuroInverse, for instance) is reflected on
+# renamed, or deleted there (NI/Deleted League, for instance) is reflected on
 # the next restart without a code change, and can't silently disagree with
 # what the database actually contains.
 #
@@ -810,7 +810,7 @@ async def stats_slash(interaction: discord.Interaction, league: str, include_ina
 # ============================================================================
 # Each subcommand is the same as its live counterpart, with the same
 # arguments, plus a "year" argument selecting which archived season database
-# to read from (e.g. year:2026 -> neuroverse_2026.db, see db.get_archive_conn).
+# to read from (e.g. year:2026 -> reborn_2026.db, see db.get_archive_conn).
 # Strictly read-only — archive connections are opened in SQLite's own
 # read-only URI mode, so there's no path by which a /legacy command could
 # accidentally write to a past season's data.
@@ -1952,13 +1952,13 @@ async def siegehistory_slash(interaction: discord.Interaction, league: str):
 
 
 # ============================================================================
-# NEUROSEASON — NFL-style season gamemode (logic lives in neuroseason.py)
+# REBORNSEASON — NFL-style season gamemode (logic lives in rebornseason.py)
 # ============================================================================
 
 async def season_autocomplete(interaction: discord.Interaction, current: str):
     """Seasons by id, newest first, labelled with their name and status so an
     admin picking one doesn't have to remember which number is which."""
-    seasons = await db.list_neuro_seasons()
+    seasons = await db.list_reborn_seasons()
     out = []
     for s in seasons:
         label = f"#{s['id']} {s['name']} ({s['status']})"
@@ -1981,7 +1981,7 @@ async def season_member_autocomplete(interaction: discord.Interaction, current: 
         return []
     rows = await db.fetchall(
         """
-        SELECT p.ign FROM neuro_season_members m
+        SELECT p.ign FROM reborn_season_members m
         JOIN players p ON p.id = m.player_id
         WHERE m.season_id=? AND p.ign LIKE ?
         ORDER BY p.ign LIMIT 25
@@ -2012,7 +2012,7 @@ async def season_match_player_autocomplete(interaction: discord.Interaction, cur
     if not season_id or not match_num:
         return await season_member_autocomplete(interaction, current)
     try:
-        match = await db.get_neuro_season_match(int(season_id), int(match_num))
+        match = await db.get_reborn_season_match(int(season_id), int(match_num))
     except (TypeError, ValueError):
         return await season_member_autocomplete(interaction, current)
     if match is None:
@@ -2032,7 +2032,7 @@ async def season_division_autocomplete(interaction: discord.Interaction, current
     via interaction.namespace.season.
 
     Deliberately not @app_commands.choices: how many divisions a season has
-    depends on how many people signed up for it (see neuroseason.plan_layout),
+    depends on how many people signed up for it (see rebornseason.plan_layout),
     so a fixed list would offer names that produce an empty table for most
     seasons. Same reasoning, and same mechanism, as /legacy's per-archive
     league field.
@@ -2045,14 +2045,14 @@ async def season_division_autocomplete(interaction: discord.Interaction, current
     divisions: list[str] = []
     if season_id:
         try:
-            divisions = await neuroseason.season_divisions(int(season_id))
+            divisions = await rebornseason.season_divisions(int(season_id))
         except (TypeError, ValueError):
             divisions = []
     if not divisions:
         divisions = [
-            neuroseason._division_name(conf, i, len(neuroseason.DIVISION_SUFFIXES))
-            for conf in neuroseason.CONFERENCES
-            for i in range(len(neuroseason.DIVISION_SUFFIXES))
+            rebornseason._division_name(conf, i, len(rebornseason.DIVISION_SUFFIXES))
+            for conf in rebornseason.CONFERENCES
+            for i in range(len(rebornseason.DIVISION_SUFFIXES))
         ]
 
     typed = (current or "").lower()
@@ -2060,76 +2060,76 @@ async def season_division_autocomplete(interaction: discord.Interaction, current
             for d in divisions if typed in d.lower()][:25]
 
 
-neuroseason_group = app_commands.Group(
-    name="neuroseason", description="NFL-style season: signups, schedule, standings, playoffs")
+rebornseason_group = app_commands.Group(
+    name="rebornseason", description="NFL-style season: signups, schedule, standings, playoffs")
 
 
-@neuroseason_group.command(name="create", description="Open signups for a new NeuroSeason")
-@app_commands.describe(name="Season name, e.g. 'NeuroSeason 1'")
-async def neuroseason_create_slash(interaction: discord.Interaction, name: str):
+@rebornseason_group.command(name="create", description="Open signups for a new RebornSeason")
+@app_commands.describe(name="Season name, e.g. 'RebornSeason 1'")
+async def rebornseason_create_slash(interaction: discord.Interaction, name: str):
     if not await _require_admin(interaction): return
-    await neuroseason.handle_create(interaction, name)
+    await rebornseason.handle_create(interaction, name)
 
 
-@neuroseason_group.command(name="join", description="Sign up for a season that's taking signups")
+@rebornseason_group.command(name="join", description="Sign up for a season that's taking signups")
 @app_commands.describe(season="Which season", player="Player IGN")
 @app_commands.autocomplete(season=season_autocomplete, player=player_autocomplete)
-async def neuroseason_join_slash(interaction: discord.Interaction, season: int, player: str):
-    await neuroseason.handle_join(interaction, season, player)
+async def rebornseason_join_slash(interaction: discord.Interaction, season: int, player: str):
+    await rebornseason.handle_join(interaction, season, player)
 
 
-@neuroseason_group.command(name="leave", description="Withdraw from a season before it starts")
+@rebornseason_group.command(name="leave", description="Withdraw from a season before it starts")
 @app_commands.describe(season="Which season", player="Player IGN")
 @app_commands.autocomplete(season=season_autocomplete, player=season_member_autocomplete)
-async def neuroseason_leave_slash(interaction: discord.Interaction, season: int, player: str):
-    await neuroseason.handle_leave(interaction, season, player)
+async def rebornseason_leave_slash(interaction: discord.Interaction, season: int, player: str):
+    await rebornseason.handle_leave(interaction, season, player)
 
 
-@neuroseason_group.command(name="start", description="Close signups, draw the divisions and build the schedule")
+@rebornseason_group.command(name="start", description="Close signups, draw the divisions and build the schedule")
 @app_commands.describe(season="Which season")
 @app_commands.autocomplete(season=season_autocomplete)
-async def neuroseason_start_slash(interaction: discord.Interaction, season: int):
+async def rebornseason_start_slash(interaction: discord.Interaction, season: int):
     if not await _require_admin(interaction): return
-    await neuroseason.handle_start(interaction, season)
+    await rebornseason.handle_start(interaction, season)
 
 
-@neuroseason_group.command(name="list", description="Every NeuroSeason and its status")
-async def neuroseason_list_slash(interaction: discord.Interaction):
-    await neuroseason.handle_list(interaction)
+@rebornseason_group.command(name="list", description="Every RebornSeason and its status")
+async def rebornseason_list_slash(interaction: discord.Interaction):
+    await rebornseason.handle_list(interaction)
 
 
-@neuroseason_group.command(name="standings", description="Division-by-division standings for a season")
+@rebornseason_group.command(name="standings", description="Division-by-division standings for a season")
 @app_commands.describe(season="Which season", conference="Limit to one conference",
                        division="Limit to one division")
 @app_commands.autocomplete(season=season_autocomplete, division=season_division_autocomplete)
 @app_commands.choices(conference=[
-    app_commands.Choice(name=c, value=c) for c in neuroseason.CONFERENCES
+    app_commands.Choice(name=c, value=c) for c in rebornseason.CONFERENCES
 ])
-async def neuroseason_standings_slash(interaction: discord.Interaction, season: int,
+async def rebornseason_standings_slash(interaction: discord.Interaction, season: int,
                                       conference: str = None, division: str = None):
-    await neuroseason.handle_standings(interaction, season, conference, division)
+    await rebornseason.handle_standings(interaction, season, conference, division)
 
 
-@neuroseason_group.command(name="schedule", description="A season's matchups, optionally for one player or week")
+@rebornseason_group.command(name="schedule", description="A season's matchups, optionally for one player or week")
 @app_commands.describe(season="Which season", player="Only this player's matchups",
                        week="Only this week")
 @app_commands.autocomplete(season=season_autocomplete, player=season_member_autocomplete)
-async def neuroseason_schedule_slash(interaction: discord.Interaction, season: int,
+async def rebornseason_schedule_slash(interaction: discord.Interaction, season: int,
                                      player: str = None, week: int = None):
-    await neuroseason.handle_schedule(interaction, season, player, week)
+    await rebornseason.handle_schedule(interaction, season, player, week)
 
 
-@neuroseason_group.command(name="bracket", description="The playoff bracket for a season")
+@rebornseason_group.command(name="bracket", description="The playoff bracket for a season")
 @app_commands.describe(season="Which season")
 @app_commands.autocomplete(season=season_autocomplete)
-async def neuroseason_bracket_slash(interaction: discord.Interaction, season: int):
-    await neuroseason.handle_bracket(interaction, season)
+async def rebornseason_bracket_slash(interaction: discord.Interaction, season: int):
+    await rebornseason.handle_bracket(interaction, season)
 
 
-@neuroseason_group.command(name="advance", description="Force a season to move on if a finished round didn't")
+@rebornseason_group.command(name="advance", description="Force a season to move on if a finished round didn't")
 @app_commands.describe(season="Which season")
 @app_commands.autocomplete(season=season_autocomplete)
-async def neuroseason_advance_slash(interaction: discord.Interaction, season: int):
+async def rebornseason_advance_slash(interaction: discord.Interaction, season: int):
     """
     Manual fallback only. The playoffs open themselves when the last regular
     season match is reported, and each round generates the next one the same
@@ -2140,17 +2140,17 @@ async def neuroseason_advance_slash(interaction: discord.Interaction, season: in
     if not await _require_admin(interaction): return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
-    note = await neuroseason.advance_season(season, lang)
-    await interaction.followup.send(note or i18n.t('neuroseason.advance.nothing', lang))
+    note = await rebornseason.advance_season(season, lang)
+    await interaction.followup.send(note or i18n.t('rebornseason.advance.nothing', lang))
 
 
-tree.add_command(neuroseason_group)
+tree.add_command(rebornseason_group)
 
 
-@tree.command(name="seasonmatch", description="Log a played NeuroSeason matchup, from a screenshot or by hand")
+@tree.command(name="seasonmatch", description="Log a played RebornSeason matchup, from a screenshot or by hand")
 @app_commands.describe(
     season="Which season",
-    match="The match number shown in /neuroseason schedule",
+    match="The match number shown in /rebornseason schedule",
     left_player="The player on the LEFT of the screenshot (either player, if there's no screenshot)",
     right_player="The player on the RIGHT of the screenshot (the other player)",
     screenshot="Optional — the Head to Head Arena 'Game Stats' screen. Leave it off to enter the stats by hand.",
@@ -2161,15 +2161,15 @@ tree.add_command(neuroseason_group)
 async def seasonmatch_slash(interaction: discord.Interaction, season: int, match: int,
                             left_player: str, right_player: str,
                             screenshot: discord.Attachment = None):
-    await neuroseason.handle_seasonmatch(interaction, season, match,
+    await rebornseason.handle_seasonmatch(interaction, season, match,
                                          left_player, right_player, screenshot)
 
 
-@tree.command(name="seasonstats", description="A player's NeuroSeason stats, for one season or their whole career")
+@tree.command(name="seasonstats", description="A player's RebornSeason stats, for one season or their whole career")
 @app_commands.describe(player="Player IGN", season="Leave blank for every season")
 @app_commands.autocomplete(player=player_autocomplete, season=season_autocomplete)
 async def seasonstats_slash(interaction: discord.Interaction, player: str, season: int = None):
-    await neuroseason.handle_seasonstats(interaction, player, season)
+    await rebornseason.handle_seasonstats(interaction, player, season)
 
 
 class RegisterModal(Modal, title="Register New Player"):

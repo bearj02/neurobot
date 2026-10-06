@@ -4,7 +4,7 @@ A Discord bot for running a **Madden Mobile** league system: score tracking, pow
 
 Built for the Reborn league system.
 
-> **Branch note.** This is `reborn_main`, the branch the Reborn bot deploys from. It is the same repository and the same code as Neuroverse's `main` — only this file and [CLAUDE.md](CLAUDE.md) differ. Reborn runs its own Discord server, bot application, token, host and database; the code is shared deliberately so a fix lands once. Land changes on `main`, then merge `main` into `reborn_main`. See [CLAUDE.md](CLAUDE.md) → "The Reborn fork: what actually differs" for the deployment delta.
+> **Branch note.** This is `reborn_main`, the branch the Reborn bot deploys from. It shares a repository with Neuroverse's `main` but is **no longer identical to it**: the gamemode module, its command, its database tables, the default database filename and all user-facing branding were renamed from Neuro* to Reborn*. Reborn also runs its own Discord server, bot application, token and host. A `main` → `reborn_main` merge is therefore a curated operation, not a fast-forward — see [CLAUDE.md](CLAUDE.md) → "The Reborn fork: what actually differs" for the full delta and the merge rules.
 
 The bot is built as a multi-league system and still is — Reborn simply has one league in it: **`RX` — CHRISTiansReborn** (formerly `NX` / NeuroChristians, renamed on the way out of Neuroverse). The league list is read from the database's `teams` table at startup, never hardcoded, so adding a second league is a row, not a code change.
 
@@ -18,7 +18,7 @@ The bot is built as a multi-league system and still is — Reborn simply has one
 - **Configurable rankings** — power rank and ladder rank are weighted formulas over dozens of stat factors, tunable per league through `/weights` and inspectable via `/factors`. Every average has a *fumble-adjusted* counterpart (fumbles excluded from the denominator rather than counted as a scored drive).
 - **Ladder builder with screenshot extraction** — `/ladder` can read a League vs League screenshot through Claude Haiku vision to pull the opponent roster, league name, division, and rank. Names that can't be matched exactly are handed back to an admin for manual matching rather than silently dropped, and suspicious OVR changes (relative to that player's own previous value) are held for review before they're applied.
 - **Siege mode** — full match lifecycle: opponent nodes with mods, per-player scoring against nodes, live status embeds, corrections, and per-mod splits.
-- **NeuroSeason** — an NFL-shaped season for individual members: signups, a conference/division draw, an 18-matchup schedule generated for any field size, screenshot-read results, NFL tiebreakers, and a self-seeding 16-team playoff.
+- **RebornSeason** — an NFL-shaped season for individual members: signups, a conference/division draw, an 18-matchup schedule generated for any field size, screenshot-read results, NFL tiebreakers, and a self-seeding 16-team playoff.
 - **Multi-season archives** — `/legacy` runs the same lookups against a previous season's database file, opened read-only at the SQLite level.
 - **Five languages** — every user-facing string goes through `i18n.t()`: English, Spanish, French, Portuguese, German.
 
@@ -58,7 +58,7 @@ Run `/manual` in Discord for the full, localized, paginated reference. Summary:
 `/siege` · `/node` · `/siegescore` · `/siegestatus` · `/updatesiege` ·
 `/siegefinal` · `/siegesplits` · `/siegehistory`
 
-### NeuroSeason
+### RebornSeason
 An NFL-shaped season played by individual members rather than by leagues: up to
 32 sign up, get drawn into two conferences and their divisions, and play 18
 matchups each — division rivals twice, a full division in-conference, a full
@@ -69,14 +69,14 @@ itself and each round generates the next until a champion is crowned.
 
 | Command | Description |
 | --- | --- |
-| `/neuroseason create` | **Admin.** Open signups for a new season |
-| `/neuroseason join` / `leave` | Sign up, or withdraw before kickoff |
-| `/neuroseason start` | **Admin.** Draw the divisions and build the schedule |
-| `/neuroseason list` | Every season and its status |
-| `/neuroseason standings` | Standings by division — overall, division and conference records; filter by conference or division |
-| `/neuroseason schedule` | The slate, filterable by player or week |
-| `/neuroseason bracket` | The playoff bracket |
-| `/neuroseason advance` | **Admin.** Fallback if a corrected result left a stage stuck |
+| `/rebornseason create` | **Admin.** Open signups for a new season |
+| `/rebornseason join` / `leave` | Sign up, or withdraw before kickoff |
+| `/rebornseason start` | **Admin.** Draw the divisions and build the schedule |
+| `/rebornseason list` | Every season and its status |
+| `/rebornseason standings` | Standings by division — overall, division and conference records; filter by conference or division |
+| `/rebornseason schedule` | The slate, filterable by player or week |
+| `/rebornseason bracket` | The playoff bracket |
+| `/rebornseason advance` | **Admin.** Fallback if a corrected result left a stage stuck |
 | `/seasonmatch` | Log a played matchup — from a result screenshot, or entered by hand |
 | `/seasonstats` | A player's stats for one season, or their whole career |
 
@@ -122,19 +122,19 @@ pip install -r requirements.txt
 | Variable | Required | Purpose | Reborn value |
 | --- | --- | --- | --- |
 | `DISCORD_TOKEN` | yes | Bot token | Reborn's own bot application — not a second copy of Neuroverse's |
-| `DB_PATH` | **yes, here** | SQLite path, defaults to `neuroverse.db` | `reborn.db` |
+| `DB_PATH` | no | SQLite path override | leave unset — defaults to `reborn.db` |
 | `DEV` | for scheduled tasks | Enables the daily new-day and daily backup loops when set to `production` | `production` |
 | `ANTHROPIC_API_KEY` | for `/ladder` and `/seasonmatch` screenshots | Claude vision extraction | set (both commands have manual fallbacks without it) |
 
 On bot-hosting.net these live on the panel's environment tab, not in a `.env` file.
 
-**`DB_PATH` is the one that fails quietly.** Leave it unset and the bot ignores `reborn.db`, creates an empty `neuroverse.db` beside it, migrates it cleanly and starts with no leagues, no players and no history — no error, just an empty bot and a `No leagues loaded from the teams table` line in the log. (Renaming the uploaded file to `neuroverse.db` works just as well as setting the variable.)
+**If the database can't be found, nothing errors.** The bot creates an empty one, migrates it cleanly, and starts with no leagues, no players and no history. The only symptom is a `No leagues loaded from the teams table` line in the log and empty league pickers in Discord — so if you see that, check the filename on the server before looking anywhere else.
 
 ```bash
 python optimized_bot.py
 ```
 
-The schema is created and migrated automatically on every startup — there is no separate migration step or schema file to apply. Archived seasons are expected as `neuroverse_<year>.db` next to the live database: that prefix is a hardcoded literal in `db._archive_path()` and does **not** follow `DB_PATH`, so an archive on this server must still be named `neuroverse_<year>.db` for `/legacy` to find it. Bundled fonts live in `fonts/` and must sit alongside `sheet_image.py`.
+The schema is created and migrated automatically on every startup — there is no separate migration step or schema file to apply. Archived seasons are expected as `reborn_<year>.db` next to the live database; that prefix is a literal in `db._archive_path()` and doesn't follow `DB_PATH`, so name archives that way regardless of what the live file is called. Bundled fonts live in `fonts/` and must sit alongside `sheet_image.py`.
 
 **GIFs are not in the repo.** `.gitignore` excludes `*.gif`, so a server deployed purely from Git has no `gifs*` folders. Score GIFs degrade gracefully (no GIF is sent), but the `Kobe!`, `Brunson!` and `bingbong` chat triggers log an `IndexError` instead of doing nothing, and `/addgif` fails until the target folder exists. Create the folders on the server and upload GIFs through `/addgif` if they're wanted.
 
@@ -159,7 +159,7 @@ This applies to the very first upload of `reborn.db` too — upload it with the 
 | `i18n.py` | Every user-facing string, all five languages |
 | `siege.py` | Siege game mode |
 | `ladder_flow.py` | The `/ladder` interactive builder |
-| `neuroseason.py` | The NeuroSeason gamemode: scheduling, standings, playoffs |
+| `rebornseason.py` | The RebornSeason gamemode: scheduling, standings, playoffs |
 | `agent.py` | Claude vision extraction for ladder and season-match screenshots |
 | `sheet_image.py` | Pillow-based PNG table and poster rendering |
 | `tournament.py`, `status.py`, `newday.py` | Smaller feature areas |

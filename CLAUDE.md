@@ -13,19 +13,44 @@ own thing: its own Discord server, its own bot application and token, its own
 bot-hosting.net server, and its own database. It renamed on the way out —
 it is **`RX` / CHRISTiansReborn** now, not `NX` / NeuroChristians.
 
-**It is the same repository and the same code as Neuroverse's `main`.** The
-only intentional differences on this branch are this file and `README.md`.
-Everything else is byte-identical, and should stay that way:
+**It shares a repository with Neuroverse's `main`, but it is no longer the
+same code.** The branch started out as docs-only divergence; in Oct 2026 the
+whole Neuro* vocabulary was renamed to Reborn* on this side. What differs now:
 
-- A bug fixed on one branch is a bug on the other. Land it on `main`, then
-  merge `main` into `reborn_main` (or cherry-pick) — don't fix it twice and
-  let the two drift.
-- Nothing in the Python is league-specific, so there is no "Reborn version"
-  of any module to maintain. The league list is read from the `teams` table
-  at startup (see "League list comes from the teams table" below), which is
-  the entire mechanism that lets one codebase serve both systems.
+| | `main` (Neuroverse) | `reborn_main` (Reborn) |
+| --- | --- | --- |
+| Gamemode module | `neuroseason.py` | **`rebornseason.py`** |
+| Its command | `/neuroseason` | **`/rebornseason`** |
+| Its schema constant | `NEUROSEASON_SCHEMA` | **`REBORNSEASON_SCHEMA`** |
+| Its four tables | `neuro_season*` | **`reborn_season*`** |
+| Its db functions | `*_neuro_season_*` | **`*_reborn_season_*`** |
+| Its i18n keys | `neuroseason.*` | **`rebornseason.*`** |
+| Conferences | `("Neuro", "Verse")` | **`("Reborn", "Revival")`** |
+| `DB_PATH` default | `neuroverse.db` | **`reborn.db`** |
+| Backup / archive prefix | `neuroverse_` | **`reborn_`** |
+| Gamemode name, 5 langs | NeuroSeason / NeuroSaison / NeuroTemporada | **RebornSeason / RebornSaison / RebornTemporada** |
+
+**A `main` → `reborn_main` merge is therefore a curated operation, not a
+fast-forward.** Git will merge the renamed files cleanly in the sense of
+producing no conflict markers, and leave you with code that is subtly wrong —
+a new `main` function named `get_neuro_season_foo()` lands here calling a
+table that doesn't exist. After any merge, grep this branch for `neuro`
+(case-insensitive) across `*.py` and expect **zero** hits. That grep is the
+actual check; the absence of conflicts proves nothing.
+
+**Merging the other way (`reborn_main` → `main`) is destructive and should
+not be done.** It would rename Neuroverse's live season tables out from under
+its bot, which has an active season in them.
+
+Still true, and worth keeping true:
+
+- A bug in shared logic is a bug on both sides. Land it on `main`, merge it
+  here, then run the grep above. Don't fix it twice independently.
+- Nothing is *league*-specific. The league list is read from the `teams`
+  table at startup (see "League list comes from the teams table" below),
+  which is what lets one codebase serve both systems despite the renames.
 - If you find yourself about to write `if league == 'RX'` anywhere, stop.
-  That's the drift this arrangement exists to avoid.
+  The renames are vocabulary; they are not a licence to branch on identity.
 
 See "The Reborn fork: what actually differs" below for the full deployment
 delta and the things that genuinely behave differently on this server.
@@ -65,7 +90,7 @@ it wrong means operating on the wrong league's data.)
 - `i18n.py` — all user-facing strings, all 5 languages, manual page text
 - `siege.py` — the Siege game mode
 - `ladder_flow.py` — the `/ladder` builder flow (screenshot extraction or manual)
-- `neuroseason.py` — the NeuroSeason gamemode (scheduling, standings, playoffs)
+- `rebornseason.py` — the RebornSeason gamemode (scheduling, standings, playoffs)
 - `agent.py` — Claude Haiku vision extraction for `/ladder` and `/seasonmatch` screenshots
 - `sheet_image.py` — PIL-based PNG table rendering (`/rank`, `/scores`, `/show_ladder`)
 - `tournament.py`, `status.py`, `newday.py` — smaller, mostly-stable feature areas
@@ -186,7 +211,7 @@ nothing should start to. Everything below is configuration or data, not code.
 | Variable | Neuroverse server | Reborn server | What breaks if it's wrong here |
 | --- | --- | --- | --- |
 | `DISCORD_TOKEN` | Neuroverse bot | **Reborn bot** | Two processes on one token: Discord closes one or both connections, and they fight over the same gateway session. Must be a different application, not just a reset token. |
-| `DB_PATH` | unset (→ `neuroverse.db`) | **`reborn.db`** | **This is the one to get right.** `db.py` line 15 is `DB_PATH = os.getenv("DB_PATH", "neuroverse.db")`. Leave it unset on the Reborn server and the bot ignores `reborn.db` entirely and creates an **empty** `neuroverse.db` next to it — schema migrates cleanly, so there's no error, just a bot with no leagues, no players and no history. The only visible symptom is the startup log line `No leagues loaded from the teams table` and every league picker coming up empty. Alternative, if you'd rather not set an env var: rename the uploaded file to `neuroverse.db` on the server. |
+| `DB_PATH` | unset (→ `neuroverse.db`) | unset (→ **`reborn.db`**) | Each branch's `db.py` line 15 defaults to its own system's filename, so neither server needs this set. It stays supported as an override. If the bot ever comes up with the log line `No leagues loaded from the teams table` and empty league pickers, it opened the wrong (or a nonexistent) file and silently created an empty one — that message is the only symptom. |
 | `DEV` | `production` | **`production`** | Gates `scheduled_newday` and `scheduled_backup` in `on_ready` (`if DEV == 'production':`). Unset, the bot runs fine but **never** creates the daily `matchup_day` placeholder rows (`/status` has nothing to show at the start of a game day until someone runs `/newday` by hand) and **never** takes a daily backup. The startup backup still runs regardless, so this fails quietly. |
 | `ANTHROPIC_API_KEY` | set | **set** | `/ladder` screenshot extraction and `/seasonmatch` screenshot extraction raise `ValueError: ANTHROPIC_API_KEY is not set`. Both commands still have working manual paths, so this degrades rather than breaks. Use a separate key if you want the two systems' usage billed separately. |
 
@@ -213,15 +238,15 @@ it's a no-op, and the panel's env tab is the real source.
   fails with `FileNotFoundError`. Both are pre-existing latent bugs that only
   a server without the folders exposes. If they get fixed, fix them on
   `main` and merge — they're not Reborn-specific.
-- **Backups are still named `neuroverse_{timestamp}.db`.** `backup_database()`
-  builds that name from a literal, not from `DB_PATH`, and `_prune_old_backups()`
-  only deletes files matching that same `neuroverse_` prefix. It works
-  correctly — backups are taken and pruned on schedule — the filenames are
-  just misleading. Don't "fix" it by changing only the backup name: the prune
-  filter has to change with it or old backups stop being pruned, and the same
-  edit has to land on both branches.
-- **`/legacy` archives**: see the hardcoded `neuroverse_{year}.db` note in the
-  multi-season archive section below.
+- **Backup and archive filenames are literals, not derived from `DB_PATH`.**
+  `backup_database()` writes `reborn_{timestamp}.db`, `_prune_old_backups()`
+  deletes only files matching that same `reborn_` prefix, and
+  `_archive_path()` builds `reborn_{year}.db`. All three were renamed
+  together on this branch, which is the only reason they agree — **if one is
+  ever changed, the other two have to change with it**, or backups stop being
+  pruned (prefix mismatch) and `/legacy` stops finding archives. Note the
+  prefix is `reborn_` with an underscore, so the live `reborn.db` itself can
+  never be matched by the prune filter.
 - **`/transfer` is a no-op with one league.** `TransferLeagueView` builds its
   select from every entry in `LEAGUE_NAMES` *including* the current one, so
   with a single league it renders one option and the handler replies "already
@@ -229,18 +254,29 @@ it's a no-op, and the panel's env tab is the real source.
 - **Siege still works normally.** `opp_league` is a free-text modal field, not
   a picker over `LEAGUE_NAMES`, so Reborn can siege any outside league by
   name exactly as before.
-- **NeuroSeason still works, at a smaller field size.** It draws from
+- **RebornSeason still works, at a smaller field size.** It draws from
   individual members, not leagues, and already auto-scales: two conferences
   always, as many divisions as fit at 3+ members each capped at 4, everyone
   still playing 18. With Reborn's 18 active players the playoff field drops
   from 16 to 8 (largest power of two that fits), which is the designed
   behaviour, not a failure.
-- **The gamemode is still called NeuroSeason** (`/neuroseason`,
-  `neuroseason.py`, every `season.*` i18n key). It was deliberately not
-  renamed — the command name, the module and ~5 languages of strings would
-  all have to move together, and that's exactly the kind of change that makes
-  the two branches diverge in code rather than in docs. Worth doing properly
-  on `main` for both systems if it's wanted, not unilaterally here.
+- **The gamemode was renamed NeuroSeason → RebornSeason**, and that rename
+  went all the way down: module, command, i18n keys, schema constant, the
+  four database tables, every `db.py` function, and the display name in all
+  five languages (RebornSeason / RebornTemporada / RebornSaison, following
+  the existing brand-prefix-plus-localized-word pattern). The conferences
+  went with it — `CONFERENCES = ("Neuro", "Verse")` split "Neuroverse" in
+  half, so it is now `("Reborn", "Revival")` and divisions read "Reborn
+  East", "Revival West". **`/rebornseason` is a new command name, so it needs
+  a `/sync`** before it appears in Discord; the old `/neuroseason` will
+  linger in the picker on this guild until then.
+- **The four season tables were renamed, not migrated.** They were empty in
+  `reborn.db` (see below), so the build script simply `DROP`s the
+  `neuro_season*` tables and `REBORNSEASON_SCHEMA` creates `reborn_season*`
+  on the next startup. There is deliberately **no rename migration in
+  `db.py`** — a migration that dropped or renamed those tables would run on
+  Neuroverse's server too if it ever reached `main`, and that database has a
+  live season in them.
 
 ### How `reborn.db` was built (Oct 2026)
 
@@ -260,7 +296,7 @@ CHRISTiansReborn), 11 `pwr_rank_weights` rows. `PRAGMA integrity_check` is
 **The rename touched ten tables, not one.** `teams.id` is a plain `TEXT`
 primary key and `team_id` is carried on `players`, `game_scores`,
 `defense_scores`, `matchup_day`, `matchup_ladder`, `ladder_matchups`,
-`siege_matches`, `pwr_rank_weights` and `neuro_season_members`. There is no
+`siege_matches`, `pwr_rank_weights` and `reborn_season_members`. There is no
 `ON UPDATE CASCADE` anywhere in this schema, so every one of those columns
 had to be updated by hand alongside `teams`. Miss one and you get either a
 league with no data or data belonging to no league — and since the bot runs
@@ -305,13 +341,13 @@ Four decisions in there that aren't obvious from the row counts:
 
 Dropped entirely: all siege data (this league had no siege matches at all
 under NX), all
-tournament data (both tables were already empty), and **all NeuroSeason
+tournament data (both tables were already empty), and **all RebornSeason
 data**. That last one is a judgement call worth knowing about — season 1 was
 `active` with 32 members drawn from six different leagues and 288 matches,
 but **zero results had been reported**, so nothing was lost by clearing it.
 Carrying it over would have left 27 members pointing at `players` rows that
 don't exist in this database. Reborn starts a fresh season with
-`/neuroseason create`.
+`/rebornseason create`.
 
 ## Database gotchas (each one cost real time to find — don't relearn these)
 
@@ -665,11 +701,11 @@ Added at the 2026→2027 season transition. Two pieces:
 - **`/legacy <rank|player|stats|history|scores|show_ladder> year:YYYY`** —
   read-only lookups against an archived past season's database, expected to
   sit alongside the live database on the server. **The archive filename is
-  hardcoded as `neuroverse_{year}.db`** in `db._archive_path()` — it is built
+  hardcoded as `reborn_{year}.db`** in `db._archive_path()` — it is built
   from a string literal, *not* from `DB_PATH`, so it does not become
   `reborn_{year}.db` just because this server's live file is `reborn.db`. An
   archive dropped on the Reborn server must therefore still be named
-  `neuroverse_2026.db` or `/legacy` will report "no archive for that year".
+  `reborn_2026.db` or `/legacy` will report "no archive for that year".
   Reborn has no archive yet, so this costs nothing today; the first time one
   is cut, either name it that way or change `_archive_path()` on **both**
   branches. Each subcommand takes exactly the same arguments as its
@@ -1683,12 +1719,14 @@ future test opens a source file, pass the encoding explicitly.
   during this conversation (Components V2 modal system, `discord.ui.Label`)
   and stale assumptions have caused real bugs before.
 - **Keeping `reborn_main` and `main` in step is part of finishing a code
-  change, not a separate chore.** Land code on `main`, merge `main` into
-  `reborn_main`, push both. The only files expected to conflict are
-  `CLAUDE.md` and `README.md` — if a merge wants to change a `.py` file in a
-  way that differs between the branches, that's the drift this setup exists
-  to prevent, and it should be resolved by making the code work for both
-  systems rather than by keeping two versions.
+  change, not a separate chore** — but since the Oct 2026 rename it is a
+  *curated* merge, not a fast-forward. Land shared logic on `main`, merge
+  `main` into `reborn_main`, then **grep the result for `neuro`
+  (case-insensitive) across `*.py` and expect zero hits**. Git will happily
+  produce a conflict-free merge that reintroduces `neuro_season*` table
+  references or a `get_neuro_season_*` call, and nothing about a clean merge
+  will tell you. The rename table at the top of this file is the mapping to
+  apply. Never merge `reborn_main` back into `main`.
 - **No Python interpreter on the current dev machine**, so `tests.py` can't
   be run locally — the suite has to be exercised somewhere that has one, or
   via `/test` from inside Discord after deploying. Query the database
@@ -1696,7 +1734,7 @@ future test opens a source file, pass the encoding explicitly.
   question comes up; there's no `sqlite3.exe` either.
 
 
-## NeuroSeason — the NFL-shaped season gamemode (`neuroseason.py`)
+## RebornSeason — the NFL-shaped season gamemode (`rebornseason.py`)
 
 A season played by **individual members**, not by leagues — up to 32 people
 from any league sign up, get drawn into two conferences and their divisions,
@@ -1713,7 +1751,7 @@ silently revisit them:**
   cases, and not ghost teams padding the field to 32.
 - **Everyone plays exactly 18, at every field size.** Small fields reach 18
   by repeating opponents, not by playing a shorter season.
-- **Signups are slash-command self-serve** (`/neuroseason join season:N
+- **Signups are slash-command self-serve** (`/rebornseason join season:N
   player:<ign>`), open to anyone — no Discord-account linking, no button UI,
   and deliberately nothing stopping someone signing another member up.
 - **The playoff field is 16.** Below 16 members that literally can't be
@@ -1722,25 +1760,25 @@ silently revisit them:**
 
 ### The four new tables — and why they're created differently to every other one
 
-`neuro_seasons`, `neuro_season_members`, `neuro_season_matches`,
-`neuro_season_stats`. **No other table in this database is created from
+`reborn_seasons`, `reborn_season_members`, `reborn_season_matches`,
+`reborn_season_stats`. **No other table in this database is created from
 code** — the rest were made by hand on the server long ago, and `db.py` only
 ever `ALTER`s them. There is no shell access to do that with anymore, so
-these four live in **`db.NEUROSEASON_SCHEMA`** (a single SQL string near the
+these four live in **`db.REBORNSEASON_SCHEMA`** (a single SQL string near the
 bottom of `db.py`), executed as `CREATE TABLE IF NOT EXISTS` by
-`_migrate_neuroseason_schema()` from `_migrate_schema()` on every startup.
+`_migrate_rebornseason_schema()` from `_migrate_schema()` on every startup.
 `tests.py`'s `setup_db()` builds its copy from **that same constant** rather
 than pasting the DDL into the test `SCHEMA` block — a schema change can't
 pass tests while breaking production.
 
 Worth knowing about the columns:
-- `neuro_season_members.team_id` is the league the player belonged to **at
+- `reborn_season_members.team_id` is the league the player belonged to **at
   signup**, same historical-attribution principle as `game_scores.team_id`.
   A mid-season transfer doesn't move them out of the season or rewrite what
   they've already played.
-- `get_neuro_season_members()` has **no status filter at all**. A season
+- `get_reborn_season_members()` has **no status filter at all**. A season
   roster is frozen at signup, so a member who goes inactive still owns their
-  matchups and their stats. Relatedly, `neuroseason._resolve_player()` falls
+  matchups and their stats. Relatedly, `rebornseason._resolve_player()` falls
   back to an unfiltered `players` lookup when `db.get_player()` (which
   excludes `status='I'`) comes back empty — without that, a member going
   inactive in week 9 would silently make their own remaining nine matchups
@@ -1748,7 +1786,7 @@ Worth knowing about the columns:
 - `match_num` is unique per season and **playoff rounds continue the regular
   season's numbering** rather than restarting it, because that number is
   what a player types into `/seasonmatch`.
-- `record_neuro_season_result()` **replaces** a previously-reported result
+- `record_reborn_season_result()` **replaces** a previously-reported result
   instead of adding a second one, using the same explicit check-then-act
   pattern as `update_player_score`/`log_siege_score` (SELECT for the
   existing row, UPDATE it by its own id, INSERT only if absent). This is the
@@ -1805,7 +1843,7 @@ leading on record, so it passed identically against a plain record sort.
 It now asserts the discriminating order *and* asserts the fixture still
 discriminates.
 
-**`/neuroseason standings` shows three records per row** — overall, division
+**`/rebornseason standings` shows three records per row** — overall, division
 and conference (`_fmt_record`, which drops the trailing `-0` until there's
 actually been a tie, because three records on one line otherwise gets hard to
 read). That isn't decoration: division and conference record are two of the
@@ -1815,7 +1853,7 @@ nobody could see.
 It takes an optional **`division:`** filter alongside `conference:`.
 `season_division_autocomplete` reads the season from
 `interaction.namespace.season` and lists **that season's own divisions**
-(`neuroseason.season_divisions`, straight from its members) rather than
+(`rebornseason.season_divisions`, straight from its members) rather than
 static choices — how many divisions a season has depends on how many people
 signed up for it, so a fixed list would offer names that produce an empty
 table. Falls back to every generatable name before a season is chosen.
@@ -1902,7 +1940,7 @@ extractor.
 
 `advance_season(season_id)` is called after every saved result and is safe
 to call at any time — it only acts when the current stage or round has zero
-pending matches, so an early call is a no-op. `/neuroseason advance` is an
+pending matches, so an early call is a no-op. `/rebornseason advance` is an
 admin fallback for the case where a result corrected after the fact left a
 stage stuck. Every seed is cleared before being re-set when the playoffs
 open, so a member who missed the field can't keep a seed from an earlier
@@ -1929,7 +1967,7 @@ call.
 
 ## Adding a page to `/manual` touches three places, not one
 
-Adding the NeuroSeason page caught this the hard way: `MANUAL_PAGE_COLORS`
+Adding the RebornSeason page caught this the hard way: `MANUAL_PAGE_COLORS`
 in `optimized_bot.py` is indexed **by page number**, and it had exactly five
 entries. A sixth page meant `IndexError` inside `ManualView._build_embed()`,
 raised from the Next button's callback — so the interaction never got a

@@ -1,5 +1,5 @@
 """
-tests.py — Unit test suite for the Neuroverse bot.
+tests.py — Unit test suite for the Reborn bot.
 
 Tests the database layer and command logic using an in-memory SQLite database.
 Discord interactions are mocked so no bot connection is needed.
@@ -503,14 +503,14 @@ CREATE UNIQUE INDEX uq_siege_node_player ON siege_scores(node_id, player_id);
 """
 
 SEED_DATA = """
-INSERT INTO teams VALUES ('NP','NeuroPerverse','NeuroPerverse');
-INSERT INTO teams VALUES ('ND','NeuroDiverse','NeuroDiverse');
+INSERT INTO teams VALUES ('RX','CHRISTiansReborn','CHRISTiansReborn');
+INSERT INTO teams VALUES ('ND','Second League','Second League');
 INSERT INTO players (team_id,ign,status,pwr_rank,off_ovr,def_ovr,total_ovr,games)
-    VALUES ('NP','Grizzly','A',93.6,244,229,7059,294);
+    VALUES ('RX','Grizzly','A',93.6,244,229,7059,294);
 INSERT INTO players (team_id,ign,status,pwr_rank,off_ovr,def_ovr,total_ovr,games)
-    VALUES ('NP','dougbaldwin','A',91.2,224,225,6585,283);
+    VALUES ('RX','dougbaldwin','A',91.2,224,225,6585,283);
 INSERT INTO players (team_id,ign,status,pwr_rank,off_ovr,def_ovr,total_ovr,games)
-    VALUES ('NP','FHRITP','A',85.0,228,211,6355,284);
+    VALUES ('RX','FHRITP','A',85.0,228,211,6355,284);
 INSERT INTO players (team_id,ign,status,off_ovr,def_ovr,total_ovr)
     VALUES ('ND','Bob','I',200,200,5000);
 INSERT INTO pwr_rank_weights (label,weight,category,display_label)
@@ -537,13 +537,13 @@ async def setup_db():
         s = stmt.strip()
         if s:
             await db.execute(s)
-    # The neuroseason tables come straight from db.NEUROSEASON_SCHEMA rather
+    # The rebornseason tables come straight from db.REBORNSEASON_SCHEMA rather
     # than being copied into SCHEMA above. That constant is what actually
     # creates them in production (there's no shell access to create a table
     # any other way), so building the test database from the same string is
     # the only way a schema change can't silently pass tests while breaking
     # the live bot.
-    for stmt in db.NEUROSEASON_SCHEMA.strip().split(";"):
+    for stmt in db.REBORNSEASON_SCHEMA.strip().split(";"):
         s = stmt.strip()
         if s:
             await db.execute(s)
@@ -595,7 +595,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
             files = os.listdir(backup_dir)
             self.assertEqual(len(files), 1)
-            self.assertTrue(files[0].startswith("neuroverse_"))
+            self.assertTrue(files[0].startswith("reborn_"))
 
             check = sqlite3.connect(os.path.join(backup_dir, files[0]))
             self.assertEqual(check.execute("SELECT x FROM t").fetchone()[0], 42)
@@ -616,8 +616,8 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     def test_prune_old_backups_removes_only_old_files(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            old_file   = os.path.join(tmp, "neuroverse_old.db")
-            recent_file = os.path.join(tmp, "neuroverse_recent.db")
+            old_file   = os.path.join(tmp, "reborn_old.db")
+            recent_file = os.path.join(tmp, "reborn_recent.db")
             unrelated  = os.path.join(tmp, "not_a_backup.txt")
             for path in (old_file, recent_file, unrelated):
                 with open(path, "w") as f:
@@ -634,8 +634,8 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
                 db.BACKUP_DIR = orig_dir
 
             remaining = set(os.listdir(tmp))
-            self.assertNotIn("neuroverse_old.db", remaining)
-            self.assertIn("neuroverse_recent.db", remaining)
+            self.assertNotIn("reborn_old.db", remaining)
+            self.assertIn("reborn_recent.db", remaining)
             self.assertIn("not_a_backup.txt", remaining)  # non-backup files are never touched
 
     # --- historical team_id vs current team_id (regression: a query that joins
@@ -649,22 +649,22 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         get_matchup_status previously filtered on the player's CURRENT team
         (p.team_id) instead of the score row's own team (gs.team_id), which
         silently dropped this exact case."""
-        await db.update_player_score("Grizzly", TODAY, 22.0, team_id_override="NP")
-        # Simulate a later transfer away from NP
+        await db.update_player_score("Grizzly", TODAY, 22.0, team_id_override="RX")
+        # Simulate a later transfer away from RX
         await db.execute("UPDATE players SET team_id='ND' WHERE ign='Grizzly'")
-        status = await db.get_matchup_status("NP", TODAY)
+        status = await db.get_matchup_status("RX", TODAY)
         self.assertEqual(status["us_score"], 22)
 
     async def test_scores_query_includes_transferred_players_historical_score(self):
         """Same regression, for the exact query /scores uses directly."""
-        await db.update_player_score("Grizzly", TODAY, 22.0, team_id_override="NP")
+        await db.update_player_score("Grizzly", TODAY, 22.0, team_id_override="RX")
         await db.execute("UPDATE players SET team_id='ND' WHERE ign='Grizzly'")
         rows = await db.fetchall(
             """
             SELECT p.ign, gs.score FROM game_scores gs JOIN players p ON p.id = gs.player_id
             WHERE gs.team_id = ? AND gs.game_date = ?
             """,
-            ("NP", TODAY)
+            ("RX", TODAY)
         )
         self.assertIn("Grizzly", [r["ign"] for r in rows])
 
@@ -674,7 +674,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         row = await db.get_player("Grizzly")
         self.assertIsNotNone(row)
         self.assertEqual(row["ign"], "Grizzly")
-        self.assertEqual(row["team_id"], "NP")
+        self.assertEqual(row["team_id"], "RX")
 
     async def test_get_player_rested_found(self):
         """A status players should be found."""
@@ -808,7 +808,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_rank_table_active_only(self):
         """Should only return A status players, not I."""
-        rows = await db.get_rank_table("NP")
+        rows = await db.get_rank_table("RX")
         igns = [r["ign"] for r in rows]
         self.assertIn("Grizzly", igns)
         self.assertIn("dougbaldwin", igns)
@@ -816,7 +816,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Bob", igns)      # L status, wrong team
 
     async def test_get_rank_table_sorted_by_pwr_rank(self):
-        rows = await db.get_rank_table("NP")
+        rows = await db.get_rank_table("RX")
         ranks = [r["pwr_rank"] for r in rows]
         self.assertEqual(ranks, sorted(ranks, reverse=True))
 
@@ -843,7 +843,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         matchup was set via /ladder or /matchup, not the score entry."""
         await db.update_player_score("Grizzly", TODAY, 18.0)
         await db.update_player_score("Grizzly", YESTERDAY, 22.0)
-        await db.set_matchup_info("NP", TODAY, event_type="HOF")
+        await db.set_matchup_info("RX", TODAY, event_type="HOF")
         avg = await db.get_player_avg("Grizzly", "HOF")
         self.assertAlmostEqual(avg, 18.0, places=1)
 
@@ -854,28 +854,28 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- matchup helpers ---
 
     async def test_set_matchup(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia", "E1")
+        await db.set_matchup("RX", TODAY, "WolfpackMafia", "E1")
         row = await db.fetchone(
-            "SELECT opp_ign, event_type FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_ign, event_type FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (TODAY,)
         )
         self.assertEqual(row["opp_ign"], "WolfpackMafia")
         self.assertEqual(row["event_type"], "E1")
 
     async def test_set_matchup_stores_our_rank(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia", "E1", our_rank=45)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia", "E1", our_rank=45)
         row = await db.fetchone(
-            "SELECT our_rank FROM matchup_day WHERE team_id='NP' AND game_date=?", (TODAY,)
+            "SELECT our_rank FROM matchup_day WHERE team_id='RX' AND game_date=?", (TODAY,)
         )
         self.assertEqual(row["our_rank"], 45)
 
     async def test_set_matchup_none_fields_preserve_existing_values(self):
         """A field left as None (e.g. our_rank wasn't visible in a screenshot)
         must preserve whatever's already stored, not wipe it out."""
-        await db.set_matchup("NP", TODAY, "WolfpackMafia", "E1", our_rank=45)
-        await db.set_matchup("NP", TODAY, opp_ign=None, event_type=None, our_rank=None)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia", "E1", our_rank=45)
+        await db.set_matchup("RX", TODAY, opp_ign=None, event_type=None, our_rank=None)
         row = await db.fetchone(
-            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (TODAY,)
         )
         self.assertEqual(row["opp_ign"], "WolfpackMafia")
@@ -883,10 +883,10 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["our_rank"], 45)
 
     async def test_set_matchup_provided_fields_overwrite_even_when_others_are_none(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia", "E1", our_rank=45)
-        await db.set_matchup("NP", TODAY, opp_ign="NewOpponent", event_type=None, our_rank=None)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia", "E1", our_rank=45)
+        await db.set_matchup("RX", TODAY, opp_ign="NewOpponent", event_type=None, our_rank=None)
         row = await db.fetchone(
-            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (TODAY,)
         )
         self.assertEqual(row["opp_ign"], "NewOpponent")  # explicitly provided, overwrites
@@ -894,34 +894,34 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["our_rank"], 45)             # left None, preserved
 
     async def test_set_matchup_upsert(self):
-        await db.set_matchup("NP", TODAY, "TeamA")
-        await db.set_matchup("NP", TODAY, "TeamB")
+        await db.set_matchup("RX", TODAY, "TeamA")
+        await db.set_matchup("RX", TODAY, "TeamB")
         rows = await db.fetchall(
-            "SELECT opp_ign FROM matchup_day WHERE team_id='NP' AND game_date=?", (TODAY,)
+            "SELECT opp_ign FROM matchup_day WHERE team_id='RX' AND game_date=?", (TODAY,)
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opp_ign"], "TeamB")
 
     async def test_set_outcome_win(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia")
-        outcome = await db.set_outcome("NP", TODAY, 300, 225, 45)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia")
+        outcome = await db.set_outcome("RX", TODAY, 300, 225, 45)
         self.assertEqual(outcome, "WIN")
 
     async def test_set_outcome_loss(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia")
-        outcome = await db.set_outcome("NP", TODAY, 200, 250, 48)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia")
+        outcome = await db.set_outcome("RX", TODAY, 200, 250, 48)
         self.assertEqual(outcome, "LOSS")
 
     async def test_set_outcome_tie(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia")
-        outcome = await db.set_outcome("NP", TODAY, 250, 250, 45)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia")
+        outcome = await db.set_outcome("RX", TODAY, 250, 250, 45)
         self.assertEqual(outcome, "TIE")
 
     async def test_update_opp_score(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia")
-        await db.update_opp_score("NP", TODAY, 225, 45)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia")
+        await db.update_opp_score("RX", TODAY, 225, 45)
         row = await db.fetchone(
-            "SELECT opp_score, opp_drives FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_score, opp_drives FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (TODAY,)
         )
         self.assertEqual(row["opp_score"], 225)
@@ -930,22 +930,22 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- get_matchup_status ---
 
     async def test_matchup_status_no_data(self):
-        status = await db.get_matchup_status("NP", TODAY)
+        status = await db.get_matchup_status("RX", TODAY)
         self.assertEqual(status["us_score"], 0)
         self.assertEqual(status["outlook"], "TIED")
 
     async def test_matchup_status_with_scores(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia")
-        await db.update_opp_score("NP", TODAY, 100, 10)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia")
+        await db.update_opp_score("RX", TODAY, 100, 10)
         await db.update_player_score("Grizzly", TODAY, 22.0)
         await db.update_player_score("dougbaldwin", TODAY, 20.0)
-        status = await db.get_matchup_status("NP", TODAY)
+        status = await db.get_matchup_status("RX", TODAY)
         self.assertEqual(status["us_score"], 42.0)
         self.assertEqual(status["outlook"], "BEHIND")
 
     async def test_matchup_status_remaining_players(self):
         await db.update_player_score("Grizzly", TODAY, 22.0)
-        status = await db.get_matchup_status("NP", TODAY)
+        status = await db.get_matchup_status("RX", TODAY)
         # dougbaldwin hasn't scored yet
         self.assertIn("dougbaldwin", status["players_remaining"])
         self.assertNotIn("Grizzly", status["players_remaining"])
@@ -953,15 +953,15 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- ladder helpers ---
 
     async def test_upsert_ladder_slot(self):
-        await db.upsert_ladder_slot("NP", TODAY, 1, "WolfpackMafia", 219, 7059)
-        rows = await db.get_ladder_snapshot("NP", TODAY)
+        await db.upsert_ladder_slot("RX", TODAY, 1, "WolfpackMafia", 219, 7059)
+        rows = await db.get_ladder_snapshot("RX", TODAY)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opp_ign"], "WolfpackMafia")
 
     async def test_upsert_ladder_slot_update(self):
-        await db.upsert_ladder_slot("NP", TODAY, 1, "TeamA", 219, 7059)
-        await db.upsert_ladder_slot("NP", TODAY, 1, "TeamB", 230, 7100)
-        rows = await db.get_ladder_snapshot("NP", TODAY)
+        await db.upsert_ladder_slot("RX", TODAY, 1, "TeamA", 219, 7059)
+        await db.upsert_ladder_slot("RX", TODAY, 1, "TeamB", 230, 7100)
+        rows = await db.get_ladder_snapshot("RX", TODAY)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opp_ign"], "TeamB")
 
@@ -998,19 +998,19 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- get_players_remaining ---
 
     async def test_players_remaining_all(self):
-        remaining = await db.get_players_remaining("NP", TODAY)
+        remaining = await db.get_players_remaining("RX", TODAY)
         self.assertIn("Grizzly", remaining)
         self.assertIn("dougbaldwin", remaining)
 
     async def test_players_remaining_after_score(self):
         await db.update_player_score("Grizzly", TODAY, 22.0)
-        remaining = await db.get_players_remaining("NP", TODAY)
+        remaining = await db.get_players_remaining("RX", TODAY)
         self.assertNotIn("Grizzly", remaining)
         self.assertIn("dougbaldwin", remaining)
 
     async def test_players_remaining_includes_all_active(self):
         """All A-status players should appear in remaining until scored."""
-        remaining = await db.get_players_remaining("NP", TODAY)
+        remaining = await db.get_players_remaining("RX", TODAY)
         self.assertIn("FHRITP", remaining)
 
     # --- fourth down rate ---
@@ -1110,26 +1110,26 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         """A transferred player's history on a PREVIOUS team must not
         extend or affect their CURRENT team's streak — matching the same
         historical-team-id scoping principle as get_player_stats."""
-        grizzly = await db.get_player("Grizzly")  # currently on NP
+        grizzly = await db.get_player("Grizzly")  # currently on RX
         # An old, high streak on a different team_id, from before a
         # hypothetical transfer.
         await db.execute(
             "INSERT INTO game_scores (player_id, team_id, game_date, score) VALUES (?, 'ND', ?, 24.0)",
             (grizzly["id"], (datetime.date.fromisoformat(TODAY) - datetime.timedelta(days=1)).isoformat())
         )
-        # Just one real game on NP, not a 24.
+        # Just one real game on RX, not a 24.
         await db.update_player_score("Grizzly", TODAY, 20.0)
         result = await db.get_player_streaks("Grizzly")
-        self.assertEqual(result["kobe_streak"], 0)  # ND's 24 must not count toward NP's streak
+        self.assertEqual(result["kobe_streak"], 0)  # ND's 24 must not count toward RX's streak
         self.assertEqual(result["no_drop_streak"], 1)  # just today's 20
 
     # --- /openspots: 18 minus active roster count, per league ---
 
     async def test_get_open_spots_basic_calculation(self):
-        """The NP fixture has 3 active players (Grizzly, dougbaldwin, JX8) —
+        """The RX fixture has 3 active players (Grizzly, dougbaldwin, JX8) —
         open_spots must be exactly 18 minus that count."""
         spots = await db.get_open_spots()
-        np_entry = next(s for s in spots if s["team_id"] == "NP")
+        np_entry = next(s for s in spots if s["team_id"] == "RX")
         self.assertEqual(np_entry["active_count"], 3)
         self.assertEqual(np_entry["open_spots"], 15)
 
@@ -1149,16 +1149,16 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     async def test_get_open_spots_excludes_inactive_players_from_count(self):
         """An inactive (status='I') player must not count against open
         spots — a league with an inactive player still has that spot open."""
-        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('NP', 'BenchedPlayer', 'I')")
+        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('RX', 'BenchedPlayer', 'I')")
         spots = await db.get_open_spots()
-        np_entry = next(s for s in spots if s["team_id"] == "NP")
+        np_entry = next(s for s in spots if s["team_id"] == "RX")
         self.assertEqual(np_entry["active_count"], 3)  # unchanged — the inactive player doesn't count
         self.assertEqual(np_entry["open_spots"], 15)
 
     async def test_get_open_spots_returns_display_name_not_just_team_id(self):
         spots = await db.get_open_spots()
-        np_entry = next(s for s in spots if s["team_id"] == "NP")
-        self.assertEqual(np_entry["name"], "NeuroPerverse")
+        np_entry = next(s for s in spots if s["team_id"] == "RX")
+        self.assertEqual(np_entry["name"], "CHRISTiansReborn")
 
 
 
@@ -1300,7 +1300,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         into their CURRENT team's stats. A league that's never played a HOF
         match must never show a HOF average for any of its players, even one
         who played HOF while on a different team before transferring."""
-        grizzly = await db.get_player("Grizzly")  # currently on NP
+        grizzly = await db.get_player("Grizzly")  # currently on RX
         # Historical HOF game from before a hypothetical transfer — tagged
         # with a different team_id, exactly like a real transferred player's
         # history. matchup_day is the real source of truth for event_type,
@@ -1312,12 +1312,12 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
             (grizzly["id"], YESTERDAY)
         )
         await db.set_matchup_info("ND", YESTERDAY, event_type="HOF")
-        # A real NP game, no matching matchup_day entry (NP has never played a HOF match)
+        # A real RX game, no matching matchup_day entry (RX has never played a HOF match)
         await db.update_player_score("Grizzly", TODAY, 20.0)
 
-        stats = await db.get_player_stats(grizzly["id"], "NP")
-        self.assertIsNone(stats["hof_avg"])   # NP has no HOF games — must not inherit ND's
-        self.assertEqual(stats["games"], 1)   # only the NP game counts, not the ND one too
+        stats = await db.get_player_stats(grizzly["id"], "RX")
+        self.assertIsNone(stats["hof_avg"])   # RX has no HOF games — must not inherit ND's
+        self.assertEqual(stats["games"], 1)   # only the RX game counts, not the ND one too
         self.assertAlmostEqual(stats["avg_yearly"], 20.0)  # ND's 30.0 must not factor in
 
     # --- Fumble-adjusted averages: fumbles treated as null drives ---
@@ -1376,7 +1376,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         await db.update_player_score("Grizzly", YESTERDAY, 20.0, fumbles=0)
         # 2 games, 30 total points, 1 total fumble -> 6 drives - 1 = 5
         # fumble-adjusted drives, 30/5 = 6.0 ppd, * 3 = 18.0
-        stats = await db.get_player_stats(grizzly["id"], "NP")
+        stats = await db.get_player_stats(grizzly["id"], "RX")
         self.assertAlmostEqual(stats["avg_yearly_fumble_adj"], 18.0)
         self.assertAlmostEqual(stats["avg_yearly"], 15.0)  # plain average, unaffected
         self.assertEqual(stats["fumbles"], 1)
@@ -1394,7 +1394,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         # An old game with a fumble that must NOT factor into the 7-game window.
         await db.execute(
             "INSERT INTO game_scores (player_id, team_id, game_date, score, fumbles) "
-            "VALUES (?, 'NP', ?, 5.0, 10)",
+            "VALUES (?, 'RX', ?, 5.0, 10)",
             (grizzly["id"], old_date)
         )
         # 7 more recent, fumble-free games — enough to fully occupy the
@@ -1403,7 +1403,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
             game_date = (datetime.date.fromisoformat(TODAY) - datetime.timedelta(days=i)).isoformat()
             await db.update_player_score("Grizzly", game_date, 24.0, fumbles=0)
 
-        stats = await db.get_player_stats(grizzly["id"], "NP")
+        stats = await db.get_player_stats(grizzly["id"], "RX")
         # Only the 7 recent, fumble-free games should count in the 7-day figures.
         self.assertAlmostEqual(stats["avg_7day"], 24.0)
         self.assertAlmostEqual(stats["avg_7day_fumble_adj"], 24.0)  # 0 fumbles in this window -> same as plain
@@ -1414,8 +1414,8 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         from the earlier division-averages bug) — not bypass it."""
         grizzly = await db.get_player("Grizzly")
         await db.update_player_score("Grizzly", TODAY, 20.0, fumbles=1)
-        await db.set_matchup_info("NP", TODAY, event_type="HOF")
-        stats = await db.get_player_stats(grizzly["id"], "NP")
+        await db.set_matchup_info("RX", TODAY, event_type="HOF")
+        stats = await db.get_player_stats(grizzly["id"], "RX")
         # 1 game = 3 drives, 1 fumble = 2 fumble-adjusted drives, 20/2=10 ppd, *3=30
         self.assertAlmostEqual(stats["hof_avg"], 20.0)
         self.assertAlmostEqual(stats["hof_avg_fumble_adj"], 30.0)
@@ -1460,7 +1460,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         before this change."""
         from optimized_bot import _build_player_card_embed
         await db.update_player_score("Grizzly", TODAY, 10.0, fumbles=1)
-        await db.set_matchup_info("NP", TODAY, event_type="E3")
+        await db.set_matchup_info("RX", TODAY, event_type="E3")
         row = await db.get_player("Grizzly")
         embed = await _build_player_card_embed("Grizzly", row, "en")
         field_names = [c.kwargs.get("name") for c in embed.add_field.call_args_list]
@@ -1503,26 +1503,26 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         selectable in the /weights UI."""
         await db.update_player_score("Grizzly", TODAY, 10.0, fumbles=1)
         row = await db.get_player("Grizzly")
-        baseline = await db.get_player_stats(row["id"], "NP")
+        baseline = await db.get_player_stats(row["id"], "RX")
 
         await db.execute(
             "INSERT INTO pwr_rank_weights (label,weight,category,display_label) "
             "VALUES ('yearly_avg_fumble_adj', 0.5, 'pwr_rank', 'Yearly Avg (Fumble-Adj.)')"
         )
-        with_new_weight = await db.get_player_stats(row["id"], "NP")
+        with_new_weight = await db.get_player_stats(row["id"], "RX")
         self.assertNotEqual(with_new_weight["pwr_rank"], baseline["pwr_rank"])
 
     async def test_ladder_rank_weight_on_fumble_adjusted_7day_actually_changes_rank(self):
         """Same check for ladder_rank, using 7day_avg_fumble_adj."""
         await db.update_player_score("Grizzly", TODAY, 10.0, fumbles=1)
         row = await db.get_player("Grizzly")
-        baseline = await db.get_player_stats(row["id"], "NP")
+        baseline = await db.get_player_stats(row["id"], "RX")
 
         await db.execute(
             "INSERT INTO pwr_rank_weights (label,weight,category,display_label) "
             "VALUES ('7day_avg_fumble_adj', 0.5, 'ladder', '7-Day Avg (Fumble-Adj.)')"
         )
-        with_new_weight = await db.get_player_stats(row["id"], "NP")
+        with_new_weight = await db.get_player_stats(row["id"], "RX")
         self.assertNotEqual(with_new_weight["ladder_rank"], baseline["ladder_rank"])
 
     async def test_fumble_adjusted_weight_defaults_to_zero_contribution(self):
@@ -1533,7 +1533,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         behavior exactly, not silently shifting everyone's rank."""
         await db.update_player_score("Grizzly", TODAY, 10.0, fumbles=1)
         row = await db.get_player("Grizzly")
-        stats = await db.get_player_stats(row["id"], "NP")
+        stats = await db.get_player_stats(row["id"], "RX")
         # No fumble-adjusted weight rows exist in the fixture by default —
         # this is just confirming pwr_rank/ladder_rank still compute cleanly
         # (no crash, no NaN) using only the pre-existing weight rows.
@@ -1593,37 +1593,37 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         must not bleed into their CURRENT team's percentage. Directly
         avoids reusing get_player_fourth_down_rate's own (deliberately
         unscoped, career-wide) query for this purpose."""
-        grizzly = await db.get_player("Grizzly")  # currently on NP
+        grizzly = await db.get_player("Grizzly")  # currently on RX
         await db.execute(
             "INSERT INTO game_scores (player_id, team_id, game_date, score, fourth_downs, fourth_down_convs) "
             "VALUES (?, 'ND', ?, 20.0, 10, 1)",
             (grizzly["id"], YESTERDAY)
         )
         await db.update_player_score("Grizzly", TODAY, 22.0, fourth_downs=4, fourth_down_convs=3)
-        stats = await db.get_player_stats(grizzly["id"], "NP")
-        self.assertEqual(stats["fourth_down_attempts"], 4)  # only NP's, not ND's 10 too
+        stats = await db.get_player_stats(grizzly["id"], "RX")
+        self.assertEqual(stats["fourth_down_attempts"], 4)  # only RX's, not ND's 10 too
         self.assertAlmostEqual(stats["fourth_down_conv_pct"], 0.75)
 
     async def test_pwr_rank_weight_on_fourth_down_conv_pct_actually_changes_rank(self):
         await db.update_player_score("Grizzly", TODAY, 22.0, fourth_downs=4, fourth_down_convs=3)
         row = await db.get_player("Grizzly")
-        baseline = await db.get_player_stats(row["id"], "NP")
+        baseline = await db.get_player_stats(row["id"], "RX")
         await db.execute(
             "INSERT INTO pwr_rank_weights (label,weight,category,display_label) "
             "VALUES ('fourth_down_conv_pct', 0.5, 'pwr_rank', '4th Down Conv %')"
         )
-        with_weight = await db.get_player_stats(row["id"], "NP")
+        with_weight = await db.get_player_stats(row["id"], "RX")
         self.assertNotEqual(with_weight["pwr_rank"], baseline["pwr_rank"])
 
     async def test_ladder_rank_weight_on_fourth_down_conv_pct_actually_changes_rank(self):
         await db.update_player_score("Grizzly", TODAY, 22.0, fourth_downs=4, fourth_down_convs=3)
         row = await db.get_player("Grizzly")
-        baseline = await db.get_player_stats(row["id"], "NP")
+        baseline = await db.get_player_stats(row["id"], "RX")
         await db.execute(
             "INSERT INTO pwr_rank_weights (label,weight,category,display_label) "
             "VALUES ('fourth_down_conv_pct', 0.5, 'ladder', '4th Down Conv %')"
         )
-        with_weight = await db.get_player_stats(row["id"], "NP")
+        with_weight = await db.get_player_stats(row["id"], "RX")
         self.assertNotEqual(with_weight["ladder_rank"], baseline["ladder_rank"])
 
     async def test_avg_type_select_displays_both_plain_and_fumble_adjusted(self):
@@ -1656,7 +1656,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         await db.set_matchup_info("ND", YESTERDAY, event_type="HOF")
         await db.update_player_score("Grizzly", TODAY, 20.0)
 
-        stats = await db.get_league_stats("NP")
+        stats = await db.get_league_stats("RX")
         self.assertIsNone(stats["hof_avg"])  # league-wide HOF avg must also be None, not 30.0
         by_ign = {p["ign"]: p for p in stats["players"]}
         self.assertIsNone(by_ign["Grizzly"]["hof_avg"])
@@ -1675,9 +1675,9 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         row = await db.fetchone("SELECT event_type FROM game_scores WHERE game_date=?", (TODAY,))
         self.assertIsNone(row["event_type"])  # confirms the realistic starting state
 
-        await db.set_matchup_info("NP", TODAY, event_type="E1")
+        await db.set_matchup_info("RX", TODAY, event_type="E1")
 
-        stats = await db.get_league_stats("NP")
+        stats = await db.get_league_stats("RX")
         self.assertAlmostEqual(stats["e1_avg"], 24.0)
         by_ign = {p["ign"]: p for p in stats["players"]}
         self.assertAlmostEqual(by_ign["Grizzly"]["e1_avg"], 24.0)
@@ -1685,7 +1685,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     async def test_get_avg_division_uses_matchup_day_not_game_scores_event_type(self):
         """Same bug, exercised through /avg's backing function."""
         await db.update_player_score("Grizzly", TODAY, 24.0)
-        await db.set_matchup_info("NP", TODAY, event_type="E1")
+        await db.set_matchup_info("RX", TODAY, event_type="E1")
         avg = await db.get_player_avg("Grizzly", "E1")
         self.assertAlmostEqual(avg, 24.0, places=1)
 
@@ -1702,7 +1702,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     async def test_get_league_stats_averages_across_active_players(self):
         await db.update_player_score("Grizzly", TODAY, 20.0)
         await db.update_player_score("dougbaldwin", TODAY, 30.0)
-        stats = await db.get_league_stats("NP")
+        stats = await db.get_league_stats("RX")
         # FHRITP has no scores at all — excluded from the average (None, not 0)
         self.assertAlmostEqual(stats["avg_yearly"], 25.0)
         self.assertEqual(stats["player_count"], 3)  # still counted as a roster member
@@ -1715,7 +1715,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         its own ign and stats."""
         await db.update_player_score("Grizzly", TODAY, 20.0)
         await db.update_player_score("dougbaldwin", TODAY, 30.0)
-        stats = await db.get_league_stats("NP")
+        stats = await db.get_league_stats("RX")
         self.assertEqual(len(stats["players"]), 3)  # Grizzly, dougbaldwin, FHRITP
         by_ign = {p["ign"]: p for p in stats["players"]}
         self.assertAlmostEqual(by_ign["Grizzly"]["avg_yearly"], 20.0)
@@ -1766,7 +1766,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         try:
             ctx = MagicMock()
             ctx.send = AsyncMock()
-            await sheet_image.send_stats_image(ctx, "NP")
+            await sheet_image.send_stats_image(ctx, "RX")
         finally:
             sheet_image._render_table = original
 
@@ -1788,7 +1788,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         import sheet_image
         await db.update_player_score("Grizzly", TODAY, 20.0)
         await db.update_player_score("dougbaldwin", TODAY, 30.0)
-        stats = await db.get_league_stats("NP")
+        stats = await db.get_league_stats("RX")
 
         captured = {}
         original = sheet_image._render_table
@@ -1799,7 +1799,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         try:
             ctx = MagicMock()
             ctx.send = AsyncMock()
-            await sheet_image.send_stats_image(ctx, "NP")
+            await sheet_image.send_stats_image(ctx, "RX")
         finally:
             sheet_image._render_table = original
 
@@ -1856,45 +1856,45 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- matchup status: real active roster (not a hardcoded 16) ---
 
     async def test_matchup_status_active_roster_count(self):
-        """NP has 3 active players in the seed data — not 16."""
-        status = await db.get_matchup_status("NP", TODAY)
+        """RX has 3 active players in the seed data — not 16."""
+        status = await db.get_matchup_status("RX", TODAY)
         self.assertEqual(status["active_roster"], 3)
 
     async def test_matchup_status_active_roster_excludes_inactive(self):
         await db.execute("UPDATE players SET status='I' WHERE ign='FHRITP'")
-        status = await db.get_matchup_status("NP", TODAY)
+        status = await db.get_matchup_status("RX", TODAY)
         self.assertEqual(status["active_roster"], 2)
         await db.execute("UPDATE players SET status='A' WHERE ign='FHRITP'")
 
     # --- siege ---
 
     async def test_start_siege_match_creates_active(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia", opp_rank="3", our_rank="2", division="E1")
+        match = await db.start_siege_match("RX", "WolfpackMafia", opp_rank="3", our_rank="2", division="E1")
         self.assertEqual(match["status"], "active")
         self.assertEqual(match["opp_league"], "WolfpackMafia")
 
     async def test_start_siege_match_blocks_second_active(self):
-        await db.start_siege_match("NP", "WolfpackMafia")
+        await db.start_siege_match("RX", "WolfpackMafia")
         with self.assertRaises(ValueError):
-            await db.start_siege_match("NP", "AnotherLeague")
+            await db.start_siege_match("RX", "AnotherLeague")
 
     async def test_start_siege_match_scoped_per_team(self):
         """A different team should be able to have its own active match at the same time."""
-        await db.start_siege_match("NP", "WolfpackMafia")
+        await db.start_siege_match("RX", "WolfpackMafia")
         match2 = await db.start_siege_match("ND", "SomeOtherLeague")
         self.assertEqual(match2["status"], "active")
 
     async def test_finalize_allows_new_match(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.finalize_siege_match(match["id"])
-        new_match = await db.start_siege_match("NP", "SecondOpponent")
+        new_match = await db.start_siege_match("RX", "SecondOpponent")
         self.assertEqual(new_match["status"], "active")
         old = await db.get_siege_match(match["id"])
         self.assertEqual(old["status"], "completed")
         self.assertIsNotNone(old["completed_at"])
 
     async def test_add_siege_node_defaults_open(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=6500, points_required=30, points_reward=10
@@ -1904,7 +1904,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_siege_node_rejects_duplicate_named_mod(self):
         """Each of the 10 named mods appears exactly once per match."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(
             match["id"], mod="Run Plays Only", opponent_name="Slayer99",
             opponent_ovr=6600, points_required=20, points_reward=8
@@ -1917,7 +1917,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_siege_node_allows_multiple_no_mod(self):
         """Up to 6 un-modded opponents exist per match — No Mod is exempt from the 1-per-match rule."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         for i in range(6):
             await db.add_siege_node(
                 match["id"], mod="No Mod", opponent_name=f"Guy{i}",
@@ -1928,7 +1928,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_siege_node_duplicate_named_mod_after_clear_still_blocked(self):
         """The 1-per-match rule applies regardless of the existing node's status."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(
             match["id"], mod="Run Plays Only", opponent_name="Slayer99",
             opponent_ovr=None, points_required=10, points_reward=8
@@ -1941,7 +1941,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_get_siege_open_nodes_by_name_unique(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(
             match["id"], mod="Run Plays Only", opponent_name="Slayer99",
             opponent_ovr=6600, points_required=20, points_reward=8
@@ -1954,7 +1954,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_siege_open_nodes_by_name_duplicate_no_mod(self):
         """Two No Mod nodes can legitimately share a name — both should come back, unresolved."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node_a = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="Slayer99",
             opponent_ovr=None, points_required=20, points_reward=8
@@ -1973,7 +1973,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(still_open[0]["id"], node_b["id"])
 
     async def test_log_siege_score_under_threshold_stays_open(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node  = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=6500, points_required=30, points_reward=10
@@ -1984,7 +1984,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed["status"], "open")
 
     async def test_log_siege_score_clears_at_threshold(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node  = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=None, points_required=20, points_reward=10
@@ -1997,7 +1997,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(refreshed["cleared_at"])
 
     async def test_log_siege_score_rejects_cleared_node(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node  = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=None, points_required=10, points_reward=10
@@ -2008,7 +2008,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_siege_score_can_reopen_node(self):
         """An admin correction that drops the total back below required should reopen the node."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node  = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=None, points_required=20, points_reward=10
@@ -2023,7 +2023,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reopened["status"], "open")
 
     async def test_siege_player_totals(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node1 = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=None, points_required=100, points_reward=10
@@ -2039,7 +2039,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(totals["drives"], 5)
 
     async def test_siege_splits_by_mod(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node1 = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="BigBoy87",
             opponent_ovr=None, points_required=100, points_reward=10
@@ -2055,15 +2055,15 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(splits["Run Plays Only"]["points"], 8)
 
     async def test_siege_history_only_completed(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.finalize_siege_match(match["id"])
-        await db.start_siege_match("NP", "SecondOpponent")  # stays active
-        history = await db.get_siege_history("NP")
+        await db.start_siege_match("RX", "SecondOpponent")  # stays active
+        history = await db.get_siege_history("RX")
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["opp_league"], "WolfpackMafia")
 
     async def test_siege_match_summary_formula(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         # One cleared node: required 20, reward 10
         cleared = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="Cleared1",
@@ -2094,7 +2094,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
 
     async def test_siege_match_summary_ppd_bonus_unfloored(self):
         """Low PPD should be allowed to push the bonus (and league score) negative."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="Weak1",
             opponent_ovr=None, points_required=100, points_reward=10
@@ -2108,7 +2108,7 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         self.assertLess(summary["league_score"], summary["open_node_points"])
 
     async def test_siege_match_summary_top_open_by_reward(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         low  = await db.add_siege_node(
             match["id"], mod="No Mod", opponent_name="Low",
             opponent_ovr=None, points_required=50, points_reward=5
@@ -2127,15 +2127,15 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- get_matchup_summary ---
 
     async def test_matchup_summary_no_matchup(self):
-        data = await db.get_matchup_summary("NP", TODAY)
+        data = await db.get_matchup_summary("RX", TODAY)
         self.assertIsNone(data["matchup"])
         self.assertEqual(data["scores"], [])
 
     async def test_matchup_summary_full(self):
-        await db.set_matchup("NP", TODAY, "WolfpackMafia", "E1")
-        await db.set_outcome("NP", TODAY, 300, 225, 45)
+        await db.set_matchup("RX", TODAY, "WolfpackMafia", "E1")
+        await db.set_outcome("RX", TODAY, 300, 225, 45)
         await db.update_player_score("Grizzly", TODAY, 22.0)
-        data = await db.get_matchup_summary("NP", TODAY)
+        data = await db.get_matchup_summary("RX", TODAY)
         self.assertIsNotNone(data["matchup"])
         self.assertEqual(data["matchup"]["outcome"], "WIN")
         self.assertEqual(len(data["scores"]), 1)
@@ -2144,17 +2144,17 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
     # --- recent matchups ---
 
     async def test_get_recent_matchups(self):
-        await db.set_matchup("NP", TODAY, "TeamA")
-        await db.set_matchup("NP", YESTERDAY, "TeamB")
-        rows = await db.get_recent_matchups("NP", limit=10)
+        await db.set_matchup("RX", TODAY, "TeamA")
+        await db.set_matchup("RX", YESTERDAY, "TeamB")
+        rows = await db.get_recent_matchups("RX", limit=10)
         self.assertEqual(len(rows), 2)
         # Most recent first
         self.assertEqual(rows[0]["opp_ign"], "TeamA")
 
     async def test_get_recent_matchups_limit(self):
-        await db.set_matchup("NP", TODAY, "TeamA")
-        await db.set_matchup("NP", YESTERDAY, "TeamB")
-        rows = await db.get_recent_matchups("NP", limit=1)
+        await db.set_matchup("RX", TODAY, "TeamA")
+        await db.set_matchup("RX", YESTERDAY, "TeamB")
+        rows = await db.get_recent_matchups("RX", limit=1)
         self.assertEqual(len(rows), 1)
 
 
@@ -2218,8 +2218,8 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
 
     def test_validate_league_valid(self):
         from optimized_bot import _validate_league
-        self.assertEqual(_validate_league("NP"), "NP")
-        self.assertEqual(_validate_league("np"), "NP")
+        self.assertEqual(_validate_league("RX"), "RX")
+        self.assertEqual(_validate_league("np"), "RX")
 
     def test_validate_league_invalid(self):
         from optimized_bot import _validate_league
@@ -2960,11 +2960,11 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
     async def test_register_new_player(self):
         await db.execute(
             "INSERT INTO players (team_id, ign, status, off_ovr, def_ovr, total_ovr) "
-            "VALUES ('NP', 'NewPlayer', 'A', 220, 210, 6500)"
+            "VALUES ('RX', 'NewPlayer', 'A', 220, 210, 6500)"
         )
         row = await db.get_player("NewPlayer")
         self.assertIsNotNone(row)
-        self.assertEqual(row["team_id"], "NP")
+        self.assertEqual(row["team_id"], "RX")
 
     async def test_register_duplicate_ign_blocked(self):
         """Re-registering an existing IGN should be caught before insert."""
@@ -3008,11 +3008,11 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
 
     async def test_weight_team_override(self):
         """A team-specific weight should override the global one."""
-        await db.add_weight("yearly_avg", "Yearly Avg Override", 0.9, "pwr_rank", "NP")
-        weights = await db.get_weights("pwr_rank", "NP")
+        await db.add_weight("yearly_avg", "Yearly Avg Override", 0.9, "pwr_rank", "RX")
+        weights = await db.get_weights("pwr_rank", "RX")
         w = next(x for x in weights if x["label"] == "yearly_avg")
         self.assertEqual(w["weight"], 0.9)
-        self.assertEqual(w["team_id"], "NP")
+        self.assertEqual(w["team_id"], "RX")
 
     # --- history query ---
 
@@ -3061,14 +3061,14 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
     # --- league management ---
 
     async def test_add_league(self):
-        await db.execute("INSERT INTO teams VALUES ('NZ', 'NeuroZero', 'NeuroZero')")
+        await db.execute("INSERT INTO teams VALUES ('NZ', 'Fresh League', 'Fresh League')")
         row = await db.fetchone("SELECT name FROM teams WHERE id='NZ'")
-        self.assertEqual(row["name"], "NeuroZero")
+        self.assertEqual(row["name"], "Fresh League")
 
     async def test_rename_league(self):
-        await db.execute("UPDATE teams SET name='NeuroPerverse2' WHERE id='NP'")
-        row = await db.fetchone("SELECT name FROM teams WHERE id='NP'")
-        self.assertEqual(row["name"], "NeuroPerverse2")
+        await db.execute("UPDATE teams SET name='CHRISTiansReborn2' WHERE id='RX'")
+        row = await db.fetchone("SELECT name FROM teams WHERE id='RX'")
+        self.assertEqual(row["name"], "CHRISTiansReborn2")
 
 
 
@@ -3094,7 +3094,7 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         rows = await db.fetchall("SELECT id, name FROM teams ORDER BY id")
         self.assertGreater(len(rows), 0)
         ids = [r['id'] for r in rows]
-        self.assertIn('NP', ids)
+        self.assertIn('RX', ids)
         self.assertIn('ND', ids)
 
     # --- get_ladder / show_ladder fallback ---
@@ -3102,20 +3102,20 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
     async def test_get_ladder_static_reference(self):
         await db.execute(
             "INSERT INTO ladder_matchups (team_id, slot, opp_ign, opp_def_ovr) "
-            "VALUES ('NP', 1, 'WolfpackMafia', 219)"
+            "VALUES ('RX', 1, 'WolfpackMafia', 219)"
         )
-        rows = await db.get_ladder("NP")
+        rows = await db.get_ladder("RX")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opp_ign"], "WolfpackMafia")
 
     async def test_get_ladder_snapshot_empty(self):
-        rows = await db.get_ladder_snapshot("NP", TODAY)
+        rows = await db.get_ladder_snapshot("RX", TODAY)
         self.assertEqual(rows, [])
 
     async def test_get_ladder_snapshot_with_data(self):
-        await db.upsert_ladder_slot("NP", TODAY, 1, "TeamA", 219, 7000)
-        await db.upsert_ladder_slot("NP", TODAY, 2, "TeamB", 235, 7100)
-        rows = await db.get_ladder_snapshot("NP", TODAY)
+        await db.upsert_ladder_slot("RX", TODAY, 1, "TeamA", 219, 7000)
+        await db.upsert_ladder_slot("RX", TODAY, 2, "TeamB", 235, 7100)
+        rows = await db.get_ladder_snapshot("RX", TODAY)
         self.assertEqual(len(rows), 2)
 
 
@@ -3246,7 +3246,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "Grizzly", "real_ign": "Grizzly"}, {"ign": "dougbaldwin", "real_ign": "dougbaldwin"}]
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "GKHl987", "total_ovr": 7000}],
-            league="NP", roster=roster, already_matched=["Grizzly"],
+            league="RX", roster=roster, already_matched=["Grizzly"],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=None, bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3262,7 +3262,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "Grizzly", "real_ign": "Grizzly"}]
         missing = [{"real_ign": f"Unknown{i}"} for i in range(6)]
         view = LadderPlayerMatchView(
-            missing_entries=missing, league="NP", roster=roster, already_matched=[],
+            missing_entries=missing, league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=None, bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3293,7 +3293,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": ign, "real_ign": ign} for ign in real_igns]
         missing = [{"real_ign": f"Unknown{i}", "total_ovr": 7000 + i} for i in range(6)]
         view = LadderPlayerMatchView(
-            missing_entries=missing, league="NP", roster=roster, already_matched=[],
+            missing_entries=missing, league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3325,7 +3325,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": f"Player{i}", "real_ign": f"Player{i}"} for i in range(10)]
         missing_batch_2 = [{"real_ign": "UnknownA"}, {"real_ign": "UnknownB"}]
         view = LadderPlayerMatchView(
-            missing_entries=missing_batch_2, league="NP", roster=roster,
+            missing_entries=missing_batch_2, league="RX", roster=roster,
             already_matched=["Player0", "Player1", "Player2", "Player3"],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
@@ -3361,7 +3361,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         row = await db.get_player("Grizzly")
         item = self._make_suspicious_item(ign="Grizzly", old=row["total_ovr"], new=row["total_ovr"] * 3, row_id=row["id"])
         view = OvrSanityCheckView(
-            suspicious_changes=[item], league="NP", game_date=datetime.date.fromisoformat(TODAY),
+            suspicious_changes=[item], league="RX", game_date=datetime.date.fromisoformat(TODAY),
             interaction_channel=MagicMock(), bot=None, preselected=["Grizzly"], preopponents=[],
             ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None, notifications=[],
         )
@@ -3383,7 +3383,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         original_total = row["total_ovr"]
         item = self._make_suspicious_item(ign="Grizzly", old=original_total, new=original_total * 3, row_id=row["id"])
         view = OvrSanityCheckView(
-            suspicious_changes=[item], league="NP", game_date=datetime.date.fromisoformat(TODAY),
+            suspicious_changes=[item], league="RX", game_date=datetime.date.fromisoformat(TODAY),
             interaction_channel=MagicMock(), bot=None, preselected=["Grizzly"], preopponents=[],
             ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None, notifications=[],
         )
@@ -3408,7 +3408,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         original_total = row["total_ovr"]
         item = self._make_suspicious_item(ign="Grizzly", old=original_total, new=original_total * 3, row_id=row["id"])
         view = OvrSanityCheckView(
-            suspicious_changes=[item], league="NP", game_date=datetime.date.fromisoformat(TODAY),
+            suspicious_changes=[item], league="RX", game_date=datetime.date.fromisoformat(TODAY),
             interaction_channel=MagicMock(), bot=None, preselected=["Grizzly"], preopponents=[],
             ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None, notifications=[],
         )
@@ -3425,7 +3425,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import OvrSanityCheckView
         items = [self._make_suspicious_item(ign=f"P{i}", row_id=i) for i in range(6)]
         view = OvrSanityCheckView(
-            suspicious_changes=items, league="NP", game_date=datetime.date.fromisoformat(TODAY),
+            suspicious_changes=items, league="RX", game_date=datetime.date.fromisoformat(TODAY),
             interaction_channel=MagicMock(), bot=None, preselected=[], preopponents=[],
             ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None, notifications=[],
         )
@@ -3446,7 +3446,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import OvrSanityCheckView
         items = [self._make_suspicious_item(ign="P0", row_id=0)]
         view = OvrSanityCheckView(
-            suspicious_changes=items, league="NP", game_date=datetime.date.fromisoformat(TODAY),
+            suspicious_changes=items, league="RX", game_date=datetime.date.fromisoformat(TODAY),
             interaction_channel=MagicMock(), bot=None, preselected=["Grizzly"], preopponents=[],
             ladder_event_type="E1", ladder_our_rank=5, opponent_league_name="Dynasty 1", notifications=[],
         )
@@ -3473,7 +3473,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "dougbaldwin", "real_ign": "dougbaldwin"}]
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "d0ugbaldw1n", "total_ovr": original_total * 3}],
-            league="NP", roster=roster, already_matched=[],
+            league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3516,7 +3516,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "dougbaldwin", "real_ign": "dougbaldwin"}]
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "d0ugbaldw1n", "total_ovr": dougbaldwin["total_ovr"] * 3}],
-            league="NP", roster=roster, already_matched=["Grizzly"],
+            league="RX", roster=roster, already_matched=["Grizzly"],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[], suspicious_ovr_changes=auto_matched_suspicious,
@@ -3559,7 +3559,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
             [{"real_ign": "d0ugbaldw1n", "total_ovr": dougbaldwin["total_ovr"] * 3}]
         )
         view = LadderPlayerMatchView(
-            missing_entries=missing, league="NP", roster=roster, already_matched=[],
+            missing_entries=missing, league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3635,7 +3635,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "Grizzly", "real_ign": "Grizzly"}, {"ign": "dougbaldwin", "real_ign": "dougbaldwin"}]
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "GKHl987", "total_ovr": 7000}],
-            league="NP", roster=roster, already_matched=[],
+            league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3659,7 +3659,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         roster = [{"ign": "dougbaldwin", "real_ign": "dougbaldwin"}]
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "d0ugbaldw1n", "total_ovr": 6999, "off_ovr": 260, "def_ovr": 240}],
-            league="NP", roster=roster, already_matched=["Grizzly"],
+            league="RX", roster=roster, already_matched=["Grizzly"],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type="E1", ladder_our_rank=12, opponent_league_name="Dynasty 1",
             notifications=[],
@@ -3684,7 +3684,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         original = await db.get_player("dougbaldwin")
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "NotARealPlayer", "total_ovr": 9999}],
-            league="NP", roster=roster, already_matched=[],
+            league="RX", roster=roster, already_matched=[],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3708,7 +3708,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         original = await db.get_player("dougbaldwin")
         view = LadderPlayerMatchView(
             missing_entries=[{"real_ign": "GKHl987", "total_ovr": 9999}],
-            league="NP", roster=roster, already_matched=["Grizzly"],
+            league="RX", roster=roster, already_matched=["Grizzly"],
             game_date=datetime.date.fromisoformat(TODAY), interaction_channel=MagicMock(), bot=None,
             preopponents=[], ladder_event_type=None, ladder_our_rank=None, opponent_league_name=None,
             notifications=[],
@@ -3764,7 +3764,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         finishing the ladder just overwrites what's already there."""
         from ladder_flow import save_ladder_to_db, LadderState, MATCHUP_SIZE
 
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected  = [f"P{i}" for i in range(MATCHUP_SIZE)]
         state.opponents = [
             {"name": f"TeamA{i}", "total_ovr": 7000 + i, "def_ovr": 200 + i}
@@ -3775,7 +3775,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         # Interim save — as the opponent-entry "Done — Sort & Arrange" button does.
         await save_ladder_to_db(state, identity, identity)
         rows = await db.fetchall(
-            "SELECT slot, our_ign, opp_ign FROM matchup_ladder WHERE team_id='NP' AND game_date=? ORDER BY slot",
+            "SELECT slot, our_ign, opp_ign FROM matchup_ladder WHERE team_id='RX' AND game_date=? ORDER BY slot",
             (TODAY,)
         )
         self.assertEqual(len(rows), MATCHUP_SIZE)
@@ -3786,13 +3786,13 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         reordered = list(reversed(identity))
         await save_ladder_to_db(state, reordered, reordered)
         rows = await db.fetchall(
-            "SELECT slot, our_ign, opp_ign FROM matchup_ladder WHERE team_id='NP' AND game_date=? ORDER BY slot",
+            "SELECT slot, our_ign, opp_ign FROM matchup_ladder WHERE team_id='RX' AND game_date=? ORDER BY slot",
             (TODAY,)
         )
 
     async def test_save_ladder_to_db_persists_extracted_matchup_context(self):
         from ladder_flow import save_ladder_to_db, LadderState, MATCHUP_SIZE
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected  = [f"P{i}" for i in range(MATCHUP_SIZE)]
         state.opponents = [{"name": f"TeamA{i}", "total_ovr": 7000, "def_ovr": 200} for i in range(MATCHUP_SIZE)]
         state.opponent_league_name = "seams suspicious"
@@ -3803,7 +3803,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         await save_ladder_to_db(state, identity, identity)
 
         row = await db.fetchone(
-            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_ign, event_type, our_rank FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (TODAY,)
         )
         self.assertEqual(row["opp_ign"], "seams suspicious")
@@ -3814,7 +3814,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         """The manual CSV entry flow never sets any of this — must not create
         a blank/garbage matchup_day row when there's nothing to save."""
         from ladder_flow import save_ladder_to_db, LadderState, MATCHUP_SIZE
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected  = [f"P{i}" for i in range(MATCHUP_SIZE)]
         state.opponents = [{"name": f"TeamA{i}", "total_ovr": 7000, "def_ovr": 200} for i in range(MATCHUP_SIZE)]
         identity = list(range(MATCHUP_SIZE))
@@ -3822,7 +3822,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         await save_ladder_to_db(state, identity, identity)
 
         row = await db.fetchone(
-            "SELECT * FROM matchup_day WHERE team_id='NP' AND game_date=?", (TODAY,)
+            "SELECT * FROM matchup_day WHERE team_id='RX' AND game_date=?", (TODAY,)
         )
         self.assertIsNone(row)
 
@@ -3835,7 +3835,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         inter.channel = MagicMock()
 
         await start_ladder_flow(
-            inter, "NP", datetime.date.fromisoformat(TODAY),
+            inter, "RX", datetime.date.fromisoformat(TODAY),
             opponent_league_name="Dynasty 1", event_type="E2", our_rank=12
         )
 
@@ -3847,10 +3847,10 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
     async def test_show_ladder_title_includes_opponent_when_set(self):
         """Same query + format logic show_ladder_slash uses to build its title —
         tested in isolation since the command itself is @tree.command-wrapped."""
-        await db.set_matchup("NP", TODAY, "seams suspicious", "E1")
+        await db.set_matchup("RX", TODAY, "seams suspicious", "E1")
         matchup = await db.fetchone(
             "SELECT opp_ign, event_type FROM matchup_day WHERE team_id=? AND game_date=?",
-            ("NP", TODAY)
+            ("RX", TODAY)
         )
         opp_str = ""
         if matchup and matchup.get('opp_ign'):
@@ -3862,7 +3862,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
     async def test_show_ladder_title_blank_when_no_matchup_recorded(self):
         matchup = await db.fetchone(
             "SELECT opp_ign, event_type FROM matchup_day WHERE team_id=? AND game_date=?",
-            ("NP", TODAY)
+            ("RX", TODAY)
         )
         opp_str = ""
         if matchup and matchup.get('opp_ign'):
@@ -3878,13 +3878,13 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
         for i in range(MATCHUP_SIZE):
             await db.upsert_ladder_slot(
-                "NP", TODAY, i + 1,
+                "RX", TODAY, i + 1,
                 opp_ign=f"SavedOpp{i}", opp_def_ovr=200 + i,
                 our_total_ovr=7000 + i, our_ign=f"P{i}",
             )
 
         state = LadderState.__new__(LadderState)
-        state.team_id   = "NP"
+        state.team_id   = "RX"
         state.game_date = TODAY
         state.lang      = "en"
         state.opponents = []  # nothing entered yet this session
@@ -3909,7 +3909,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_matchup_info_modal_saves_entered_values(self):
         from ladder_flow import LadderMatchupInfoModal, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         modal = LadderMatchupInfoModal(state)
         modal.opp_name.value = "seams suspicious"
         modal.division.value = "e1"  # lowercase, should normalize
@@ -3925,7 +3925,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_matchup_info_modal_blank_fields_clear_state(self):
         from ladder_flow import LadderMatchupInfoModal, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.opponent_league_name = "OldName"
         state.event_type = "E2"
         state.our_rank = 10
@@ -3945,7 +3945,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
     async def test_ladder_matchup_info_modal_non_numeric_rank_becomes_none(self):
         """A typo in the rank field must not crash — just treated as not entered."""
         from ladder_flow import LadderMatchupInfoModal, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         modal = LadderMatchupInfoModal(state)
         modal.opp_name.value = "seams suspicious"
         modal.division.value = ""
@@ -3958,7 +3958,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_matchup_info_modal_prefills_from_existing_state(self):
         from ladder_flow import LadderMatchupInfoModal, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.opponent_league_name = "Dynasty 1"
         state.event_type = "E2"
         state.our_rank = 12
@@ -3970,7 +3970,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
     async def test_opponent_entry_view_button_opens_matchup_info_modal(self):
         import i18n
         from ladder_flow import OpponentEntryView, LadderMatchupInfoModal, LadderState, MATCHUP_SIZE
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         view = OpponentEntryView(state)
         info_button = next(c for c in view.children if i18n.t('ladder.matchup_info_btn', 'en') == c.label)
         inter = MagicMock()
@@ -3982,7 +3982,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_opponent_entry_view_embed_shows_context_when_set(self):
         from ladder_flow import OpponentEntryView, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.opponent_league_name = "seams suspicious"
         state.event_type = "E1"
         state.our_rank = 45
@@ -3994,7 +3994,7 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_opponent_entry_view_embed_omits_context_when_not_set(self):
         from ladder_flow import OpponentEntryView, LadderState
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         view = OpponentEntryView(state)
         embed = view._build_embed()
         names = [c.kwargs.get("name") for c in embed.add_field.call_args_list]
@@ -4006,12 +4006,12 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
 
         await db.upsert_ladder_slot(
-            "NP", TODAY, 1, opp_ign="OldSavedOpp", opp_def_ovr=210,
+            "RX", TODAY, 1, opp_ign="OldSavedOpp", opp_def_ovr=210,
             our_total_ovr=7000, our_ign="P0",
         )
 
         state = LadderState.__new__(LadderState)
-        state.team_id   = "NP"
+        state.team_id   = "RX"
         state.game_date = TODAY
         state.lang      = "en"
         state.opponents = [
@@ -4070,28 +4070,28 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_siege_sends_modal(self):
         inter = self._make_interaction()
-        await self.siege.handle_siege(inter, "NP")
+        await self.siege.handle_siege(inter, "RX")
         inter.response.send_modal.assert_awaited_once()
         modal = inter.response.send_modal.call_args.args[0]
         self.assertIsInstance(modal, self.siege.SiegeStartModal)
-        self.assertEqual(modal.team_id, "NP")
+        self.assertEqual(modal.team_id, "RX")
 
     async def test_siege_start_modal_creates_match(self):
-        modal = self.siege.SiegeStartModal("NP")
+        modal = self.siege.SiegeStartModal("RX")
         modal.opp_league.value = "WolfpackMafia"
         modal.opp_rank.value   = "3"
         modal.our_rank.value   = "2"
         modal.division.value   = "E1"
         inter = self._make_interaction()
         await modal.on_submit(inter)
-        match = await db.get_active_siege_match("NP")
+        match = await db.get_active_siege_match("RX")
         self.assertIsNotNone(match)
         self.assertEqual(match["opp_league"], "WolfpackMafia")
         inter.response.send_message.assert_awaited_once()
 
     async def test_siege_start_modal_blocks_second_active(self):
-        await db.start_siege_match("NP", "ExistingOpp")
-        modal = self.siege.SiegeStartModal("NP")
+        await db.start_siege_match("RX", "ExistingOpp")
+        modal = self.siege.SiegeStartModal("RX")
         modal.opp_league.value = "NewOpp"
         modal.opp_rank.value = modal.our_rank.value = modal.division.value = ""
         inter = self._make_interaction()
@@ -4104,21 +4104,21 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_node_no_active_match(self):
         inter = self._make_interaction()
-        await self.siege.handle_node(inter, "NP", "No Mod")
+        await self.siege.handle_node(inter, "RX", "No Mod")
         inter.response.send_message.assert_awaited_once()
         self.assertIn("No active siege match", inter.response.send_message.call_args.args[0])
 
     async def test_handle_node_sends_modal(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         inter = self._make_interaction()
-        await self.siege.handle_node(inter, "NP", "Run Plays Only")
+        await self.siege.handle_node(inter, "RX", "Run Plays Only")
         modal = inter.response.send_modal.call_args.args[0]
         self.assertIsInstance(modal, self.siege.NodeModal)
         self.assertEqual(modal.match_id, match["id"])
         self.assertEqual(modal.mod, "Run Plays Only")
 
     async def test_node_modal_creates_node(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         modal = self.siege.NodeModal(match["id"], "No Mod")
         modal.opponent_name.value   = "BigBoy87"
         modal.opponent_ovr.value    = "6500"
@@ -4133,7 +4133,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(node["opponent_ovr"], 6500)
 
     async def test_node_modal_rejects_non_integer(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         modal = self.siege.NodeModal(match["id"], "No Mod")
         modal.opponent_name.value   = "BigBoy87"
         modal.opponent_ovr.value    = ""
@@ -4149,7 +4149,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_siege_opponent_autocomplete_shows_all_mods_together(self):
         """No mod pre-selection needed — modded and un-modded nodes both show up."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="OpenGuy",
                                  opponent_ovr=None, points_required=50, points_reward=5)
         await db.add_siege_node(match["id"], mod="Run Plays Only", opponent_name="ModdedGuy",
@@ -4159,7 +4159,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         await db.update_siege_node(cleared["id"], status="cleared")
 
         inter = self._make_interaction()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await self.siege.siege_opponent_autocomplete(inter, "")
         labels = {c.name for c in choices}
         self.assertTrue(any("OpenGuy" in l for l in labels))
@@ -4169,11 +4169,11 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
     async def test_siege_opponent_autocomplete_value_is_node_id(self):
         """The visible label is friendly; the underlying value is the node id
         (what actually disambiguates duplicate No Mod names)."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="OpenGuy",
                                         opponent_ovr=6500, points_required=50, points_reward=5)
         inter = self._make_interaction()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await self.siege.siege_opponent_autocomplete(inter, "OpenGuy")
         self.assertEqual(len(choices), 1)
         self.assertEqual(choices[0].value, str(node["id"]))
@@ -4182,54 +4182,54 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_siege_opponent_autocomplete_duplicate_no_mod_names_both_listed(self):
         """Two No Mod nodes sharing a name must both appear, as separate selectable entries."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node_a = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                           opponent_ovr=None, points_required=20, points_reward=8)
         node_b = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                           opponent_ovr=None, points_required=30, points_reward=12)
         inter = self._make_interaction()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await self.siege.siege_opponent_autocomplete(inter, "Slayer")
         self.assertEqual(len(choices), 2)
         self.assertEqual({c.value for c in choices}, {str(node_a["id"]), str(node_b["id"])})
 
     async def test_handle_siegescore_no_active_match(self):
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", "1")
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", "1")
         self.assertIn("No active siege match", inter.response.send_message.call_args.args[0])
 
     async def test_handle_siegescore_node_not_found(self):
-        await db.start_siege_match("NP", "WolfpackMafia")
+        await db.start_siege_match("RX", "WolfpackMafia")
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", "NoSuchOpponent")
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", "NoSuchOpponent")
         self.assertIn("No open node found", inter.response.send_message.call_args.args[0])
 
     async def test_handle_siegescore_player_not_found(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                  opponent_ovr=None, points_required=30, points_reward=10)
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "NoSuchPlayer", "BigBoy87")
+        await self.siege.handle_siegescore(inter, "RX", "NoSuchPlayer", "BigBoy87")
         self.assertIn("not found", inter.response.send_message.call_args.args[0])
 
     async def test_handle_siegescore_resolves_via_autocomplete_id(self):
         """The normal path: opponent is the node id the autocomplete supplied, not a typed name."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", str(node["id"]))
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", str(node["id"]))
         modal = inter.response.send_modal.call_args.args[0]
         self.assertIsInstance(modal, self.siege.SiegeScoreModal)
         self.assertEqual(modal.node_id, node["id"])
 
     async def test_handle_siegescore_manual_name_unambiguous_still_works(self):
         """If someone types a name by hand and it's unique, it should still resolve."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", "BigBoy87")
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", "BigBoy87")
         modal = inter.response.send_modal.call_args.args[0]
         self.assertIsInstance(modal, self.siege.SiegeScoreModal)
         self.assertEqual(modal.node_id, node["id"])
@@ -4237,13 +4237,13 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
     async def test_handle_siegescore_manual_name_ambiguous_flags_instead_of_guessing(self):
         """Two No Mod nodes share a name — typing the name manually must not
         silently pick one; it should tell the admin to use autocomplete."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                  opponent_ovr=None, points_required=20, points_reward=8)
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                  opponent_ovr=None, points_required=30, points_reward=12)
         inter = self._make_interaction()
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", "Slayer99")
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", "Slayer99")
         inter.response.send_modal.assert_not_awaited()
         msg = inter.response.send_message.call_args.args[0]
         self.assertIn("2", msg)
@@ -4251,19 +4251,19 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_siegescore_resolves_duplicate_names_independently_via_id(self):
         """Two No Mod nodes share a name — each must be individually scoreable via its own id."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node_a = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                           opponent_ovr=None, points_required=20, points_reward=8)
         node_b = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                           opponent_ovr=None, points_required=30, points_reward=12)
 
         inter_a = self._make_interaction()
-        await self.siege.handle_siegescore(inter_a, "NP", "Grizzly", str(node_a["id"]))
+        await self.siege.handle_siegescore(inter_a, "RX", "Grizzly", str(node_a["id"]))
         modal_a = inter_a.response.send_modal.call_args.args[0]
         self.assertEqual(modal_a.node_id, node_a["id"])
 
         inter_b = self._make_interaction()
-        await self.siege.handle_siegescore(inter_b, "NP", "Grizzly", str(node_b["id"]))
+        await self.siege.handle_siegescore(inter_b, "RX", "Grizzly", str(node_b["id"]))
         modal_b = inter_b.response.send_modal.call_args.args[0]
         self.assertEqual(modal_b.node_id, node_b["id"])
 
@@ -4271,13 +4271,13 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import league_player_autocomplete
         inter = MagicMock()
         inter.namespace = MagicMock()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await league_player_autocomplete(inter, "")
         names = [c.name for c in choices]
-        self.assertIn("Grizzly", names)     # NP active player
-        self.assertIn("dougbaldwin", names)  # NP active player
-        self.assertIn("FHRITP", names)       # NP active player
-        # Bob is ND, not NP — must not appear when scoped to NP
+        self.assertIn("Grizzly", names)     # RX active player
+        self.assertIn("dougbaldwin", names)  # RX active player
+        self.assertIn("FHRITP", names)       # RX active player
+        # Bob is ND, not RX — must not appear when scoped to RX
         self.assertNotIn("Bob", names)
 
     async def test_league_player_autocomplete_finds_transferred_player(self):
@@ -4285,23 +4285,23 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         league must be findable via that league's own autocomplete, not
         buried behind (or missing from) a global, unfiltered search."""
         from optimized_bot import league_player_autocomplete
-        # Simulate a transfer: an ND player moves to NP
-        await db.execute("UPDATE players SET team_id='NP' WHERE ign='Bob'")
+        # Simulate a transfer: an ND player moves to RX
+        await db.execute("UPDATE players SET team_id='RX' WHERE ign='Bob'")
         await db.execute("UPDATE players SET status='A' WHERE ign='Bob'")
 
         inter = MagicMock()
         inter.namespace = MagicMock()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await league_player_autocomplete(inter, "")
         names = [c.name for c in choices]
-        self.assertIn("Bob", names)  # now on NP, must show up for NP's siege scoring
+        self.assertIn("Bob", names)  # now on RX, must show up for RX's siege scoring
 
     async def test_league_player_autocomplete_excludes_inactive(self):
         from optimized_bot import league_player_autocomplete
         await db.execute("UPDATE players SET status='R' WHERE ign='FHRITP'")
         inter = MagicMock()
         inter.namespace = MagicMock()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await league_player_autocomplete(inter, "")
         names = [c.name for c in choices]
         self.assertNotIn("FHRITP", names)
@@ -4318,13 +4318,13 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import league_player_autocomplete
         inter = MagicMock()
         inter.namespace = MagicMock()
-        inter.namespace.league = "NP"
+        inter.namespace.league = "RX"
         choices = await league_player_autocomplete(inter, "Griz")
         names = [c.name for c in choices]
         self.assertEqual(names, ["Grizzly"])
 
     async def test_siege_score_modal_logs_score(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         modal = self.siege.SiegeScoreModal(node["id"], "BigBoy87", "Grizzly")
@@ -4340,7 +4340,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
     async def test_log_siege_score_replaces_not_adds_for_same_player_and_node(self):
         """Re-scoring the same player against the same node must replace
         their entry, not add a second one that sums into the total."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=100, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", drives=3, points=20)
@@ -4356,7 +4356,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
     async def test_log_siege_score_different_players_still_both_count(self):
         """Replace-not-add is scoped to (node, player) — different players
         scoring the same node must still both contribute to the total."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=100, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", drives=3, points=20)
@@ -4368,7 +4368,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 2)
 
     async def test_log_siege_score_replace_can_still_trigger_clear(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=20, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", drives=3, points=10)
@@ -4379,7 +4379,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         """Simulates data already corrupted by the old additive behavior —
         two rows for the same node+player before this fix existed — and
         confirms the migration merges them into one, keeping the newest."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=100, points_reward=10)
         grizzly = await db.get_player("Grizzly")
@@ -4405,7 +4405,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
     async def test_migration_rebuilds_siege_unique_index(self):
         """After the migration, a raw duplicate insert for the same node+player
         must be rejected outright by the database itself."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=100, points_reward=10)
         grizzly = await db.get_player("Grizzly")
@@ -4421,7 +4421,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_siege_score_modal_reports_cleared(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=10, points_reward=10)
         modal = self.siege.SiegeScoreModal(node["id"], "BigBoy87", "Grizzly")
@@ -4436,18 +4436,18 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_siegestatus_no_active_match(self):
         inter = self._make_interaction()
-        await self.siege.handle_siegestatus(inter, "NP")
+        await self.siege.handle_siegestatus(inter, "RX")
         self.assertIn("No active siege match", inter.response.send_message.call_args.args[0])
 
     async def test_build_status_embed_highlights_top_nodes(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         low  = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Low",
                                         opponent_ovr=None, points_required=50, points_reward=5)
         high = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="High",
                                         opponent_ovr=None, points_required=50, points_reward=25)
         summary = await db.get_siege_match_summary(match["id"])
         player_totals = await db.get_siege_all_player_totals(match["id"])
-        embed = self.siege.build_status_embed("NP", match, summary, player_totals)
+        embed = self.siege.build_status_embed("RX", match, summary, player_totals)
         # Pull the "Open Nodes" field value out of the recorded add_field calls
         open_field_value = None
         for call in embed.add_field.call_args_list:
@@ -4501,7 +4501,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         each of the 16 to test the actual worst case that can occur, not
         an unrealistically large node count that could never happen.
         """
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         for i in range(self.siege.MAX_SIEGE_NODES):
             await db.add_siege_node(
                 match["id"], mod="No Mod", opponent_name=f"ReasonablyLongOpponentPlayerName_{i}",
@@ -4509,7 +4509,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
             )
         summary = await db.get_siege_match_summary(match["id"])
         player_totals = await db.get_siege_all_player_totals(match["id"])
-        embed = self.siege.build_status_embed("NP", match, summary, player_totals)
+        embed = self.siege.build_status_embed("RX", match, summary, player_totals)
 
         calls = embed.add_field.call_args_list
         for call in calls:
@@ -4533,7 +4533,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         etc.) — the field-length safety net must still hold regardless,
         even though this exact scale should never occur in practice.
         """
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         for i in range(30):
             await db.add_siege_node(
                 match["id"], mod="No Mod", opponent_name=f"Opponent_Player_{i}",
@@ -4541,7 +4541,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
             )
         summary = await db.get_siege_match_summary(match["id"])
         player_totals = await db.get_siege_all_player_totals(match["id"])
-        embed = self.siege.build_status_embed("NP", match, summary, player_totals)
+        embed = self.siege.build_status_embed("RX", match, summary, player_totals)
 
         calls = embed.add_field.call_args_list
         self.assertGreater(len(calls), 1)  # confirms it actually split into multiple fields
@@ -4556,14 +4556,14 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         """Same class of bug, for the player-totals field — this league has
         at least one 66-player roster (NA), easily enough to exceed 1024
         chars even after the existing 2-column halving."""
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Solo",
                                  opponent_ovr=None, points_required=9999, points_reward=1)
         # Build player_totals directly — doesn't require every player to have
         # actually logged a score, just needs enough rows to exceed the limit.
         player_totals = [{"ign": f"SomeReallyLongPlayerName{i}", "points": 100 + i, "drives": 20 + i} for i in range(66)]
         summary = await db.get_siege_match_summary(match["id"])
-        embed = self.siege.build_status_embed("NP", match, summary, player_totals)
+        embed = self.siege.build_status_embed("RX", match, summary, player_totals)
 
         calls = embed.add_field.call_args_list
         totals_calls = [c for c in calls if "Player Totals" in c.kwargs.get("name", "") or c.kwargs.get("name") == "\u200b"]
@@ -4575,17 +4575,17 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_updatesiege_no_active_match(self):
         inter = self._make_interaction()
-        await self.siege.handle_updatesiege(inter, "NP")
+        await self.siege.handle_updatesiege(inter, "RX")
         self.assertIn("No active siege match", inter.response.send_message.call_args.args[0])
 
     async def test_handle_updatesiege_sends_correction_view(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 3, 14)
 
         inter = self._make_interaction()
-        await self.siege.handle_updatesiege(inter, "NP")
+        await self.siege.handle_updatesiege(inter, "RX")
         inter.followup.send.assert_awaited_once()
         view = inter.followup.send.call_args.kwargs["view"]
         self.assertIsInstance(view, self.siege.SiegeCorrectionView)
@@ -4593,15 +4593,15 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(view.children), 3)
 
     async def test_handle_siegefinal_view_has_finalize_button(self):
-        await db.start_siege_match("NP", "WolfpackMafia")
+        await db.start_siege_match("RX", "WolfpackMafia")
         inter = self._make_interaction()
-        await self.siege.handle_siegefinal(inter, "NP")
+        await self.siege.handle_siegefinal(inter, "RX")
         view = inter.followup.send.call_args.kwargs["view"]
         # opp-points button + finalize button (no nodes/scores yet)
         self.assertEqual(len(view.children), 2)
 
     async def test_correction_view_set_opp_points(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia", )
+        match = await db.start_siege_match("RX", "WolfpackMafia", )
         await db.update_siege_match(match["id"], opp_total_points=99)
         match = await db.get_siege_match(match["id"])
         view = self.siege.SiegeCorrectionView(match, [], [])
@@ -4613,7 +4613,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.opp_points.default, "99.0")
 
     async def test_correction_view_edit_node(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=6500, points_required=30, points_reward=10)
         view = self.siege.SiegeCorrectionView(match, [node], [])
@@ -4627,7 +4627,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.points_required.default, "30")
 
     async def test_correction_view_edit_score(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 3, 14)
@@ -4642,7 +4642,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.points.default, "14")
 
     async def test_correction_view_finalize(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         view = self.siege.SiegeCorrectionView(match, [], [], allow_finalize=True)
         inter = self._make_interaction()
         await view._finalize(inter)
@@ -4652,7 +4652,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         inter.channel.send.assert_awaited_once()
 
     async def test_opponent_points_modal_updates_match(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         modal = self.siege.OpponentPointsModal(match["id"])
         modal.opp_points.value = "4200"
         inter = self._make_interaction()
@@ -4661,7 +4661,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["opp_total_points"], 4200.0)
 
     async def test_node_edit_modal_recheck_reopens_node(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=10, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 2, 10)
@@ -4679,7 +4679,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reopened["status"], "open")
 
     async def test_score_edit_modal_updates_score(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 3, 14)
@@ -4702,7 +4702,7 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No siege scores", inter.followup.send.call_args.args[0])
 
     async def test_handle_siegesplits_with_scores(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="Run Plays Only", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 3, 14)
@@ -4713,14 +4713,14 @@ class TestSiege(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_siegehistory_empty(self):
         inter = self._make_interaction()
-        await self.siege.handle_siegehistory(inter, "NP")
+        await self.siege.handle_siegehistory(inter, "RX")
         self.assertIn("No completed siege matches", inter.followup.send.call_args.args[0])
 
     async def test_handle_siegehistory_with_matches(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.finalize_siege_match(match["id"])
         inter = self._make_interaction()
-        await self.siege.handle_siegehistory(inter, "NP")
+        await self.siege.handle_siegehistory(inter, "RX")
         embed = inter.followup.send.call_args.kwargs["embed"]
         self.assertIn("WolfpackMafia", embed.description)
 
@@ -4833,7 +4833,7 @@ class TestScoresGrid(unittest.TestCase):
         # not an artificially narrow one a single title word couldn't fit in.
         headers = ['#', 'Our Player', 'Ladder Rank', 'Off OVR', 'Opponent', 'Opp TOT', 'Opp DEF', '+/-', 'Result']
         rows = [[str(i), f'Player{i}', '15.5', '235', f'Opp{i}', '7000', '220', '+15', 'WIN 22-14'] for i in range(16)]
-        long_title = "NeuroPerverse vs seams suspicious (E1)  Ladder  (snapshot for 2026-07-20)"
+        long_title = "CHRISTiansReborn vs seams suspicious (E1)  Ladder  (snapshot for 2026-07-20)"
         buf = _render_table(long_title, headers, rows, ['R', 'L', 'R', 'R', 'L', 'R', 'R', 'R', 'L'])
         img = Image.open(buf)
 
@@ -4920,7 +4920,7 @@ class TestScoresGrid(unittest.TestCase):
         rows = [[str(i), f'Player{i}', '15.5', '235', f'Opp{i}', '7000', '220', '+15', 'WIN 22-14'] for i in range(16)]
         long_subtitle = ("Ladder (snapshot for 2026-07-20, pulled from the daily archive after "
                           "confirmation, reflecting the most recently saved matchup ladder state)")
-        buf = _render_table("NeuroPerverse", headers, rows, ['R','L','R','R','L','R','R','R','L'], subtitle=long_subtitle)
+        buf = _render_table("CHRISTiansReborn", headers, rows, ['R','L','R','R','L','R','R','R','L'], subtitle=long_subtitle)
         img = Image.open(buf)
 
         font_sub = sheet_image._load_font(sheet_image.FONT_ITALIC, sheet_image.SUBTITLE_SIZE)
@@ -4935,8 +4935,8 @@ class TestScoresGrid(unittest.TestCase):
         from PIL import Image
         rows = [{'slot': 1, 'our_ign': 'P1', 'ladder_rank': 15.0, 'our_off_ovr': 230,
                  'opp_ign': 'O1', 'our_total_ovr': 7000, 'opp_def_ovr': 220}]
-        without = render_ladder_image("NeuroPerverse", rows)
-        with_sub = render_ladder_image("NeuroPerverse", rows, subtitle="Ladder (snapshot for 2026-07-20)")
+        without = render_ladder_image("CHRISTiansReborn", rows)
+        with_sub = render_ladder_image("CHRISTiansReborn", rows, subtitle="Ladder (snapshot for 2026-07-20)")
         self.assertGreater(Image.open(with_sub).height, Image.open(without).height)
 
     def test_load_font_falls_back_through_multiple_candidate_paths(self):
@@ -5034,7 +5034,7 @@ class TestScoresGrid(unittest.TestCase):
         from sheet_image import render_ladder_image
         from PIL import Image
         rows = [{'slot': i, 'our_ign': f'P{i}', 'ladder_rank': 75.0, 'opp_ign': f'O{i}', 'opp_def_ovr': 110} for i in range(1, 17)]
-        buf = render_ladder_image("T", rows, style='carnival', our_team_name="NeuroPerverse", opponent_name="Opponents")
+        buf = render_ladder_image("T", rows, style='carnival', our_team_name="CHRISTiansReborn", opponent_name="Opponents")
         img = Image.open(buf)
         self.assertEqual(img.format, "PNG")
         self.assertGreater(img.width, 0)
@@ -5120,7 +5120,7 @@ class TestScoresGrid(unittest.TestCase):
             sheet_image._POSTER_FONT_BOLD = [original_bold[0], '/nonexistent/system/font.ttf']
             rows = [{'slot': 1, 'our_ign': 'Grizzly', 'ladder_rank': 81.8, 'opp_ign': 'CesarX', 'opp_def_ovr': 117}]
             buf = sheet_image.render_ladder_image(
-                "T", rows, style='neon', our_team_name="NeuroPerverse", opponent_name="seams suspicious"
+                "T", rows, style='neon', our_team_name="CHRISTiansReborn", opponent_name="seams suspicious"
             )
             img = Image.open(buf)
             # Measure the actual title font used via the same _fit_text call
@@ -5128,7 +5128,7 @@ class TestScoresGrid(unittest.TestCase):
             # ~10px fallback size.
             dummy = ImageDraw.Draw(Image.new('RGB', (1, 1)))
             title_font = sheet_image._fit_text(
-                dummy, "NeuroPerverse vs seams suspicious", sheet_image._POSTER_FONT_BOLD, 44, 24, img.width - 70
+                dummy, "CHRISTiansReborn vs seams suspicious", sheet_image._POSTER_FONT_BOLD, 44, 24, img.width - 70
             )
             self.assertGreaterEqual(title_font.size, 24)
         finally:
@@ -5147,8 +5147,8 @@ class TestScoresGrid(unittest.TestCase):
                       'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
                       'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = render_ladder_image(
-                "NeuroPerverse vs seams suspicious", rows, subtitle="Ladder (E1)",
-                style=style, our_team_name="NeuroPerverse", opponent_name="seams suspicious", division="E1"
+                "CHRISTiansReborn vs seams suspicious", rows, subtitle="Ladder (E1)",
+                style=style, our_team_name="CHRISTiansReborn", opponent_name="seams suspicious", division="E1"
             )
             img = Image.open(buf)
             self.assertEqual(img.format, "PNG")
@@ -5188,7 +5188,7 @@ class TestScoresGrid(unittest.TestCase):
                       'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
                       'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
             buf = render_ladder_image("Title", rows, style=style,
-                                       our_team_name="NeuroPerverse", opponent_name="seams suspicious")
+                                       our_team_name="CHRISTiansReborn", opponent_name="seams suspicious")
             img = Image.open(buf)  # must not raise
             self.assertGreater(img.width, 0)
 
@@ -5230,7 +5230,7 @@ class TestScoresGrid(unittest.TestCase):
             {"ign": "Grizzly", "scores": {"2026-07-20": "22", "2026-07-21": "M", "2026-07-22": None}},
             {"ign": "TOTAL",   "scores": {"2026-07-20": "22", "2026-07-21": "0",  "2026-07-22": "0"}},
         ]
-        buf = render_scores_grid("NeuroPerverse — 2026-07-20 to 2026-07-22", dates, roster_rows)
+        buf = render_scores_grid("CHRISTiansReborn — 2026-07-20 to 2026-07-22", dates, roster_rows)
         img = Image.open(buf)
         self.assertEqual(img.format, "PNG")
         self.assertGreater(img.width, 0)
@@ -5371,8 +5371,8 @@ class TestI18nTier1(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_status_translated_in_french(self):
         from status import get_status
-        await db.set_matchup("NP", TODAY, "RivalTeam", "E1")
-        embed = await get_status("NP", lang='fr')
+        await db.set_matchup("RX", TODAY, "RivalTeam", "E1")
+        embed = await get_status("RX", lang='fr')
         field_names = [c.kwargs.get("name") for c in embed.add_field.call_args_list]
         self.assertIn("📊 Tableau des Scores", field_names)
         self.assertIn("📈 Perspective", field_names)
@@ -5408,7 +5408,7 @@ class TestI18nTier2(unittest.IsolatedAsyncioTestCase):
 
     async def test_siege_start_modal_translated(self):
         inter = self._make_interaction()
-        await self.siege.handle_siege(inter, "NP")
+        await self.siege.handle_siege(inter, "RX")
         modal = inter.response.send_modal.call_args.args[0]
         self.assertEqual(modal.title, "Belagerung Starten")
         modal.opp_league.value = "WolfpackMafia"
@@ -5419,9 +5419,9 @@ class TestI18nTier2(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Belagerung gestartet", msg)
 
     async def test_node_modal_translated_spanish(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         inter = self._make_interaction(discord.Locale.spain_spanish)
-        await self.siege.handle_node(inter, "NP", "No Mod")
+        await self.siege.handle_node(inter, "RX", "No Mod")
         modal = inter.response.send_modal.call_args.args[0]
         self.assertEqual(modal.title, "Reportar Nodo de Asedio")
         modal.opponent_name.value = "BigBoy87"
@@ -5435,29 +5435,29 @@ class TestI18nTier2(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_active_match_translated_french(self):
         inter = self._make_interaction(discord.Locale.french)
-        await self.siege.handle_siegestatus(inter, "NP")
+        await self.siege.handle_siegestatus(inter, "RX")
         msg = inter.response.send_message.call_args.args[0]
         self.assertIn("Aucun siège actif", msg)
 
     async def test_siege_status_embed_translated_portuguese(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         node = await db.add_siege_node(match["id"], mod="No Mod", opponent_name="BigBoy87",
                                         opponent_ovr=None, points_required=30, points_reward=10)
         await db.log_siege_score(node["id"], "Grizzly", 3, 14)
         inter = self._make_interaction(discord.Locale.brazil_portuguese)
-        await self.siege.handle_siegestatus(inter, "NP")
+        await self.siege.handle_siegestatus(inter, "RX")
         embed = inter.followup.send.call_args.kwargs["embed"]
         field_names = [c.kwargs.get("name") for c in embed.add_field.call_args_list]
         self.assertTrue(any("Nós Abertos" in n for n in field_names))
 
     async def test_siegescore_ambiguous_name_translated(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                  opponent_ovr=None, points_required=20, points_reward=8)
         await db.add_siege_node(match["id"], mod="No Mod", opponent_name="Slayer99",
                                  opponent_ovr=None, points_required=30, points_reward=12)
         inter = self._make_interaction(discord.Locale.german)
-        await self.siege.handle_siegescore(inter, "NP", "Grizzly", "Slayer99")
+        await self.siege.handle_siegescore(inter, "RX", "Grizzly", "Slayer99")
         msg = inter.response.send_message.call_args.args[0]
         self.assertIn("offene Knoten namens", msg)
 
@@ -5469,14 +5469,14 @@ class TestI18nTier2(unittest.IsolatedAsyncioTestCase):
 
     async def test_siegehistory_no_matches_translated(self):
         inter = self._make_interaction(discord.Locale.spain_spanish)
-        await self.siege.handle_siegehistory(inter, "NP")
+        await self.siege.handle_siegehistory(inter, "RX")
         msg = inter.followup.send.call_args.args[0]
         self.assertIn("Aún no hay combates de asedio", msg)
 
     async def test_correction_view_translated_and_finalize(self):
-        match = await db.start_siege_match("NP", "WolfpackMafia")
+        match = await db.start_siege_match("RX", "WolfpackMafia")
         inter = self._make_interaction(discord.Locale.german)
-        await self.siege.handle_siegefinal(inter, "NP")
+        await self.siege.handle_siegefinal(inter, "RX")
         view = inter.followup.send.call_args.kwargs["view"]
         labels = [c.label for c in view.children]
         self.assertIn("💰 Gegnerpunkte Festlegen", labels)
@@ -5497,9 +5497,9 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
     async def test_update_matchup_view_translated_german(self):
         from optimized_bot import UpdateMatchupView
         players = [{"ign": "Grizzly", "score": None, "is_forfeit": 0}]
-        view = UpdateMatchupView("NP", TODAY, None, players, lang="de")
+        view = UpdateMatchupView("RX", TODAY, None, players, lang="de")
         embed = view._build_embed()
-        self.assertEqual(embed.title, f"📋 Matchup Aktualisieren — NeuroPerverse {TODAY}")
+        self.assertEqual(embed.title, f"📋 Matchup Aktualisieren — CHRISTiansReborn {TODAY}")
         field_names = [c.kwargs.get("name") for c in embed.add_field.call_args_list]
         self.assertIn("Ergebnis", field_names)
         button_labels = [c.label for c in view.children]
@@ -5515,7 +5515,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
     async def test_outcome_modal_translated_portuguese(self):
         from optimized_bot import UpdateMatchupView
         players = [{"ign": "Grizzly", "score": None, "is_forfeit": 0}]
-        view = UpdateMatchupView("NP", TODAY, None, players, lang="pt")
+        view = UpdateMatchupView("RX", TODAY, None, players, lang="pt")
         inter = MagicMock()
         inter.response = MagicMock()
         inter.response.send_modal = AsyncMock()
@@ -5545,7 +5545,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row_before)
 
         players = [{"ign": "Grizzly", "score": 22.0, "is_forfeit": 0, "is_excused": 0}]
-        view = UpdateMatchupView("NP", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
+        view = UpdateMatchupView("RX", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
         view.pending_scores = {"Grizzly": (None, False, False)}  # cell left blank at submission
 
         await view._save(self._make_matchup_save_interaction())
@@ -5558,7 +5558,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         and must not create any row."""
         from optimized_bot import UpdateMatchupView
         players = [{"ign": "Grizzly", "score": None, "is_forfeit": 0, "is_excused": 0}]
-        view = UpdateMatchupView("NP", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
+        view = UpdateMatchupView("RX", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
         view.pending_scores = {"Grizzly": (None, False, False)}
 
         await view._save(self._make_matchup_save_interaction())  # must not raise
@@ -5572,7 +5572,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import UpdateMatchupView
         await db.update_player_score("Grizzly", TODAY, 22.0)
         players = [{"ign": "Grizzly", "score": 22.0, "is_forfeit": 0, "is_excused": 0}]
-        view = UpdateMatchupView("NP", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
+        view = UpdateMatchupView("RX", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
         view.pending_scores = {"Grizzly": (24.0, False, False)}
 
         await view._save(self._make_matchup_save_interaction())
@@ -5588,7 +5588,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import UpdateMatchupView
         await db.update_player_score("Grizzly", TODAY, 22.0)
         players = [{"ign": "Grizzly", "score": 22.0, "is_forfeit": 0, "is_excused": 0}]
-        view = UpdateMatchupView("NP", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
+        view = UpdateMatchupView("RX", TODAY, {"opp_ign": "SomeOpp"}, players, lang="en")
 
         callback = view._make_score_page(0)
         inter = MagicMock()
@@ -5620,13 +5620,13 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         inter.response = MagicMock()
         inter.response.is_done = MagicMock(return_value=False)
         inter.response.send_message = AsyncMock()
-        await start_ladder_flow(inter, "NP", TODAY)
+        await start_ladder_flow(inter, "RX", TODAY)
         embed = inter.response.send_message.call_args.kwargs["embed"]
         self.assertIn("Paso 1", embed.title)
 
     async def test_ladder_step2_opponent_csv_modal_translated_german(self):
         from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
-        state = LadderState("NP", TODAY, None, lang="de")
+        state = LadderState("RX", TODAY, None, lang="de")
         state.opponents = [{"name": "-", "total_ovr": None, "def_ovr": None} for _ in range(MATCHUP_SIZE)]
         view = OpponentEntryView.__new__(OpponentEntryView)
         view.state = state
@@ -5648,7 +5648,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_final_embed_translated_french(self):
         from ladder_flow import LadderState, build_final_embed
-        state = LadderState("NP", TODAY, None, lang="fr")
+        state = LadderState("RX", TODAY, None, lang="fr")
         state.selected = [f"P{i}" for i in range(16)]
         state.opponents = [{"name": f"O{i}", "total_ovr": 100, "def_ovr": 50} for i in range(16)]
         order = list(range(16))
@@ -5657,7 +5657,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_final_embed_shows_extracted_context_when_present(self):
         from ladder_flow import LadderState, build_final_embed
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected = [f"P{i}" for i in range(16)]
         state.opponents = [{"name": f"O{i}", "total_ovr": 100, "def_ovr": 50} for i in range(16)]
         state.opponent_league_name = "seams suspicious"
@@ -5673,7 +5673,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
 
     async def test_ladder_final_embed_omits_division_and_rank_when_not_extracted(self):
         from ladder_flow import LadderState, build_final_embed
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected = [f"P{i}" for i in range(16)]
         state.opponents = [{"name": f"O{i}", "total_ovr": 100, "def_ovr": 50} for i in range(16)]
         state.opponent_league_name = "seams suspicious"
@@ -5687,7 +5687,7 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
         """The manual CSV entry flow never extracts any of this — no
         confirmation field should appear at all, not one with blanks in it."""
         from ladder_flow import LadderState, build_final_embed
-        state = LadderState("NP", TODAY, None)
+        state = LadderState("RX", TODAY, None)
         state.selected = [f"P{i}" for i in range(16)]
         state.opponents = [{"name": f"O{i}", "total_ovr": 100, "def_ovr": 50} for i in range(16)]
         order = list(range(16))
@@ -5697,12 +5697,12 @@ class TestI18nTier3(unittest.IsolatedAsyncioTestCase):
 
     async def test_build_ladder_image_passes_style_through(self):
         from optimized_bot import _build_ladder_image
-        await db.upsert_ladder_slot("NP", TODAY, 1, opp_ign="TestOpp", opp_def_ovr=200, our_ign="Grizzly")
+        await db.upsert_ladder_slot("RX", TODAY, 1, opp_ign="TestOpp", opp_def_ovr=200, our_ign="Grizzly")
         for style in ['classic', 'neon', 'clean', 'scoreboard', 'tactical', 'varsity', 'arcade', 'street',
                       'carnival', 'gridiron', 'blueprint', 'newsprint', 'terminal',
                       'gators', 'ledboard', 'dossier', 'gameboy', 'cyberdeck', 'starfield',
                       'hazard', 'bubble', 'sketch', 'prestige', 'paper', 'heatmap']:
-            buf = await _build_ladder_image("NP", datetime.date.fromisoformat(TODAY), style=style)
+            buf = await _build_ladder_image("RX", datetime.date.fromisoformat(TODAY), style=style)
             self.assertIsNotNone(buf)
 
 
@@ -5760,7 +5760,7 @@ class TestI18nTier4(unittest.IsolatedAsyncioTestCase):
 
     async def test_transfer_league_view_translated_portuguese(self):
         from optimized_bot import TransferLeagueView
-        view = TransferLeagueView("Grizzly", "NP", lang="pt")
+        view = TransferLeagueView("Grizzly", "RX", lang="pt")
         select = view.children[0]
         self.assertEqual(select.placeholder, "Selecione a liga de destino...")
 
@@ -5785,7 +5785,7 @@ class TestI18nTier4(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import LeagueAddModal
         modal = LeagueAddModal(lang="de")
         self.assertEqual(modal.title, "Neue Liga Hinzufügen")
-        self.assertEqual(_label_text_for(modal, modal.league_id), "Liga-ID (2 Buchstaben, z. B. NX)")
+        self.assertEqual(_label_text_for(modal, modal.league_id), "Liga-ID (2 Buchstaben, z. B. RX)")
 
     async def test_inactive_confirm_translated_spanish(self):
         import i18n
@@ -5915,7 +5915,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
 
     async def test_register_defaults_real_ign_to_nickname_when_blank(self):
         from optimized_bot import RegisterModal
-        modal = RegisterModal("NP")
+        modal = RegisterModal("RX")
         modal.ign.value = "BrandNewPlayer"
         modal.real_ign.value = ""  # left blank
         modal.off_ovr.value = "150"
@@ -5936,7 +5936,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         """A real_ign already used by another player must not block registration —
         duplicates are valid and expected, not an error condition."""
         from optimized_bot import RegisterModal
-        modal = RegisterModal("NP")
+        modal = RegisterModal("RX")
         modal.ign.value = "SecondPlayer"
         modal.real_ign.value = "Grizzly"  # same real_ign as the existing Grizzly
         modal.off_ovr.value = "150"
@@ -6058,7 +6058,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 conn = await db.get_archive_conn(1999)
                 self.assertIsNone(conn)
             finally:
@@ -6069,8 +6069,8 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                archive_path = os.path.join(tmpdir, "neuroverse_2026.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                archive_path = os.path.join(tmpdir, "reborn_2026.db")
                 raw = sqlite3.connect(archive_path)
                 raw.execute("CREATE TABLE players (id INTEGER PRIMARY KEY, ign TEXT)")
                 raw.execute("INSERT INTO players (ign) VALUES ('ArchivedPlayer')")
@@ -6093,8 +6093,8 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                archive_path = os.path.join(tmpdir, "neuroverse_2026.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                archive_path = os.path.join(tmpdir, "reborn_2026.db")
                 raw = sqlite3.connect(archive_path)
                 raw.execute("CREATE TABLE players (id INTEGER PRIMARY KEY, ign TEXT)")
                 raw.commit()
@@ -6113,8 +6113,8 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                archive_path = os.path.join(tmpdir, "neuroverse_2026.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                archive_path = os.path.join(tmpdir, "reborn_2026.db")
                 raw = sqlite3.connect(archive_path)
                 raw.execute("CREATE TABLE players (id INTEGER PRIMARY KEY)")
                 raw.commit()
@@ -6148,21 +6148,21 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
     async def _build_temp_archive(self, tmpdir, year=2026):
         """Build a minimal but real archive db, using the same schema as the
         live test fixture, with one scored player."""
-        archive_path = os.path.join(tmpdir, f"neuroverse_{year}.db")
+        archive_path = os.path.join(tmpdir, f"reborn_{year}.db")
         raw = sqlite3.connect(archive_path)
         raw.executescript(SCHEMA)
-        raw.execute("INSERT INTO teams VALUES ('NP', 'NeuroPerverse', 'NeuroPerverse')")
+        raw.execute("INSERT INTO teams VALUES ('RX', 'CHRISTiansReborn', 'CHRISTiansReborn')")
         raw.execute(
             "INSERT INTO players (team_id,ign,status,off_ovr,def_ovr,total_ovr) "
-            "VALUES ('NP','ArchivedGrizzly','A',240,220,7000)"
+            "VALUES ('RX','ArchivedGrizzly','A',240,220,7000)"
         )
         raw.execute(
             "INSERT INTO game_scores (player_id, team_id, game_date, score) "
-            "VALUES (1, 'NP', '2026-07-20', 22.0)"
+            "VALUES (1, 'RX', '2026-07-20', 22.0)"
         )
         raw.execute(
             "INSERT INTO matchup_day (team_id, game_date, opp_ign, event_type, opp_score, our_score) "
-            "VALUES ('NP', '2026-07-20', 'ArchivedOpp', 'E1', 14, 22)"
+            "VALUES ('RX', '2026-07-20', 'ArchivedOpp', 'E1', 14, 22)"
         )
         raw.commit()
         raw.close()
@@ -6175,7 +6175,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 await legacy_history_slash(inter, "Grizzly", "2026-07-01", 1999)
             finally:
                 await db.close_archive_connections()
@@ -6190,7 +6190,7 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 await self._build_temp_archive(tmpdir)
                 await legacy_history_slash(inter, "ArchivedGrizzly", "2026-07-01", 2026, "2026-07-31")
             finally:
@@ -6208,8 +6208,8 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                await legacy_scores_slash(inter, 1999, "NP", "2026-07-01")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                await legacy_scores_slash(inter, 1999, "RX", "2026-07-01")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6223,9 +6223,9 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 await self._build_temp_archive(tmpdir)
-                await legacy_scores_slash(inter, 2026, "NP", "2026-07-20")
+                await legacy_scores_slash(inter, 2026, "RX", "2026-07-20")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6239,8 +6239,8 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                await legacy_show_ladder_slash(inter, 1999, "NP")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                await legacy_show_ladder_slash(inter, 1999, "RX")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6257,17 +6257,17 @@ class TestNickIgnDisambiguation(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 archive_path = await self._build_temp_archive(tmpdir)
                 raw = sqlite3.connect(archive_path)
                 raw.execute(
                     "INSERT INTO matchup_ladder (team_id, game_date, slot, our_ign, opp_ign) "
-                    "VALUES ('NP', '2026-07-20', 1, 'ArchivedGrizzly', 'ArchivedOpp')"
+                    "VALUES ('RX', '2026-07-20', 1, 'ArchivedGrizzly', 'ArchivedOpp')"
                 )
                 raw.commit()
                 raw.close()
 
-                await legacy_show_ladder_slash(inter, 2026, "NP")  # date omitted
+                await legacy_show_ladder_slash(inter, 2026, "RX")  # date omitted
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
@@ -6335,10 +6335,10 @@ class TestDataIntegrity(unittest.IsolatedAsyncioTestCase):
 
     async def test_matchup_day_unique_per_team_date(self):
         """Only one matchup per team per date."""
-        await db.set_matchup("NP", TODAY, "TeamA")
-        await db.set_matchup("NP", TODAY, "TeamB")  # should upsert
+        await db.set_matchup("RX", TODAY, "TeamA")
+        await db.set_matchup("RX", TODAY, "TeamB")  # should upsert
         rows = await db.fetchall(
-            "SELECT * FROM matchup_day WHERE team_id='NP' AND game_date=?", (TODAY,)
+            "SELECT * FROM matchup_day WHERE team_id='RX' AND game_date=?", (TODAY,)
         )
         self.assertEqual(len(rows), 1)
 
@@ -6371,14 +6371,14 @@ class TestDataIntegrity(unittest.IsolatedAsyncioTestCase):
 
     async def test_l_status_excluded_from_rank_table(self):
         await db.execute("UPDATE players SET status='I' WHERE ign='Grizzly'")
-        rows = await db.get_rank_table("NP")
+        rows = await db.get_rank_table("RX")
         igns = [r["ign"] for r in rows]
         self.assertNotIn("Grizzly", igns)
 
     async def test_inactive_excluded_from_remaining(self):
         """I-status players should not appear in remaining."""
         await db.execute("UPDATE players SET status='I' WHERE ign='FHRITP'")
-        remaining = await db.get_players_remaining("NP", TODAY)
+        remaining = await db.get_players_remaining("RX", TODAY)
         self.assertNotIn("FHRITP", remaining)
         await db.execute("UPDATE players SET status='A' WHERE ign='FHRITP'")
 
@@ -6403,7 +6403,7 @@ class TestThemedLadderStyles(unittest.TestCase):
         from PIL import Image
         from sheet_image import render_ladder_image, _LADDER_THEMES
         for style in _LADDER_THEMES:
-            buf = render_ladder_image("T", self.ROWS, style=style, our_team_name="NeuroAdverse",
+            buf = render_ladder_image("T", self.ROWS, style=style, our_team_name="Second League",
                                       opponent_name="Legends of Valhalla", division="E1")
             img = Image.open(buf)
             self.assertEqual(img.format, "PNG", style)
@@ -6599,7 +6599,7 @@ class TestLadderStyleChoices(unittest.TestCase):
             if choice.value == 'classic':
                 continue
             out = render_ladder_image("T", TestThemedLadderStyles.ROWS, style=choice.value,
-                                      our_team_name="NeuroAdverse", opponent_name="Opponents")
+                                      our_team_name="Second League", opponent_name="Opponents")
             self.assertNotEqual(out.getvalue(), classic,
                                 f'style {choice.value!r} fell through to classic')
 
@@ -6888,11 +6888,11 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         isn't a row there (NI, deleted) must not appear."""
         with tempfile.TemporaryDirectory() as tmpdir:
             path = self._write_db(
-                os.path.join(tmpdir, "neuroverse.db"),
-                [("NP", "NeuroPerverse"), ("NX", "NeuroChristians")],
+                os.path.join(tmpdir, "reborn.db"),
+                [("RX", "CHRISTiansReborn"), ("NX", "Third League")],
             )
             names = db.load_league_names_sync(path)
-        self.assertEqual(names, {"NP": "NeuroPerverse", "NX": "NeuroChristians"})
+        self.assertEqual(names, {"RX": "CHRISTiansReborn", "NX": "Third League"})
         self.assertNotIn("NI", names)
 
     def test_load_league_names_sync_missing_file_returns_empty(self):
@@ -6917,7 +6917,7 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         the live db, and must not create a WAL/journal file alongside it
         (the deploy process treats stray -wal files as state to delete)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = self._write_db(os.path.join(tmpdir, "neuroverse.db"), [("NP", "NeuroPerverse")])
+            path = self._write_db(os.path.join(tmpdir, "reborn.db"), [("RX", "CHRISTiansReborn")])
             before = os.path.getmtime(path)
             db.load_league_names_sync(path)
             self.assertEqual(os.path.getmtime(path), before)
@@ -6932,7 +6932,7 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
             with open(os.path.join(os.path.dirname(__file__), mod), encoding="utf-8") as f:
                 src = f.read()
             self.assertIn("db.load_league_names_sync()", src, f"{mod} must load leagues from the teams table")
-            for literal in ("'NeuroPerverse'", '"NeuroPerverse"', "'NeuroInverse'", '"NeuroInverse"'):
+            for literal in ("'CHRISTiansReborn'", '"CHRISTiansReborn"', "'Deleted League'", '"Deleted League"'):
                 self.assertNotIn(literal, src, f"{mod} hardcodes a league name ({literal})")
 
     def test_no_module_hardcodes_team_ids_either(self):
@@ -6956,7 +6956,7 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
                 continue
             with open(path, encoding='utf-8') as f:
                 src = f.read()
-            for literal in ("'NeuroPerverse'", '"NeuroPerverse"'):
+            for literal in ("'CHRISTiansReborn'", '"CHRISTiansReborn"'):
                 self.assertNotIn(literal, src, f'{mod} hardcodes a league name')
             hit = pattern.search(src)
             self.assertIsNone(hit, f'{mod} looks like it hardcodes a team-id list: {hit.group(0) if hit else ""}')
@@ -6973,19 +6973,19 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 self._write_db(
-                    os.path.join(tmpdir, "neuroverse_2026.db"),
-                    [("NI", "NeuroInverse"), ("NP", "NeuroPerverse")],
+                    os.path.join(tmpdir, "reborn_2026.db"),
+                    [("NI", "Deleted League"), ("RX", "CHRISTiansReborn")],
                 )
                 with patch.dict("optimized_bot.LEAGUE_NAMES",
-                                {"NP": "NeuroPerverse", "ZZ": "NeuroBrandNew"}, clear=True):
+                                {"RX": "CHRISTiansReborn", "ZZ": "RebornBrandNew"}, clear=True):
                     choices = await archive_league_autocomplete(inter, "")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
         values = {c.value for c in choices}
-        self.assertEqual(values, {"NI", "NP"})
+        self.assertEqual(values, {"NI", "RX"})
         self.assertNotIn("ZZ", values)  # exists now, didn't exist in 2026
 
     async def test_archive_league_autocomplete_filters_on_current_input(self):
@@ -6994,10 +6994,10 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 self._write_db(
-                    os.path.join(tmpdir, "neuroverse_2026.db"),
-                    [("NI", "NeuroInverse"), ("NP", "NeuroPerverse")],
+                    os.path.join(tmpdir, "reborn_2026.db"),
+                    [("NI", "Deleted League"), ("RX", "CHRISTiansReborn")],
                 )
                 choices = await archive_league_autocomplete(inter, "inverse")
             finally:
@@ -7011,9 +7011,9 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         from optimized_bot import archive_league_autocomplete
         inter = self._make_interaction(year=None)
         with patch.dict("optimized_bot.LEAGUE_NAMES",
-                        {"NP": "NeuroPerverse", "NX": "NeuroChristians"}, clear=True):
+                        {"RX": "CHRISTiansReborn", "NX": "Third League"}, clear=True):
             choices = await archive_league_autocomplete(inter, "")
-        self.assertEqual({c.value for c in choices}, {"NP", "NX"})
+        self.assertEqual({c.value for c in choices}, {"RX", "NX"})
 
     async def test_archive_league_autocomplete_falls_back_when_no_archive(self):
         from optimized_bot import archive_league_autocomplete
@@ -7021,13 +7021,13 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                with patch.dict("optimized_bot.LEAGUE_NAMES", {"NP": "NeuroPerverse"}, clear=True):
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                with patch.dict("optimized_bot.LEAGUE_NAMES", {"RX": "CHRISTiansReborn"}, clear=True):
                     choices = await archive_league_autocomplete(inter, "")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
-        self.assertEqual([c.value for c in choices], ["NP"])
+        self.assertEqual([c.value for c in choices], ["RX"])
 
     async def test_legacy_rank_serves_a_league_that_no_longer_exists(self):
         """A season's own league must be viewable even after it's deleted
@@ -7038,9 +7038,9 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
                 archive = self._write_db(
-                    os.path.join(tmpdir, "neuroverse_2026.db"), [("NI", "NeuroInverse")]
+                    os.path.join(tmpdir, "reborn_2026.db"), [("NI", "Deleted League")]
                 )
                 raw = sqlite3.connect(archive)
                 raw.execute(
@@ -7049,7 +7049,7 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
                 )
                 raw.commit()
                 raw.close()
-                with patch.dict("optimized_bot.LEAGUE_NAMES", {"NP": "NeuroPerverse"}, clear=True):
+                with patch.dict("optimized_bot.LEAGUE_NAMES", {"RX": "CHRISTiansReborn"}, clear=True):
                     await legacy_rank_slash(inter, 2026, "NI")
             finally:
                 await db.close_archive_connections()
@@ -7066,8 +7066,8 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_path = db.DB_PATH
             try:
-                db.DB_PATH = os.path.join(tmpdir, "neuroverse.db")
-                self._write_db(os.path.join(tmpdir, "neuroverse_2026.db"), [("NP", "NeuroPerverse")])
+                db.DB_PATH = os.path.join(tmpdir, "reborn.db")
+                self._write_db(os.path.join(tmpdir, "reborn_2026.db"), [("RX", "CHRISTiansReborn")])
                 await legacy_rank_slash(inter, 2026, "ZZ")
             finally:
                 await db.close_archive_connections()
@@ -7085,9 +7085,9 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
                 siege_mod.LEAGUE_NAMES, ladder_flow.LEAGUE_NAMES)
         saved = [dict(m) for m in maps]
         try:
-            optimized_bot._sync_league_name("QQ", "NeuroRenamed")
+            optimized_bot._sync_league_name("QQ", "RebornRenamed")
             for m in maps:
-                self.assertEqual(m.get("QQ"), "NeuroRenamed")
+                self.assertEqual(m.get("QQ"), "RebornRenamed")
         finally:
             for m, original in zip(maps, saved):
                 m.clear()
@@ -7134,14 +7134,14 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         await newday_mod.newday()
         # A day's real data lands on the placeholder row
         await db.execute(
-            "UPDATE matchup_day SET opp_ign=?, opp_score=?, our_score=? WHERE team_id='NP' AND game_date=?",
+            "UPDATE matchup_day SET opp_ign=?, opp_score=?, our_score=? WHERE team_id='RX' AND game_date=?",
             ('Legends of Valhalla', 14, 22, today))
 
         await newday_mod.newday()
         await newday_mod.newday()
 
         rows = await db.fetchall(
-            "SELECT opp_ign, opp_score, our_score FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT opp_ign, opp_score, our_score FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (today,))
         self.assertEqual(len(rows), 1, "a re-run duplicated the day's matchup row")
         self.assertEqual(rows[0]['opp_ign'], 'Legends of Valhalla', 'a re-run wiped the recorded opponent')
@@ -7153,11 +7153,11 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         be inserted for, because matchup_day.team_id is a foreign key to it."""
         import newday as newday_mod
         import datetime as _dt
-        await db.execute("DELETE FROM players WHERE team_id='NP'")
-        await db.execute("DELETE FROM teams WHERE id='NP'")
+        await db.execute("DELETE FROM players WHERE team_id='RX'")
+        await db.execute("DELETE FROM teams WHERE id='RX'")
         await newday_mod.newday()   # must not raise
         row = await db.fetchone(
-            "SELECT team_id FROM matchup_day WHERE team_id='NP' AND game_date=?",
+            "SELECT team_id FROM matchup_day WHERE team_id='RX' AND game_date=?",
             (str(_dt.date.today()),))
         self.assertIsNone(row, 'created a matchup_day row for a league that no longer exists')
 
@@ -7216,18 +7216,18 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
         await setup_db()
         import ladder_flow
         self.lf = ladder_flow
-        # A full 18-player active pool for NP, on top of the 3 seeded ones.
+        # A full 18-player active pool for RX, on top of the 3 seeded ones.
         for i in range(15):
             await db.execute(
                 "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, def_ovr, total_ovr) "
-                "VALUES ('NP',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
+                "VALUES ('RX',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
 
     async def asyncTearDown(self):
         await _patched_close()
 
     async def _state(self, preselected=None):
-        players = await db.get_team_stats("NP")
-        state = self.lf.LadderState("NP", "2026-09-29", MagicMock(), lang='en')
+        players = await db.get_team_stats("RX")
+        state = self.lf.LadderState("RX", "2026-09-29", MagicMock(), lang='en')
         state.players = [dict(p) for p in players]
         if preselected is not None:
             state.selected = preselected
@@ -7270,7 +7270,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
         player who isn't on this league's active roster, so the ign lands in
         `selected` with no button to tick — 15 ticks, a count of 16, and no
         way to clear the phantom because nothing renders it."""
-        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        pool = [p['ign'] for p in (await db.get_team_stats("RX"))]
         preselected = pool[:15] + ["SomeoneElsesPlayer"]
         state = await self._state(preselected)
         view = self.lf.PlayerToggleView(state)
@@ -7282,7 +7282,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
     async def test_a_duplicated_preselection_is_counted_once(self):
         """Three screenshots can show the same player twice, and the
         extraction loop appends every match with no dedup."""
-        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        pool = [p['ign'] for p in (await db.get_team_stats("RX"))]
         state = await self._state(pool[:15] + [pool[0]])
         view = self.lf.PlayerToggleView(state)
 
@@ -7293,7 +7293,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
         """Nothing enforced the 16-player cap on the pre-populated list — the
         guard lives only in the toggle callback, which never runs for it. A
         count above 16 is how the reported '17' becomes reachable."""
-        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        pool = [p['ign'] for p in (await db.get_team_stats("RX"))]
         self.assertGreater(len(pool), self.lf.MATCHUP_SIZE)
         state = await self._state(list(pool))
         view = self.lf.PlayerToggleView(state)
@@ -7304,7 +7304,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
     async def test_toggling_keeps_the_count_and_the_ticks_in_step(self):
         """The whole reported sequence: untick one, tick another, and the
         count has to track the ticks at every step."""
-        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        pool = [p['ign'] for p in (await db.get_team_stats("RX"))]
         state = await self._state(pool[:15] + ["SomeoneElsesPlayer"])
         view = self.lf.PlayerToggleView(state)
         inter = MagicMock()
@@ -7334,7 +7334,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
         keep appending to their own copy as batches resolve, so a stale click
         on one of those earlier messages could mutate a live ladder's
         selection out from under it."""
-        pool = [p['ign'] for p in (await db.get_team_stats("NP"))]
+        pool = [p['ign'] for p in (await db.get_team_stats("RX"))]
         callers_list = pool[:16]
 
         inter = MagicMock()
@@ -7346,7 +7346,7 @@ class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
         inter.channel = MagicMock()
         inter.locale = discord.Locale.american_english
 
-        await self.lf.start_ladder_flow(inter, "NP", "2026-09-29", preselected=callers_list)
+        await self.lf.start_ladder_flow(inter, "RX", "2026-09-29", preselected=callers_list)
         sent_view = (inter.response.send_message.call_args
                      or inter.followup.send.call_args).kwargs['view']
 
@@ -7371,8 +7371,8 @@ class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
         os.environ["DB_PATH"] = ":memory:"
         db._db = None
         await setup_db()
-        # The seeded teams table only has NP and ND.
-        await db.execute("INSERT INTO teams VALUES ('NX','NeuroChristians','NeuroChristians')")
+        # The seeded teams table only has RX and ND.
+        await db.execute("INSERT INTO teams VALUES ('NX','Third League','Third League')")
         await db.execute(
             "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('ND','317-Elite','317-Elite','I')")
         await db.execute(
@@ -7390,7 +7390,7 @@ class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
         """Returning the ND player to an NX ladder is the actual bug: that
         ign has no button in NX's pool, so it can be counted but never
         unticked."""
-        self.assertIsNone(await db.get_player_by_real_ign("317-Elite", team_id="NP"))
+        self.assertIsNone(await db.get_player_by_real_ign("317-Elite", team_id="RX"))
 
     async def test_team_scoped_lookup_skips_inactive_players(self):
         self.assertIsNone(await db.get_player_by_real_ign("317-Elite", team_id="ND"))
@@ -7452,11 +7452,11 @@ class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
 
     async def test_fallback_to_ign_still_works_when_real_ign_is_null(self):
         await db.execute(
-            "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('NP','NoRealIgn',NULL,'A')")
+            "INSERT INTO players (team_id, ign, real_ign, status) VALUES ('RX','NoRealIgn',NULL,'A')")
         row = await db.get_player_by_real_ign("NoRealIgn")
         self.assertIsNotNone(row)
         self.assertEqual(row['ign'], "NoRealIgn")
-        scoped = await db.get_player_by_real_ign("NoRealIgn", team_id="NP")
+        scoped = await db.get_player_by_real_ign("NoRealIgn", team_id="RX")
         self.assertIsNotNone(scoped)
         self.assertEqual(scoped['ign'], "NoRealIgn")
 
@@ -7464,7 +7464,7 @@ class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
 # Test: defensive reporting (/dstats, /dscores)
 # ---------------------------------------------------------------------------
 
-def _drow(date="2026-08-01", pa=18, d1='6', d2='6', d3='6', ovr=120.0, team='NP'):
+def _drow(date="2026-08-01", pa=18, d1='6', d2='6', d3='6', ovr=120.0, team='RX'):
     return {'game_date': date, 'team_id': team, 'points_allowed': pa,
             'drive1_outcome': d1, 'drive2_outcome': d2, 'drive3_outcome': d3,
             'avg_off_ovr_faced': ovr}
@@ -7540,7 +7540,7 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         await setup_db()
         import optimized_bot
         self.ob = optimized_bot
-        for ign, team in (("DefA", "NP"), ("DefB", "NP"), ("DefC", "ND")):
+        for ign, team in (("DefA", "RX"), ("DefB", "RX"), ("DefC", "ND")):
             await db.execute(
                 "INSERT INTO players (team_id, ign, status) VALUES (?,?,'A')", (team, ign))
         self.ids = {ign: (await db.get_player(ign))['id']
@@ -7568,7 +7568,7 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         await self._log("DefA", "2026-08-01", 18)
         await self._log("DefA", "2026-08-02", 24, d1='8', d2='8', d3='8')
         await self._log("DefB", "2026-08-01", 6, d1='0', d2='6', d3='0')
-        stats = await db.get_league_dstats("NP")
+        stats = await db.get_league_dstats("RX")
 
         rows = {p['ign']: p for p in stats['players']}
         self.assertEqual(rows['DefA']['games'], 2)
@@ -7583,7 +7583,7 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         for d in range(1, 6):
             await self._log("DefA", f"2026-08-0{d}", 30)     # five games at 30
         await self._log("DefB", "2026-08-10", 0)             # one game at 0
-        stats = await db.get_league_dstats("NP")
+        stats = await db.get_league_dstats("RX")
         self.assertEqual(stats['league']['avg_allowed'], 25.0)   # 150 / 6 games
         mean_of_means = 15.0                                     # (30 + 0) / 2
         self.assertNotEqual(stats['league']['avg_allowed'], mean_of_means)
@@ -7592,10 +7592,10 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         """The bug class this codebase keeps hitting: filtering on the
         player's *current* team silently moves (or drops) history the moment
         someone transfers."""
-        await self._log("DefA", "2026-08-01", 18, team="NP")
+        await self._log("DefA", "2026-08-01", 18, team="RX")
         await db.execute("UPDATE players SET team_id='ND' WHERE id=?", (self.ids["DefA"],))
 
-        old_league = await db.get_league_dstats("NP", include_inactive=True)
+        old_league = await db.get_league_dstats("RX", include_inactive=True)
         self.assertEqual(old_league['league']['games'], 1)
         self.assertIn("DefA", {p['ign'] for p in old_league['players']})
 
@@ -7607,11 +7607,11 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         await self._log("DefA", "2026-08-01", 18)
         await db.execute("UPDATE players SET status='I' WHERE id=?", (self.ids["DefA"],))
 
-        default = await db.get_league_dstats("NP")
+        default = await db.get_league_dstats("RX")
         self.assertNotIn("DefA", {p['ign'] for p in default['players']})
         self.assertEqual(default['league']['games'], 0)
 
-        with_inactive = await db.get_league_dstats("NP", include_inactive=True)
+        with_inactive = await db.get_league_dstats("RX", include_inactive=True)
         self.assertIn("DefA", {p['ign'] for p in with_inactive['players']})
         self.assertEqual(with_inactive['league']['games'], 1)
 
@@ -7619,7 +7619,7 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
         """A player with no entries has no average; sorting them as 0.00
         would put them at the top of a best-defense-first table."""
         await self._log("DefA", "2026-08-01", 24)
-        stats = await db.get_league_dstats("NP")
+        stats = await db.get_league_dstats("RX")
         igns = [p['ign'] for p in stats['players']]
         self.assertEqual(igns[0], "DefA")
         self.assertEqual(stats['players'][-1]['games'], 0)
@@ -7627,7 +7627,7 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
     async def test_best_defense_sorts_first(self):
         await self._log("DefA", "2026-08-01", 24)
         await self._log("DefB", "2026-08-01", 6)
-        stats = await db.get_league_dstats("NP")
+        stats = await db.get_league_dstats("RX")
         self.assertEqual([p['ign'] for p in stats['players']][:2], ["DefB", "DefA"])
 
     async def test_unknown_league_returns_nothing_rather_than_an_empty_table(self):
@@ -7644,11 +7644,11 @@ class TestDefensiveReporting(unittest.IsolatedAsyncioTestCase):
             async def send(self, *a, **kw):
                 sent.append((a, kw))
 
-        self.assertFalse(await sheet_image.send_dstats_image(Ctx(), "NP"))
+        self.assertFalse(await sheet_image.send_dstats_image(Ctx(), "RX"))
         self.assertEqual(sent, [], "an image was sent for a league with no entries")
 
         await self._log("DefA", "2026-08-01", 18)
-        self.assertTrue(await sheet_image.send_dstats_image(Ctx(), "NP"))
+        self.assertTrue(await sheet_image.send_dstats_image(Ctx(), "RX"))
         self.assertTrue(sent and sent[0][1].get('file') is not None)
 
     # --- /dscores ---
@@ -7773,7 +7773,7 @@ class TestManualPages(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test: NeuroSeason gamemode
+# Test: RebornSeason gamemode
 # ---------------------------------------------------------------------------
 
 class _FakeResponse:
@@ -7848,17 +7848,17 @@ def _members(n):
 
 
 def _placed(n, seed=1):
-    import neuroseason as ns
+    import rebornseason as ns
     layout = ns.plan_layout(n)
     return layout, ns.place_members(_members(n), layout, random.Random(seed))
 
 
-class TestNeuroSeasonLogic(unittest.TestCase):
+class TestRebornSeasonLogic(unittest.TestCase):
     """The pure scheduling/standings/seeding rules — no database, no Discord."""
 
     def setUp(self):
-        import neuroseason
-        self.ns = neuroseason
+        import rebornseason
+        self.ns = rebornseason
 
     # --- layout ---
 
@@ -7974,10 +7974,10 @@ class TestNeuroSeasonLogic(unittest.TestCase):
 
     def test_standings_count_division_and_conference_records_separately(self):
         members = [
-            {'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
-            {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
-            {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro North'},
-            {'player_id': 4, 'ign': 'D', 'conference': 'Verse', 'division': 'Verse East'},
+            {'player_id': 1, 'ign': 'A', 'conference': 'Reborn', 'division': 'Reborn East'},
+            {'player_id': 2, 'ign': 'B', 'conference': 'Reborn', 'division': 'Reborn East'},
+            {'player_id': 3, 'ign': 'C', 'conference': 'Reborn', 'division': 'Reborn North'},
+            {'player_id': 4, 'ign': 'D', 'conference': 'Revival', 'division': 'Revival East'},
         ]
         matches = [
             self._match(1, 1, 2, 24, 6),   # division win for A
@@ -7994,17 +7994,17 @@ class TestNeuroSeasonLogic(unittest.TestCase):
         self.assertEqual((rows[2]['ties'], rows[2]['conf_ties']), (1, 1))
 
     def test_unplayed_matches_are_not_losses(self):
-        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'}]
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Reborn', 'division': 'Reborn East'}]
         rows = self.ns.compute_standings(members, [self._match(1, 1, 2)])
         self.assertEqual([r['games'] for r in rows], [0, 0])
 
     def test_head_to_head_breaks_a_tie_before_points_for(self):
         """Both 1-1, but B beat A, so B is ahead even though A scored far
         more points across the two games."""
-        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro North'}]
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 3, 'ign': 'C', 'conference': 'Reborn', 'division': 'Reborn North'}]
         matches = [
             self._match(1, 1, 2, 0, 3),     # B beats A head-to-head
             self._match(2, 1, 3, 60, 0),    # A piles on points elsewhere
@@ -8016,9 +8016,9 @@ class TestNeuroSeasonLogic(unittest.TestCase):
         self.assertEqual([r['ign'] for r in ranked], ['B', 'A'])
 
     def test_division_record_breaks_a_tie_when_head_to_head_is_level(self):
-        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 3, 'ign': 'C', 'conference': 'Neuro', 'division': 'Neuro East'}]
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 3, 'ign': 'C', 'conference': 'Reborn', 'division': 'Reborn East'}]
         matches = [
             self._match(1, 1, 2, 10, 3),   # A beats B
             self._match(2, 2, 1, 10, 3),   # B beats A — head-to-head level
@@ -8031,8 +8031,8 @@ class TestNeuroSeasonLogic(unittest.TestCase):
         self.assertEqual([r['ign'] for r in ranked], ['A', 'B'])
 
     def test_points_for_is_the_last_resort(self):
-        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Neuro', 'division': 'Neuro East'},
-                   {'player_id': 2, 'ign': 'B', 'conference': 'Neuro', 'division': 'Neuro North'}]
+        members = [{'player_id': 1, 'ign': 'A', 'conference': 'Reborn', 'division': 'Reborn East'},
+                   {'player_id': 2, 'ign': 'B', 'conference': 'Reborn', 'division': 'Reborn North'}]
         matches = [self._match(1, 1, 2, 30, 24), self._match(2, 2, 1, 30, 29)]
         ranked = self.ns.rank_rows(self.ns.compute_standings(members, matches), matches)
         self.assertEqual([r['ign'] for r in ranked], ['A', 'B'])  # 59 points to 54
@@ -8057,12 +8057,12 @@ class TestNeuroSeasonLogic(unittest.TestCase):
         P1 must still be seeded above P4. Sorting the conference purely on
         record would put P4 second, which is the bug this pins."""
         members = [
-            {'player_id': 1, 'ign': 'P1', 'conference': 'Neuro', 'division': 'Neuro East'},
-            {'player_id': 2, 'ign': 'P2', 'conference': 'Neuro', 'division': 'Neuro East'},
-            {'player_id': 3, 'ign': 'P3', 'conference': 'Neuro', 'division': 'Neuro North'},
-            {'player_id': 4, 'ign': 'P4', 'conference': 'Neuro', 'division': 'Neuro North'},
-            {'player_id': 9, 'ign': 'V1', 'conference': 'Verse', 'division': 'Verse East'},
-            {'player_id': 10, 'ign': 'V2', 'conference': 'Verse', 'division': 'Verse East'},
+            {'player_id': 1, 'ign': 'P1', 'conference': 'Reborn', 'division': 'Reborn East'},
+            {'player_id': 2, 'ign': 'P2', 'conference': 'Reborn', 'division': 'Reborn East'},
+            {'player_id': 3, 'ign': 'P3', 'conference': 'Reborn', 'division': 'Reborn North'},
+            {'player_id': 4, 'ign': 'P4', 'conference': 'Reborn', 'division': 'Reborn North'},
+            {'player_id': 9, 'ign': 'V1', 'conference': 'Revival', 'division': 'Revival East'},
+            {'player_id': 10, 'ign': 'V2', 'conference': 'Revival', 'division': 'Revival East'},
         ]
         matches = [
             self._match(1, 3, 4, 21, 0),    # P3 3-0, wins the North
@@ -8077,41 +8077,41 @@ class TestNeuroSeasonLogic(unittest.TestCase):
             self._match(10, 10, 2, 24, 0),
         ]
         standings = self.ns.compute_standings(members, matches)
-        by_record = self.ns.rank_rows([r for r in standings if r['conference'] == 'Neuro'], matches)
+        by_record = self.ns.rank_rows([r for r in standings if r['conference'] == 'Reborn'], matches)
         self.assertEqual([r['ign'] for r in by_record], ['P3', 'P4', 'P1', 'P2'],
                          "fixture no longer discriminates: P4 must out-record P1")
 
         seeded = self.ns.compute_seeds(standings, matches, playoff_teams=8)
-        self.assertEqual([r['ign'] for r in seeded['Neuro']], ['P3', 'P1', 'P4', 'P2'])
-        self.assertEqual([r['seed'] for r in seeded['Neuro']], [1, 2, 3, 4])
+        self.assertEqual([r['ign'] for r in seeded['Reborn']], ['P3', 'P1', 'P4', 'P2'])
+        self.assertEqual([r['seed'] for r in seeded['Reborn']], [1, 2, 3, 4])
 
     def test_bracket_reseeds_best_against_worst(self):
-        remaining = {'Neuro': [{'player_id': i, 'seed': i} for i in range(1, 9)],
-                     'Verse': [{'player_id': 10 + i, 'seed': i} for i in range(1, 9)]}
+        remaining = {'Reborn': [{'player_id': i, 'seed': i} for i in range(1, 9)],
+                     'Revival': [{'player_id': 10 + i, 'seed': i} for i in range(1, 9)]}
         matches = self.ns.build_playoff_round(remaining)
         self.assertEqual(len(matches), 8)
         self.assertTrue(all(m['round'] == 'wildcard' for m in matches))
-        neuro = [(m['home_player_id'], m['away_player_id'])
-                 for m in matches if m['conference'] == 'Neuro']
-        self.assertEqual(neuro, [(1, 8), (2, 7), (3, 6), (4, 5)])
+        reborn_conf = [(m['home_player_id'], m['away_player_id'])
+                       for m in matches if m['conference'] == 'Reborn']
+        self.assertEqual(reborn_conf, [(1, 8), (2, 7), (3, 6), (4, 5)])
 
     def test_last_one_standing_in_each_conference_meet_in_the_final(self):
         matches = self.ns.build_playoff_round(
-            {'Neuro': [{'player_id': 1, 'seed': 1}], 'Verse': [{'player_id': 2, 'seed': 3}]})
+            {'Reborn': [{'player_id': 1, 'seed': 1}], 'Revival': [{'player_id': 2, 'seed': 3}]})
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]['round'], 'final')
         self.assertIsNone(matches[0]['conference'])
 
 
-class TestNeuroSeasonDB(unittest.IsolatedAsyncioTestCase):
+class TestRebornSeasonDB(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         os.environ["DB_PATH"] = ":memory:"
         db._db = None
         await setup_db()
-        import neuroseason
-        self.ns = neuroseason
-        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('NP','SeasonA','A')")
+        import rebornseason
+        self.ns = rebornseason
+        await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('RX','SeasonA','A')")
         await db.execute("INSERT INTO players (team_id, ign, status) VALUES ('ND','SeasonB','A')")
         self.a = (await db.get_player('SeasonA'))['id']
         self.b = (await db.get_player('SeasonB'))['id']
@@ -8122,126 +8122,126 @@ class TestNeuroSeasonDB(unittest.IsolatedAsyncioTestCase):
     async def test_schema_creation_is_idempotent(self):
         """It runs on every single startup forever — rerunning it must be a
         no-op, not an error, and must not wipe anything already there."""
-        season = await db.create_neuro_season("Rerun")
-        for stmt in db.NEUROSEASON_SCHEMA.strip().split(";"):
+        season = await db.create_reborn_season("Rerun")
+        for stmt in db.REBORNSEASON_SCHEMA.strip().split(";"):
             if stmt.strip():
                 await db.execute(stmt.strip())
-        self.assertIsNotNone(await db.get_neuro_season(season['id']))
+        self.assertIsNotNone(await db.get_reborn_season(season['id']))
 
     async def test_signing_up_twice_is_reported_not_duplicated(self):
-        season = await db.create_neuro_season("S")
-        self.assertTrue(await db.add_neuro_season_member(season['id'], self.a, 'NP'))
-        self.assertFalse(await db.add_neuro_season_member(season['id'], self.a, 'NP'))
-        self.assertEqual(len(await db.get_neuro_season_members(season['id'])), 1)
+        season = await db.create_reborn_season("S")
+        self.assertTrue(await db.add_reborn_season_member(season['id'], self.a, 'RX'))
+        self.assertFalse(await db.add_reborn_season_member(season['id'], self.a, 'RX'))
+        self.assertEqual(len(await db.get_reborn_season_members(season['id'])), 1)
 
     async def test_member_keeps_the_league_they_joined_under(self):
         """Same historical-attribution principle as game_scores.team_id: a
         transfer after signup must not rewrite which league the player was
         representing when they joined."""
-        season = await db.create_neuro_season("S")
-        await db.add_neuro_season_member(season['id'], self.a, 'NP')
+        season = await db.create_reborn_season("S")
+        await db.add_reborn_season_member(season['id'], self.a, 'RX')
         await db.execute("UPDATE players SET team_id='ND' WHERE id=?", (self.a,))
-        member = await db.get_neuro_season_member(season['id'], self.a)
-        self.assertEqual(member['team_id'], 'NP')
+        member = await db.get_reborn_season_member(season['id'], self.a)
+        self.assertEqual(member['team_id'], 'RX')
 
     async def test_recording_a_result_writes_both_sides_and_the_winner(self):
-        season = await db.create_neuro_season("S")
-        await db.insert_neuro_season_matches(season['id'], [
+        season = await db.create_reborn_season("S")
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
-        await db.record_neuro_season_result(
+        await db.record_reborn_season_result(
             season['id'], 1,
             {'points': 24, 'rushing_yds': 19, 'passing_yds': 203, 'kick_return_yds': 51,
              'touchdowns': 3, 'turnovers': 0, 'field_goals': 0},
             {'points': 6, 'rushing_yds': 0, 'passing_yds': 52, 'kick_return_yds': 33,
              'touchdowns': 1, 'turnovers': 2, 'field_goals': 0})
 
-        match = await db.get_neuro_season_match(season['id'], 1)
+        match = await db.get_reborn_season_match(season['id'], 1)
         self.assertEqual((match['home_score'], match['away_score']), (24, 6))
         self.assertEqual(match['winner_player_id'], self.a)
         self.assertEqual(match['status'], 'complete')
 
-        stats = await db.get_neuro_season_player_stats(season['id'], self.a)
+        stats = await db.get_reborn_season_player_stats(season['id'], self.a)
         self.assertEqual(stats['wins'], 1)
         self.assertEqual(stats['passing_yds'], 203)
         self.assertEqual(stats['points_against'], 6)
-        loser = await db.get_neuro_season_player_stats(season['id'], self.b)
+        loser = await db.get_reborn_season_player_stats(season['id'], self.b)
         self.assertEqual((loser['losses'], loser['turnovers']), (1, 2))
 
     async def test_re_reporting_a_match_replaces_it_instead_of_doubling_it(self):
         """The duplicate-row bug this codebase has now hit twice (game_scores,
         siege_scores). A corrected screenshot must overwrite the first
         reading, not add a second one that inflates every total."""
-        season = await db.create_neuro_season("S")
-        await db.insert_neuro_season_matches(season['id'], [
+        season = await db.create_reborn_season("S")
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
-        await db.record_neuro_season_result(season['id'], 1, {'points': 24}, {'points': 6})
-        await db.record_neuro_season_result(season['id'], 1, {'points': 14}, {'points': 6})
+        await db.record_reborn_season_result(season['id'], 1, {'points': 24}, {'points': 6})
+        await db.record_reborn_season_result(season['id'], 1, {'points': 14}, {'points': 6})
 
         rows = await db.fetchall(
-            "SELECT * FROM neuro_season_stats WHERE season_id=? AND player_id=?",
+            "SELECT * FROM reborn_season_stats WHERE season_id=? AND player_id=?",
             (season['id'], self.a))
         self.assertEqual(len(rows), 1)
-        stats = await db.get_neuro_season_player_stats(season['id'], self.a)
+        stats = await db.get_reborn_season_player_stats(season['id'], self.a)
         self.assertEqual((stats['games'], stats['points']), (1, 14))
 
     async def test_a_corrected_result_can_flip_the_winner(self):
-        season = await db.create_neuro_season("S")
-        await db.insert_neuro_season_matches(season['id'], [
+        season = await db.create_reborn_season("S")
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
-        await db.record_neuro_season_result(season['id'], 1, {'points': 24}, {'points': 6})
-        await db.record_neuro_season_result(season['id'], 1, {'points': 6}, {'points': 24})
-        match = await db.get_neuro_season_match(season['id'], 1)
+        await db.record_reborn_season_result(season['id'], 1, {'points': 24}, {'points': 6})
+        await db.record_reborn_season_result(season['id'], 1, {'points': 6}, {'points': 24})
+        match = await db.get_reborn_season_match(season['id'], 1)
         self.assertEqual(match['winner_player_id'], self.b)
-        self.assertEqual((await db.get_neuro_season_player_stats(season['id'], self.a))['wins'], 0)
+        self.assertEqual((await db.get_reborn_season_player_stats(season['id'], self.a))['wins'], 0)
 
     async def test_a_tie_has_no_winner_and_counts_as_a_tie(self):
-        season = await db.create_neuro_season("S")
-        await db.insert_neuro_season_matches(season['id'], [
+        season = await db.create_reborn_season("S")
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
-        await db.record_neuro_season_result(season['id'], 1, {'points': 7}, {'points': 7})
-        match = await db.get_neuro_season_match(season['id'], 1)
+        await db.record_reborn_season_result(season['id'], 1, {'points': 7}, {'points': 7})
+        match = await db.get_reborn_season_match(season['id'], 1)
         self.assertIsNone(match['winner_player_id'])
-        self.assertEqual((await db.get_neuro_season_player_stats(season['id'], self.a))['ties'], 1)
+        self.assertEqual((await db.get_reborn_season_player_stats(season['id'], self.a))['ties'], 1)
 
     async def test_playoff_matches_continue_the_regular_season_numbering(self):
         """A match number is what a player types into /seasonmatch, so it has
         to identify exactly one match across the whole season."""
-        season = await db.create_neuro_season("S")
-        await db.insert_neuro_season_matches(season['id'], [
+        season = await db.create_reborn_season("S")
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1},
             {'home_player_id': self.b, 'away_player_id': self.a, 'week': 2}])
-        await db.insert_neuro_season_matches(season['id'], [
+        await db.insert_reborn_season_matches(season['id'], [
             {'home_player_id': self.a, 'away_player_id': self.b,
              'stage': 'playoff', 'round': 'final'}])
-        nums = [m['match_num'] for m in await db.get_neuro_season_matches(season['id'])]
+        nums = [m['match_num'] for m in await db.get_reborn_season_matches(season['id'])]
         self.assertEqual(sorted(nums), [1, 2, 3])
 
     async def test_career_stats_span_seasons(self):
         for name in ("One", "Two"):
-            season = await db.create_neuro_season(name)
-            await db.insert_neuro_season_matches(season['id'], [
+            season = await db.create_reborn_season(name)
+            await db.insert_reborn_season_matches(season['id'], [
                 {'home_player_id': self.a, 'away_player_id': self.b, 'week': 1}])
-            await db.record_neuro_season_result(
+            await db.record_reborn_season_result(
                 season['id'], 1, {'points': 21, 'touchdowns': 3}, {'points': 0})
-        career = await db.get_neuro_season_player_career(self.a)
+        career = await db.get_reborn_season_player_career(self.a)
         self.assertEqual(len(career), 2)
         self.assertEqual([row['wins'] for row in career], [1, 1])
         self.assertEqual({row['season_name'] for row in career}, {"One", "Two"})
 
 
-class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
+class TestRebornSeasonFlow(unittest.IsolatedAsyncioTestCase):
     """The handlers and the automatic stage advancement, end to end."""
 
     async def asyncSetUp(self):
         os.environ["DB_PATH"] = ":memory:"
         db._db = None
         await setup_db()
-        import neuroseason
-        self.ns = neuroseason
+        import rebornseason
+        self.ns = rebornseason
         self.player_ids = []
         for i in range(8):
             await db.execute(
-                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+                "INSERT INTO players (team_id, ign, status) VALUES ('RX',?,'A')", (f"NS{i}",))
             self.player_ids.append((await db.get_player(f"NS{i}"))['id'])
 
     async def asyncTearDown(self):
@@ -8250,7 +8250,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
     async def _season_with(self, count, name="Test Season"):
         inter = _FakeInteraction()
         await self.ns.handle_create(inter, name)
-        season = (await db.list_neuro_seasons())[0]
+        season = (await db.list_reborn_seasons())[0]
         for i in range(count):
             join = _FakeInteraction()
             await self.ns.handle_join(join, season['id'], f"NS{i}")
@@ -8261,12 +8261,12 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         inter = _FakeInteraction()
         await self.ns.handle_start(inter, season['id'])
 
-        members = await db.get_neuro_season_members(season['id'])
+        members = await db.get_reborn_season_members(season['id'])
         self.assertEqual(len(members), 8)
         self.assertTrue(all(m['conference'] and m['division'] for m in members))
-        matches = await db.get_neuro_season_matches(season['id'])
+        matches = await db.get_reborn_season_matches(season['id'])
         self.assertEqual(len(matches), 8 * 18 // 2)
-        fresh = await db.get_neuro_season(season['id'])
+        fresh = await db.get_reborn_season(season['id'])
         self.assertEqual(fresh['status'], 'active')
         self.assertEqual(fresh['playoff_teams'], 8)
 
@@ -8282,7 +8282,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         inter = _FakeInteraction()
         await self.ns.handle_start(inter, season['id'])
         self.assertIn("at least", " ".join(inter.texts()))
-        self.assertEqual((await db.get_neuro_season(season['id']))['status'], 'signups')
+        self.assertEqual((await db.get_reborn_season(season['id']))['status'], 'signups')
 
     async def test_a_full_season_creates_playoffs_then_crowns_a_champion(self):
         """The whole arc: play every regular-season match, watch the bracket
@@ -8291,12 +8291,12 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         await self.ns.handle_start(_FakeInteraction(), season['id'])
         sid = season['id']
 
-        regular = await db.get_neuro_season_matches(sid, stage='regular')
+        regular = await db.get_reborn_season_matches(sid, stage='regular')
         for n, m in enumerate(regular):
             # Deterministic, lopsided results so the standings have a clear
             # order rather than a pile of ties to break.
             home_pts = 30 if m['home_player_id'] % 2 == 0 else 3
-            await db.record_neuro_season_result(sid, m['match_num'],
+            await db.record_reborn_season_result(sid, m['match_num'],
                                                 {'points': home_pts}, {'points': 30 - home_pts})
             if n < len(regular) - 1:
                 self.assertIsNone(await self.ns.advance_season(sid),
@@ -8304,27 +8304,27 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
 
         note = await self.ns.advance_season(sid)
         self.assertIsNotNone(note)
-        fresh = await db.get_neuro_season(sid)
+        fresh = await db.get_reborn_season(sid)
         self.assertEqual(fresh['status'], 'playoffs')
-        seeded = [m for m in await db.get_neuro_season_members(sid) if m['seed']]
+        seeded = [m for m in await db.get_reborn_season_members(sid) if m['seed']]
         self.assertEqual(len(seeded), 4)
 
         # Play the bracket out, round by round, letting each round generate
         # the next one.
         for _ in range(4):
-            pending = [m for m in await db.get_neuro_season_matches(sid, stage='playoff')
+            pending = [m for m in await db.get_reborn_season_matches(sid, stage='playoff')
                        if m['status'] != 'complete']
             if not pending:
                 break
             for m in pending:
-                await db.record_neuro_season_result(sid, m['match_num'],
+                await db.record_reborn_season_result(sid, m['match_num'],
                                                     {'points': 21}, {'points': 7})
             await self.ns.advance_season(sid)
 
-        done = await db.get_neuro_season(sid)
+        done = await db.get_reborn_season(sid)
         self.assertEqual(done['status'], 'complete')
         self.assertIsNotNone(done['champion_player_id'])
-        final = [m for m in await db.get_neuro_season_matches(sid, stage='playoff')
+        final = [m for m in await db.get_reborn_season_matches(sid, stage='playoff')
                  if m['round'] == 'final']
         self.assertEqual(len(final), 1)
         self.assertEqual(done['champion_player_id'], final[0]['winner_player_id'])
@@ -8332,7 +8332,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
     async def test_seasonmatch_rejects_players_who_arent_in_that_match(self):
         season = await self._season_with(8)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
-        match = (await db.get_neuro_season_matches(season['id']))[0]
+        match = (await db.get_reborn_season_matches(season['id']))[0]
         outsider = next(ign for ign in (f"NS{i}" for i in range(8))
                         if ign not in (match['home_ign'], match['away_ign']))
 
@@ -8342,7 +8342,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         self.assertIn(str(match['match_num']), " ".join(inter.texts()))
         # Rejected before ever deferring, so no screenshot was fetched and no
         # result was written.
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             season['id'], match['match_num']))['status'], 'pending')
 
     async def test_confirm_view_saves_the_left_and_right_columns_to_the_right_players(self):
@@ -8351,31 +8351,31 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         them."""
         season = await self._season_with(8)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
-        match = (await db.get_neuro_season_matches(season['id']))[0]
+        match = (await db.get_reborn_season_matches(season['id']))[0]
         home = await db.get_player(match['home_ign'])
         away = await db.get_player(match['away_ign'])
 
         # Away player is the LEFT column, and wins.
         view = self.ns.SeasonMatchConfirmView(
-            await db.get_neuro_season(season['id']), match, away, home,
+            await db.get_reborn_season(season['id']), match, away, home,
             {'points': 31, 'touchdowns': 4}, {'points': 10, 'touchdowns': 1})
         await view._on_confirm(_FakeInteraction())
 
-        saved = await db.get_neuro_season_match(season['id'], match['match_num'])
+        saved = await db.get_reborn_season_match(season['id'], match['match_num'])
         self.assertEqual((saved['home_score'], saved['away_score']), (10, 31))
         self.assertEqual(saved['winner_player_id'], away['id'])
         self.assertEqual(
-            (await db.get_neuro_season_player_stats(season['id'], away['id']))['touchdowns'], 4)
+            (await db.get_reborn_season_player_stats(season['id'], away['id']))['touchdowns'], 4)
 
     async def test_the_score_can_be_corrected_before_anything_is_written(self):
         season = await self._season_with(8)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
-        match = (await db.get_neuro_season_matches(season['id']))[0]
+        match = (await db.get_reborn_season_matches(season['id']))[0]
         home = await db.get_player(match['home_ign'])
         away = await db.get_player(match['away_ign'])
 
         view = self.ns.SeasonMatchConfirmView(
-            await db.get_neuro_season(season['id']), match, home, away,
+            await db.get_reborn_season(season['id']), match, home, away,
             {'points': 82}, {'points': 6})          # a misread leading digit
         modal = self.ns.SeasonStatEditModal(view, 'left', 'score')
         modal.inputs['points'].value = "32"
@@ -8383,18 +8383,18 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.left_stats['points'], 32)
 
         # Still nothing saved — correcting the score is not confirming it.
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             season['id'], match['match_num']))['status'], 'pending')
         await view._on_confirm(_FakeInteraction())
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             season['id'], match['match_num']))['home_score'], 32)
 
     async def _pending_match(self, members=8):
         """A started season plus its first pending match and both players."""
         season = await self._season_with(members)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
-        match = (await db.get_neuro_season_matches(season['id']))[0]
-        return (await db.get_neuro_season(season['id']), match,
+        match = (await db.get_reborn_season_matches(season['id']))[0]
+        return (await db.get_reborn_season(season['id']), match,
                 await db.get_player(match['home_ign']),
                 await db.get_player(match['away_ign']))
 
@@ -8458,14 +8458,14 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
 
         await view._on_confirm(_FakeInteraction())
 
-        saved = await db.get_neuro_season_match(season['id'], match['match_num'])
+        saved = await db.get_reborn_season_match(season['id'], match['match_num'])
         self.assertEqual(saved['status'], 'complete')
         self.assertEqual((saved['home_score'], saved['away_score']), (24, 6))
-        stats = await db.get_neuro_season_player_stats(season['id'], home['id'])
+        stats = await db.get_reborn_season_player_stats(season['id'], home['id'])
         self.assertEqual(stats['passing_yds'], 203)
         self.assertEqual(stats['kick_return_yds'], 51)
         self.assertEqual(stats['touchdowns'], 3)
-        loser = await db.get_neuro_season_player_stats(season['id'], away['id'])
+        loser = await db.get_reborn_season_player_stats(season['id'], away['id'])
         self.assertEqual((loser['turnovers'], loser['passing_yds']), (2, 52))
 
     async def test_a_blank_box_stores_nothing_rather_than_a_zero(self):
@@ -8527,7 +8527,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         inter = _FakeInteraction()
         await view._on_confirm(inter)
         self.assertTrue(inter.texts())
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             season['id'], match['match_num']))['status'], 'pending')
 
         # Fill the missing side in and it saves.
@@ -8535,7 +8535,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         modal.inputs['points'].value = "6"
         await modal.on_submit(_FakeInteraction())
         await view._on_confirm(_FakeInteraction())
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             season['id'], match['match_num']))['status'], 'complete')
 
     async def test_an_unreadable_screenshot_falls_back_to_manual_entry(self):
@@ -8631,13 +8631,13 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
                 label = self.ns._stat_label(field, lang)
                 self.assertLessEqual(len(label), 45, f"{field} [{lang}]: {label}")
             for page_key, _fields in self.ns.STAT_PAGES:
-                title = _i18n.t('neuroseason.match.edit_page_title', lang,
+                title = _i18n.t('rebornseason.match.edit_page_title', lang,
                                 player="a" * 20,
-                                page=_i18n.t(f'neuroseason.match.page_{page_key}', lang))
+                                page=_i18n.t(f'rebornseason.match.page_{page_key}', lang))
                 # The code slices to 45; this checks the slice isn't eating a
                 # meaningful amount of a realistic title.
                 self.assertLessEqual(len(title[:45]), 45)
-                self.assertLess(len(_i18n.t(f'neuroseason.match.page_{page_key}', lang)), 30,
+                self.assertLess(len(_i18n.t(f'rebornseason.match.page_{page_key}', lang)), 30,
                                 f"page label too long to survive the slice [{lang}]")
 
     def test_every_stat_is_reachable_from_the_edit_menu(self):
@@ -8653,21 +8653,21 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         season = await self._season_with(4)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
         sid = season['id']
-        for m in await db.get_neuro_season_matches(sid, stage='regular'):
-            await db.record_neuro_season_result(sid, m['match_num'],
+        for m in await db.get_reborn_season_matches(sid, stage='regular'):
+            await db.record_reborn_season_result(sid, m['match_num'],
                                                 {'points': 20}, {'points': 3})
         await self.ns.advance_season(sid)
-        playoff = (await db.get_neuro_season_matches(sid, stage='playoff'))[0]
+        playoff = (await db.get_reborn_season_matches(sid, stage='playoff'))[0]
         home = await db.get_player(playoff['home_ign'])
         away = await db.get_player(playoff['away_ign'])
 
         view = self.ns.SeasonMatchConfirmView(
-            await db.get_neuro_season(sid), playoff, home, away,
+            await db.get_reborn_season(sid), playoff, home, away,
             {'points': 14}, {'points': 14})
         inter = _FakeInteraction()
         await view._on_confirm(inter)
         self.assertIn("tied", " ".join(inter.texts()).lower())
-        self.assertEqual((await db.get_neuro_season_match(
+        self.assertEqual((await db.get_reborn_season_match(
             sid, playoff['match_num']))['status'], 'pending')
 
     async def test_a_member_who_goes_inactive_can_still_be_reported_on(self):
@@ -8702,12 +8702,12 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         season = await self._season_with(members)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
         sid = season['id']
-        for m in await db.get_neuro_season_matches(sid, stage='regular'):
+        for m in await db.get_reborn_season_matches(sid, stage='regular'):
             home_pts = 30 if m['home_player_id'] % 2 == 0 else 3
-            await db.record_neuro_season_result(sid, m['match_num'],
+            await db.record_reborn_season_result(sid, m['match_num'],
                                                 {'points': home_pts},
                                                 {'points': 30 - home_pts})
-        return await db.get_neuro_season(sid)
+        return await db.get_reborn_season(sid)
 
     async def test_standings_show_division_and_conference_records_per_row(self):
         """The three records that decide the order are now all on the row —
@@ -8726,8 +8726,8 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("PF ", line, line)
 
         # And the numbers are the real ones, not placeholders.
-        members = await db.get_neuro_season_members(season['id'])
-        matches = await db.get_neuro_season_matches(season['id'], stage='regular')
+        members = await db.get_reborn_season_members(season['id'])
+        matches = await db.get_reborn_season_matches(season['id'], stage='regular')
         standings = {r['ign']: r for r in self.ns.compute_standings(members, matches)}
         joined = "\n".join(rows)
         sample = next(iter(standings.values()))
@@ -8754,7 +8754,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(name.startswith(target), f"{name!r} is not {target!r}")
 
         # Everyone shown really is in that division, and everyone in it is shown.
-        members = await db.get_neuro_season_members(season['id'])
+        members = await db.get_reborn_season_members(season['id'])
         in_division = {m['ign'] for m in members if m['division'] == target}
         shown = "\n".join(v for _n, v in self._embed_fields(inter))
         for ign in in_division:
@@ -8764,7 +8764,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(f"**{m['ign']}**", shown)
 
     async def test_division_filter_is_case_insensitive(self):
-        """Autocomplete only suggests — a hand-typed 'neuro east' is
+        """Autocomplete only suggests — a hand-typed 'reborn east' is
         unambiguously the same division and shouldn't be an error."""
         season = await self._played_season()
         target = (await self.ns.season_divisions(season['id']))[0]
@@ -8776,15 +8776,15 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
     async def test_an_unknown_division_says_which_ones_exist(self):
         season = await self._played_season()
         inter = _FakeInteraction()
-        await self.ns.handle_standings(inter, season['id'], None, "Neuro Atlantic")
+        await self.ns.handle_standings(inter, season['id'], None, "Reborn Atlantic")
         message = " ".join(inter.texts())
-        self.assertIn("Neuro Atlantic", message)
+        self.assertIn("Reborn Atlantic", message)
         for division in await self.ns.season_divisions(season['id']):
             self.assertIn(division, message)
 
     async def test_conference_and_division_filters_combine(self):
         season = await self._played_season()
-        members = await db.get_neuro_season_members(season['id'])
+        members = await db.get_reborn_season_members(season['id'])
         target = next(m for m in members if m['conference'] == self.ns.CONFERENCES[0])
 
         # The division does belong to the conference: both filters pass it.
@@ -8812,7 +8812,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         tables."""
         small = await self._played_season(members=8)
         small_divisions = await self.ns.season_divisions(small['id'])
-        members = await db.get_neuro_season_members(small['id'])
+        members = await db.get_reborn_season_members(small['id'])
         self.assertEqual(sorted(small_divisions),
                          sorted({m['division'] for m in members}))
 
@@ -8838,7 +8838,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         limit that rejects the entire message, not just the field."""
         for i in range(8, 32):
             await db.execute(
-                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+                "INSERT INTO players (team_id, ign, status) VALUES ('RX',?,'A')", (f"NS{i}",))
         season = await self._played_season(members=32)
         inter = _FakeInteraction()
         await self.ns.handle_standings(inter, season['id'])
@@ -8855,7 +8855,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         season = await self._season_with(8)
         await self.ns.handle_start(_FakeInteraction(), season['id'])
         self.assertIsNone(await self.ns.advance_season(season['id']))
-        self.assertEqual((await db.get_neuro_season(season['id']))['status'], 'active')
+        self.assertEqual((await db.get_reborn_season(season['id']))['status'], 'active')
 
     async def test_standings_and_schedule_render_for_a_full_thirty_two_season(self):
         """32 members is 288 matchups and eight divisions — comfortably enough
@@ -8863,7 +8863,7 @@ class TestNeuroSeasonFlow(unittest.IsolatedAsyncioTestCase):
         the entire message rather than truncating the field."""
         for i in range(8, 32):
             await db.execute(
-                "INSERT INTO players (team_id, ign, status) VALUES ('NP',?,'A')", (f"NS{i}",))
+                "INSERT INTO players (team_id, ign, status) VALUES ('RX',?,'A')", (f"NS{i}",))
         season = await self._season_with(32, name="Big")
         await self.ns.handle_start(_FakeInteraction(), season['id'])
 

@@ -30,7 +30,7 @@ SYSTEM_PROMPT = """You are a Madden Mobile league data extractor.
 You will receive screenshots of a League vs League matchup screen.
 The screen shows two teams side by side, each in its own header badge at the top.
 The LEFT side is the opponent team.
-The RIGHT side is OUR team (NeuroPerverse or another Neuro league).
+The RIGHT side is OUR team (CHRISTiansReborn or another league).
 
 Extract ALL of the following and return ONLY valid JSON with this exact structure:
 {

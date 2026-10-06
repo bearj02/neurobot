@@ -1,19 +1,19 @@
 """
-neuroseason.py — NeuroSeason gamemode: an NFL-shaped season played by
+rebornseason.py — RebornSeason gamemode: an NFL-shaped season played by
 individual league members rather than by leagues.
 
 Flow:
-  /neuroseason create   (admin) — opens signups for a new season
-  /neuroseason join             — a member signs up (up to 32)
-  /neuroseason leave            — withdraw before the season starts
-  /neuroseason start    (admin) — freezes the roster, splits it into two
+  /rebornseason create   (admin) — opens signups for a new season
+  /rebornseason join             — a member signs up (up to 32)
+  /rebornseason leave            — withdraw before the season starts
+  /rebornseason start    (admin) — freezes the roster, splits it into two
                                   conferences and their divisions, and
                                   generates every regular-season matchup
   /seasonmatch                  — report a played matchup, from a screenshot
                                   or entered by hand
-  /neuroseason standings        — division-by-division standings
-  /neuroseason schedule         — the full slate, or one player's / one week's
-  /neuroseason bracket          — the playoff bracket once the field is set
+  /rebornseason standings        — division-by-division standings
+  /rebornseason schedule         — the full slate, or one player's / one week's
+  /rebornseason bracket          — the playoff bracket once the field is set
   /seasonstats                  — a player's stats, per season or career
 
 Everything in the first half of this file is deliberately pure — plain dicts
@@ -48,7 +48,7 @@ MIN_SEASON_MEMBERS = 4
 GAMES_PER_MEMBER   = 18
 MAX_PLAYOFF_TEAMS  = 16
 
-CONFERENCES = ("Neuro", "Verse")
+CONFERENCES = ("Reborn", "Revival")
 DIVISION_SUFFIXES = ("East", "North", "South", "West")
 
 # Playoff rounds, keyed by how many teams are left in a single conference.
@@ -598,7 +598,7 @@ async def _resolve_player(interaction, ign: str, lang: str):
     if player is None:
         player = await db.fetchone("SELECT * FROM players WHERE ign = ? LIMIT 1", (ign,))
     if player is None:
-        await _send(interaction, i18n.t('neuroseason.err.no_player', lang, player=ign))
+        await _send(interaction, i18n.t('rebornseason.err.no_player', lang, player=ign))
         return None
     return player
 
@@ -611,25 +611,25 @@ async def _send(interaction: discord.Interaction, content=None, *, embed=None, e
 
 
 async def _resolve_season(interaction, season_id: int, lang: str) -> dict | None:
-    season = await db.get_neuro_season(season_id)
+    season = await db.get_reborn_season(season_id)
     if season is None:
-        await _send(interaction, i18n.t('neuroseason.err.no_season', lang, season=season_id))
+        await _send(interaction, i18n.t('rebornseason.err.no_season', lang, season=season_id))
         return None
     return season
 
 
-# --- /neuroseason create ---------------------------------------------------
+# --- /rebornseason create ---------------------------------------------------
 
 async def handle_create(interaction: discord.Interaction, name: str):
     lang = i18n.resolve_lang(interaction)
-    season = await db.create_neuro_season(name.strip())
+    season = await db.create_reborn_season(name.strip())
     await interaction.response.send_message(
-        i18n.t('neuroseason.create.success', lang,
+        i18n.t('rebornseason.create.success', lang,
                name=season['name'], season=season['id'], max=MAX_SEASON_MEMBERS)
     )
 
 
-# --- /neuroseason join / leave --------------------------------------------
+# --- /rebornseason join / leave --------------------------------------------
 
 async def handle_join(interaction: discord.Interaction, season_id: int, ign: str):
     lang = i18n.resolve_lang(interaction)
@@ -637,7 +637,7 @@ async def handle_join(interaction: discord.Interaction, season_id: int, ign: str
     if season is None:
         return
     if season['status'] != 'signups':
-        await _send(interaction, i18n.t('neuroseason.err.signups_closed', lang,
+        await _send(interaction, i18n.t('rebornseason.err.signups_closed', lang,
                                         name=season['name']))
         return
 
@@ -645,20 +645,20 @@ async def handle_join(interaction: discord.Interaction, season_id: int, ign: str
     if player is None:
         return
 
-    members = await db.get_neuro_season_members(season_id)
+    members = await db.get_reborn_season_members(season_id)
     if len(members) >= (season['max_members'] or MAX_SEASON_MEMBERS):
-        await _send(interaction, i18n.t('neuroseason.err.full', lang,
+        await _send(interaction, i18n.t('rebornseason.err.full', lang,
                                         name=season['name'], max=season['max_members']))
         return
 
-    added = await db.add_neuro_season_member(season_id, player['id'], player['team_id'])
+    added = await db.add_reborn_season_member(season_id, player['id'], player['team_id'])
     if not added:
-        await _send(interaction, i18n.t('neuroseason.join.already', lang,
+        await _send(interaction, i18n.t('rebornseason.join.already', lang,
                                         player=player['ign'], name=season['name']))
         return
 
     await interaction.response.send_message(
-        i18n.t('neuroseason.join.success', lang, player=player['ign'], name=season['name'],
+        i18n.t('rebornseason.join.success', lang, player=player['ign'], name=season['name'],
                count=len(members) + 1, max=season['max_members'] or MAX_SEASON_MEMBERS)
     )
 
@@ -672,19 +672,19 @@ async def handle_leave(interaction: discord.Interaction, season_id: int, ign: st
         # Removing someone from a started season would leave their scheduled
         # matchups pointing at a member who isn't in it — the season would
         # have to be regenerated, which is a different operation entirely.
-        await _send(interaction, i18n.t('neuroseason.err.already_started', lang,
+        await _send(interaction, i18n.t('rebornseason.err.already_started', lang,
                                         name=season['name']))
         return
     player = await _resolve_player(interaction, ign, lang)
     if player is None:
         return
-    removed = await db.remove_neuro_season_member(season_id, player['id'])
-    key = 'neuroseason.leave.success' if removed else 'neuroseason.leave.not_in'
+    removed = await db.remove_reborn_season_member(season_id, player['id'])
+    key = 'rebornseason.leave.success' if removed else 'rebornseason.leave.not_in'
     await _send(interaction, i18n.t(key, lang, player=player['ign'], name=season['name']),
                 ephemeral=not removed)
 
 
-# --- /neuroseason start ----------------------------------------------------
+# --- /rebornseason start ----------------------------------------------------
 
 async def handle_start(interaction: discord.Interaction, season_id: int):
     lang = i18n.resolve_lang(interaction)
@@ -692,13 +692,13 @@ async def handle_start(interaction: discord.Interaction, season_id: int):
     if season is None:
         return
     if season['status'] != 'signups':
-        await _send(interaction, i18n.t('neuroseason.err.already_started', lang,
+        await _send(interaction, i18n.t('rebornseason.err.already_started', lang,
                                         name=season['name']))
         return
 
-    members = await db.get_neuro_season_members(season_id)
+    members = await db.get_reborn_season_members(season_id)
     if len(members) < MIN_SEASON_MEMBERS:
-        await _send(interaction, i18n.t('neuroseason.err.too_few', lang,
+        await _send(interaction, i18n.t('rebornseason.err.too_few', lang,
                                         count=len(members), min=MIN_SEASON_MEMBERS))
         return
 
@@ -719,19 +719,19 @@ async def handle_start(interaction: discord.Interaction, season_id: int):
         return
 
     for m in placed:
-        await db.set_neuro_season_member_placement(
+        await db.set_reborn_season_member_placement(
             season_id, m['player_id'], m['conference'], m['division'])
-    await db.insert_neuro_season_matches(season_id, schedule)
+    await db.insert_reborn_season_matches(season_id, schedule)
 
     weeks = max(m['week'] for m in schedule)
-    await db.update_neuro_season(
+    await db.update_reborn_season(
         season_id, status='active', started_at=datetime.datetime.now().isoformat(timespec='seconds'),
         divisions_per_conf=layout['divisions_per_conf'], weeks=weeks,
         playoff_teams=playoff_field_size(len(members)))
 
     embed = discord.Embed(
-        title=i18n.t('neuroseason.start.title', lang, name=season['name']),
-        description=i18n.t('neuroseason.start.desc', lang, count=len(members),
+        title=i18n.t('rebornseason.start.title', lang, name=season['name']),
+        description=i18n.t('rebornseason.start.desc', lang, count=len(members),
                            games=games, weeks=weeks, matches=len(schedule),
                            playoff=playoff_field_size(len(members))),
         color=discord.Color.green(),
@@ -744,29 +744,29 @@ async def handle_start(interaction: discord.Interaction, season_id: int):
     await interaction.followup.send(embed=embed)
 
 
-# --- /neuroseason list / standings / schedule ------------------------------
+# --- /rebornseason list / standings / schedule ------------------------------
 
 async def handle_list(interaction: discord.Interaction):
     lang = i18n.resolve_lang(interaction)
-    seasons = await db.list_neuro_seasons()
+    seasons = await db.list_reborn_seasons()
     if not seasons:
-        await _send(interaction, i18n.t('neuroseason.list.empty', lang))
+        await _send(interaction, i18n.t('rebornseason.list.empty', lang))
         return
     lines = []
     for s in seasons:
-        members = await db.get_neuro_season_members(s['id'])
-        lines.append(i18n.t('neuroseason.list.row', lang, season=s['id'], name=s['name'],
+        members = await db.get_reborn_season_members(s['id'])
+        lines.append(i18n.t('rebornseason.list.row', lang, season=s['id'], name=s['name'],
                             status=_status_label(s['status'], lang), count=len(members)))
-    embed = discord.Embed(title=i18n.t('neuroseason.list.title', lang),
+    embed = discord.Embed(title=i18n.t('rebornseason.list.title', lang),
                           color=discord.Color.blurple())
     for n, chunk in enumerate(chunk_lines_to_fit(lines)):
-        embed.add_field(name="​" if n else i18n.t('neuroseason.list.header', lang),
+        embed.add_field(name="​" if n else i18n.t('rebornseason.list.header', lang),
                         value=chunk, inline=False)
     await _send(interaction, embed=embed, ephemeral=False)
 
 
 def _status_label(status: str, lang: str) -> str:
-    return i18n.t(f'neuroseason.status.{status}', lang)
+    return i18n.t(f'rebornseason.status.{status}', lang)
 
 
 async def season_divisions(season_id: int) -> list[str]:
@@ -779,7 +779,7 @@ async def season_divisions(season_id: int) -> list[str]:
     tables."""
     rows = await db.fetchall(
         """
-        SELECT DISTINCT division FROM neuro_season_members
+        SELECT DISTINCT division FROM reborn_season_members
         WHERE season_id=? AND division IS NOT NULL
         ORDER BY division
         """,
@@ -806,21 +806,21 @@ async def handle_standings(interaction: discord.Interaction, season_id: int,
     if season is None:
         return
     if season['status'] == 'signups':
-        # Before /neuroseason start there are no divisions to group by, so
+        # Before /rebornseason start there are no divisions to group by, so
         # this would otherwise render one nameless block of everyone who has
         # signed up and call it a table.
-        await _send(interaction, i18n.t('neuroseason.err.not_started', lang,
+        await _send(interaction, i18n.t('rebornseason.err.not_started', lang,
                                         name=season['name']))
         return
 
-    members = await db.get_neuro_season_members(season_id)
-    matches = await db.get_neuro_season_matches(season_id, stage='regular')
+    members = await db.get_reborn_season_members(season_id)
+    matches = await db.get_reborn_season_matches(season_id, stage='regular')
     standings = compute_standings(members, matches)
 
     # Autocomplete only ever *suggests* a value — Discord still accepts
     # whatever was typed — so the division has to be re-validated here, the
     # same way /legacy re-validates its league. Matched case-insensitively
-    # because a hand-typed "neuro east" is unambiguously the same division.
+    # because a hand-typed "reborn east" is unambiguously the same division.
     wanted_division = None
     if division:
         wanted_division = next(
@@ -828,7 +828,7 @@ async def handle_standings(interaction: discord.Interaction, season_id: int,
             None)
         if wanted_division is None:
             await _send(interaction, i18n.t(
-                'neuroseason.err.no_division', lang, division=division,
+                'rebornseason.err.no_division', lang, division=division,
                 divisions=", ".join(await season_divisions(season_id)) or "—"))
             return
 
@@ -842,22 +842,22 @@ async def handle_standings(interaction: discord.Interaction, season_id: int,
     if not by_div:
         # A filter that matches nothing is a different problem from a season
         # that hasn't started — e.g. a real division asked for inside the
-        # conference it isn't in. Saying "run /neuroseason start" there sends
+        # conference it isn't in. Saying "run /rebornseason start" there sends
         # someone off to fix something that isn't broken.
-        key = ('neuroseason.err.empty_filter' if (conference or wanted_division)
-               else 'neuroseason.err.not_started')
+        key = ('rebornseason.err.empty_filter' if (conference or wanted_division)
+               else 'rebornseason.err.not_started')
         await _send(interaction, i18n.t(key, lang, name=season['name'],
                                         conference=conference or "—",
                                         division=wanted_division or "—"))
         return
 
     embed = discord.Embed(
-        title=i18n.t('neuroseason.standings.title', lang, name=season['name']),
+        title=i18n.t('rebornseason.standings.title', lang, name=season['name']),
         color=discord.Color.gold())
     for div_name in sorted(by_div):
         ranked = rank_rows(by_div[div_name], matches)
         lines = [
-            i18n.t('neuroseason.standings.row', lang, pos=n, player=r['ign'],
+            i18n.t('rebornseason.standings.row', lang, pos=n, player=r['ign'],
                    rec=_fmt_record(r['wins'], r['losses'], r['ties']),
                    div=_fmt_record(r['div_wins'], r['div_losses'], r['div_ties']),
                    conf=_fmt_record(r['conf_wins'], r['conf_losses'], r['conf_ties']),
@@ -870,8 +870,8 @@ async def handle_standings(interaction: discord.Interaction, season_id: int,
     # Three records per line needs a key; the tiebreaker order is worth
     # stating alongside it, since those same three records are what
     # decides the order the rows are in.
-    embed.set_footer(text=i18n.t('neuroseason.standings.legend', lang) + "\n"
-                          + i18n.t('neuroseason.standings.footer', lang))
+    embed.set_footer(text=i18n.t('rebornseason.standings.legend', lang) + "\n"
+                          + i18n.t('rebornseason.standings.footer', lang))
     await _send(interaction, embed=embed, ephemeral=False)
 
 
@@ -889,36 +889,36 @@ async def handle_schedule(interaction: discord.Interaction, season_id: int,
             return
         player_id = player['id']
 
-    matches = await db.get_neuro_season_matches(season_id, player_id=player_id, week=week)
+    matches = await db.get_reborn_season_matches(season_id, player_id=player_id, week=week)
     if not matches:
-        await _send(interaction, i18n.t('neuroseason.schedule.empty', lang,
+        await _send(interaction, i18n.t('rebornseason.schedule.empty', lang,
                                         name=season['name']))
         return
 
     lines = [_match_line(m, lang) for m in matches]
     embed = discord.Embed(
-        title=i18n.t('neuroseason.schedule.title', lang, name=season['name']),
+        title=i18n.t('rebornseason.schedule.title', lang, name=season['name']),
         color=discord.Color.blue())
     # A 32-member season is 288 matchups, far more than five 1024-character
     # fields hold, so the unfiltered view genuinely will be cut short — say
     # so, and point at the filters that narrow it.
     chunks = chunk_lines_to_fit(lines)
     for n, chunk in enumerate(chunks):
-        embed.add_field(name=i18n.t('neuroseason.schedule.header', lang) if n == 0 else "​",
+        embed.add_field(name=i18n.t('rebornseason.schedule.header', lang) if n == 0 else "​",
                         value=chunk, inline=False)
     if sum(c.count("\n") + 1 for c in chunks) < len(lines):
-        embed.set_footer(text=i18n.t('neuroseason.schedule.truncated', lang))
+        embed.set_footer(text=i18n.t('rebornseason.schedule.truncated', lang))
     await _send(interaction, embed=embed, ephemeral=False)
 
 
 def _match_line(m: dict, lang: str) -> str:
-    where = (i18n.t(f'neuroseason.round.{m["round"]}', lang) if m['stage'] == 'playoff'
-             else i18n.t('neuroseason.schedule.week', lang, week=m['week']))
+    where = (i18n.t(f'rebornseason.round.{m["round"]}', lang) if m['stage'] == 'playoff'
+             else i18n.t('rebornseason.schedule.week', lang, week=m['week']))
     if m['status'] == 'complete':
-        return i18n.t('neuroseason.schedule.row_done', lang, num=m['match_num'], where=where,
+        return i18n.t('rebornseason.schedule.row_done', lang, num=m['match_num'], where=where,
                       home=m['home_ign'], away=m['away_ign'],
                       hs=m['home_score'], as_=m['away_score'])
-    return i18n.t('neuroseason.schedule.row_pending', lang, num=m['match_num'], where=where,
+    return i18n.t('rebornseason.schedule.row_pending', lang, num=m['match_num'], where=where,
                   home=m['home_ign'], away=m['away_ign'])
 
 
@@ -927,12 +927,12 @@ async def handle_bracket(interaction: discord.Interaction, season_id: int):
     season = await _resolve_season(interaction, season_id, lang)
     if season is None:
         return
-    matches = await db.get_neuro_season_matches(season_id, stage='playoff')
+    matches = await db.get_reborn_season_matches(season_id, stage='playoff')
     if not matches:
-        await _send(interaction, i18n.t('neuroseason.bracket.none', lang, name=season['name']))
+        await _send(interaction, i18n.t('rebornseason.bracket.none', lang, name=season['name']))
         return
     embed = discord.Embed(
-        title=i18n.t('neuroseason.bracket.title', lang, name=season['name']),
+        title=i18n.t('rebornseason.bracket.title', lang, name=season['name']),
         color=discord.Color.purple())
     by_round: dict[str, list[dict]] = defaultdict(list)
     for m in matches:
@@ -942,13 +942,13 @@ async def handle_bracket(interaction: discord.Interaction, season_id: int):
             continue
         lines = [_match_line(m, lang) for m in by_round[rname]]
         for n, chunk in enumerate(chunk_lines_to_fit(lines)):
-            embed.add_field(name=i18n.t(f'neuroseason.round.{rname}', lang) if n == 0 else "​",
+            embed.add_field(name=i18n.t(f'rebornseason.round.{rname}', lang) if n == 0 else "​",
                             value=chunk, inline=False)
     if season['champion_player_id']:
         champ = await db.fetchone("SELECT ign FROM players WHERE id=?",
                                   (season['champion_player_id'],))
         if champ:
-            embed.add_field(name=i18n.t('neuroseason.bracket.champion', lang),
+            embed.add_field(name=i18n.t('rebornseason.bracket.champion', lang),
                             value=f"🏆 **{champ['ign']}**", inline=False)
     await _send(interaction, embed=embed, ephemeral=False)
 
@@ -966,57 +966,57 @@ async def handle_seasonstats(interaction: discord.Interaction, ign: str,
         season = await _resolve_season(interaction, season_id, lang)
         if season is None:
             return
-        stats = await db.get_neuro_season_player_stats(season_id, player['id'])
+        stats = await db.get_reborn_season_player_stats(season_id, player['id'])
         if not stats:
-            await _send(interaction, i18n.t('neuroseason.stats.none', lang,
+            await _send(interaction, i18n.t('rebornseason.stats.none', lang,
                                             player=player['ign'], name=season['name']))
             return
         embed = _stats_embed(player['ign'], season['name'], stats, lang)
-        member = await db.get_neuro_season_member(season_id, player['id'])
+        member = await db.get_reborn_season_member(season_id, player['id'])
         if member and member['division']:
-            embed.add_field(name=i18n.t('neuroseason.stats.division', lang),
+            embed.add_field(name=i18n.t('rebornseason.stats.division', lang),
                             value=member['division'], inline=True)
         if member and member['seed']:
-            embed.add_field(name=i18n.t('neuroseason.stats.seed', lang),
+            embed.add_field(name=i18n.t('rebornseason.stats.seed', lang),
                             value=str(member['seed']), inline=True)
         await _send(interaction, embed=embed, ephemeral=False)
         return
 
-    career = await db.get_neuro_season_player_career(player['id'])
+    career = await db.get_reborn_season_player_career(player['id'])
     if not career:
-        await _send(interaction, i18n.t('neuroseason.stats.no_career', lang,
+        await _send(interaction, i18n.t('rebornseason.stats.no_career', lang,
                                         player=player['ign']))
         return
     embed = discord.Embed(
-        title=i18n.t('neuroseason.stats.career_title', lang, player=player['ign']),
+        title=i18n.t('rebornseason.stats.career_title', lang, player=player['ign']),
         color=discord.Color.teal())
     lines = [
-        i18n.t('neuroseason.stats.career_row', lang, season=row['season_id'],
+        i18n.t('rebornseason.stats.career_row', lang, season=row['season_id'],
                name=row['season_name'], w=row['wins'] or 0, l=row['losses'] or 0,
                t=row['ties'] or 0, pf=row['points'] or 0, td=row['touchdowns'] or 0)
         for row in career
     ]
     for n, chunk in enumerate(chunk_lines_to_fit(lines)):
-        embed.add_field(name=i18n.t('neuroseason.stats.career_header', lang) if n == 0 else "​",
+        embed.add_field(name=i18n.t('rebornseason.stats.career_header', lang) if n == 0 else "​",
                         value=chunk, inline=False)
     await _send(interaction, embed=embed, ephemeral=False)
 
 
 def _stats_embed(ign: str, season_name: str, stats: dict, lang: str) -> discord.Embed:
     embed = discord.Embed(
-        title=i18n.t('neuroseason.stats.title', lang, player=ign, name=season_name),
+        title=i18n.t('rebornseason.stats.title', lang, player=ign, name=season_name),
         color=discord.Color.teal())
-    embed.add_field(name=i18n.t('neuroseason.stats.record', lang),
+    embed.add_field(name=i18n.t('rebornseason.stats.record', lang),
                     value=f"{stats['wins'] or 0}-{stats['losses'] or 0}-{stats['ties'] or 0}",
                     inline=True)
-    embed.add_field(name=i18n.t('neuroseason.stats.games', lang),
+    embed.add_field(name=i18n.t('rebornseason.stats.games', lang),
                     value=str(stats['games'] or 0), inline=True)
-    embed.add_field(name=i18n.t('neuroseason.stats.pf_pa', lang),
+    embed.add_field(name=i18n.t('rebornseason.stats.pf_pa', lang),
                     value=f"{stats['points'] or 0} / {stats['points_against'] or 0}", inline=True)
     for field, key in (('rushing_yds', 'rush'), ('passing_yds', 'pass'),
                        ('kick_return_yds', 'kr'), ('touchdowns', 'td'),
                        ('turnovers', 'to'), ('field_goals', 'fg')):
-        embed.add_field(name=i18n.t(f'neuroseason.stat.{key}', lang),
+        embed.add_field(name=i18n.t(f'rebornseason.stat.{key}', lang),
                         value=str(stats.get(field) or 0), inline=True)
     return embed
 
@@ -1050,12 +1050,12 @@ async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, m
     if season is None:
         return
     if season['status'] not in ('active', 'playoffs'):
-        await _send(interaction, i18n.t('neuroseason.err.not_started', lang, name=season['name']))
+        await _send(interaction, i18n.t('rebornseason.err.not_started', lang, name=season['name']))
         return
 
-    match = await db.get_neuro_season_match(season_id, match_num)
+    match = await db.get_reborn_season_match(season_id, match_num)
     if match is None:
-        await _send(interaction, i18n.t('neuroseason.err.no_match', lang,
+        await _send(interaction, i18n.t('rebornseason.err.no_match', lang,
                                         num=match_num, name=season['name']))
         return
 
@@ -1068,7 +1068,7 @@ async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, m
 
     scheduled = {match['home_player_id'], match['away_player_id']}
     if {left['id'], right['id']} != scheduled:
-        await _send(interaction, i18n.t('neuroseason.err.wrong_players', lang,
+        await _send(interaction, i18n.t('rebornseason.err.wrong_players', lang,
                                         num=match_num, home=match['home_ign'],
                                         away=match['away_ign']))
         return
@@ -1095,7 +1095,7 @@ async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, m
             # away.
             logger.error(
                 f"/seasonmatch extraction failed for season {season_id} match {match_num}: {e}")
-            note = i18n.t('neuroseason.err.extract_failed_manual', lang, error=str(e)[:200])
+            note = i18n.t('rebornseason.err.extract_failed_manual', lang, error=str(e)[:200])
         else:
             left_stats.update({k: v for k, v in (extracted.get('left') or {}).items()
                                if k in db.SEASON_STAT_FIELDS})
@@ -1103,7 +1103,7 @@ async def handle_seasonmatch(interaction: discord.Interaction, season_id: int, m
                                 if k in db.SEASON_STAT_FIELDS})
             source = 'screenshot'
             if left_stats.get('points') is None or right_stats.get('points') is None:
-                note = i18n.t('neuroseason.err.no_scores_manual', lang)
+                note = i18n.t('rebornseason.err.no_scores_manual', lang)
 
     view = SeasonMatchConfirmView(season, match, left, right, left_stats, right_stats, lang,
                                   source=source)
@@ -1145,7 +1145,7 @@ _STAT_META = {
 
 
 def _stat_label(field: str, lang: str) -> str:
-    return i18n.t(f'neuroseason.stat.{_STAT_META[field][0]}', lang)
+    return i18n.t(f'rebornseason.stat.{_STAT_META[field][0]}', lang)
 
 
 class SeasonMatchConfirmView(View):
@@ -1184,22 +1184,22 @@ class SeasonMatchConfirmView(View):
         for side, player in (('left', left), ('right', right)):
             for page_key, _fields in STAT_PAGES:
                 options.append(discord.SelectOption(
-                    label=f"{player['ign']} — {i18n.t(f'neuroseason.match.page_{page_key}', lang)}"[:100],
+                    label=f"{player['ign']} — {i18n.t(f'rebornseason.match.page_{page_key}', lang)}"[:100],
                     value=f"{side}:{page_key}",
-                    description=i18n.t(f'neuroseason.match.page_{page_key}_desc', lang)[:100],
+                    description=i18n.t(f'rebornseason.match.page_{page_key}_desc', lang)[:100],
                 ))
         edit_select = Select(
-            placeholder=i18n.t('neuroseason.match.edit_select_placeholder', lang)[:150],
+            placeholder=i18n.t('rebornseason.match.edit_select_placeholder', lang)[:150],
             options=options, row=0)
         edit_select.callback = self._on_edit_select
         self.add_item(edit_select)
 
-        confirm = Button(label=i18n.t('neuroseason.match.confirm', lang),
+        confirm = Button(label=i18n.t('rebornseason.match.confirm', lang),
                          style=discord.ButtonStyle.success, row=1)
         confirm.callback = self._on_confirm
         self.add_item(confirm)
 
-        cancel = Button(label=i18n.t('neuroseason.match.cancel', lang),
+        cancel = Button(label=i18n.t('rebornseason.match.cancel', lang),
                         style=discord.ButtonStyle.danger, row=1)
         cancel.callback = self._on_cancel
         self.add_item(cancel)
@@ -1213,9 +1213,9 @@ class SeasonMatchConfirmView(View):
     def build_embed(self) -> discord.Embed:
         lang = self.lang
         embed = discord.Embed(
-            title=i18n.t('neuroseason.match.review_title', lang,
+            title=i18n.t('rebornseason.match.review_title', lang,
                          num=self.match['match_num'], name=self.season['name']),
-            description=i18n.t('neuroseason.match.review_desc', lang,
+            description=i18n.t('rebornseason.match.review_desc', lang,
                                left=self.left['ign'], lpts=_fmt(self.left_stats.get('points')),
                                right=self.right['ign'], rpts=_fmt(self.right_stats.get('points'))),
             color=discord.Color.orange())
@@ -1227,8 +1227,8 @@ class SeasonMatchConfirmView(View):
                     name=_stat_label(field, lang),
                     value=f"{_fmt(self.left_stats.get(field))} — {_fmt(self.right_stats.get(field))}",
                     inline=True)
-        footer_key = ('neuroseason.match.review_footer' if self.source == 'screenshot'
-                      else 'neuroseason.match.manual_footer')
+        footer_key = ('rebornseason.match.review_footer' if self.source == 'screenshot'
+                      else 'rebornseason.match.manual_footer')
         embed.set_footer(text=i18n.t(footer_key, lang))
         return embed
 
@@ -1255,7 +1255,7 @@ class SeasonMatchConfirmView(View):
             # Saving now would record 0-0 and hand someone a loss they didn't
             # play. The rest of the stats are genuinely optional — a score
             # is not.
-            await interaction.followup.send(i18n.t('neuroseason.err.missing_points', lang))
+            await interaction.followup.send(i18n.t('rebornseason.err.missing_points', lang))
             return
 
         if (self.match['stage'] == 'playoff'
@@ -1263,16 +1263,16 @@ class SeasonMatchConfirmView(View):
             # A tie can't advance a bracket — there's no next round to send
             # two players into, and inventing a tiebreak here would be the
             # bot deciding a playoff game.
-            await interaction.followup.send(i18n.t('neuroseason.err.playoff_tie', lang))
+            await interaction.followup.send(i18n.t('rebornseason.err.playoff_tie', lang))
             return
 
-        await db.record_neuro_season_result(
+        await db.record_reborn_season_result(
             self.season['id'], self.match['match_num'], home_stats, away_stats)
 
         for child in self.children:
             child.disabled = True
         await interaction.followup.send(
-            i18n.t('neuroseason.match.saved', lang, num=self.match['match_num'],
+            i18n.t('rebornseason.match.saved', lang, num=self.match['match_num'],
                    left=self.left['ign'], lpts=_fmt(self.left_stats.get('points')),
                    right=self.right['ign'], rpts=_fmt(self.right_stats.get('points'))))
 
@@ -1285,7 +1285,7 @@ class SeasonMatchConfirmView(View):
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
-            content=i18n.t('neuroseason.match.cancelled', self.lang), embed=None, view=self)
+            content=i18n.t('rebornseason.match.cancelled', self.lang), embed=None, view=self)
         self.stop()
 
 
@@ -1314,9 +1314,9 @@ class SeasonStatEditModal(Modal, title="Edit stats"):
         stats = parent.stats_for(side)
 
         self.fields = dict(STAT_PAGES)[page_key]
-        self.title = i18n.t('neuroseason.match.edit_page_title', lang,
+        self.title = i18n.t('rebornseason.match.edit_page_title', lang,
                             player=player['ign'],
-                            page=i18n.t(f'neuroseason.match.page_{page_key}', lang))[:45]
+                            page=i18n.t(f'rebornseason.match.page_{page_key}', lang))[:45]
 
         self.inputs: dict[str, TextInput] = {}
         for field in self.fields:
@@ -1341,13 +1341,13 @@ class SeasonStatEditModal(Modal, title="Edit stats"):
                 parsed[field] = int(raw)
             except ValueError:
                 await interaction.response.send_message(
-                    i18n.t('neuroseason.err.bad_stat', lang,
+                    i18n.t('rebornseason.err.bad_stat', lang,
                            stat=_stat_label(field, lang), value=raw[:20]),
                     ephemeral=True)
                 return
             if parsed[field] < 0:
                 await interaction.response.send_message(
-                    i18n.t('neuroseason.err.negative_stat', lang,
+                    i18n.t('rebornseason.err.negative_stat', lang,
                            stat=_stat_label(field, lang)),
                     ephemeral=True)
                 return
@@ -1370,18 +1370,18 @@ async def advance_season(season_id: int, lang: str = 'en') -> str | None:
     or round, so an early call is a no-op rather than an error. Returns a
     message worth announcing, or None if nothing changed.
     """
-    season = await db.get_neuro_season(season_id)
+    season = await db.get_reborn_season(season_id)
     if season is None:
         return None
 
     if season['status'] == 'active':
-        if await db.count_neuro_season_pending(season_id, stage='regular'):
+        if await db.count_reborn_season_pending(season_id, stage='regular'):
             return None
         return await _open_playoffs(season, lang)
 
     if season['status'] == 'playoffs':
         current = await _current_playoff_round(season_id)
-        if current is None or await db.count_neuro_season_pending(
+        if current is None or await db.count_reborn_season_pending(
                 season_id, stage='playoff', round_name=current):
             return None
         return await _advance_playoff_round(season, current, lang)
@@ -1392,7 +1392,7 @@ async def advance_season(season_id: int, lang: str = 'en') -> str | None:
 async def _current_playoff_round(season_id: int) -> str | None:
     """The furthest round that has any matches — playoff rounds are created
     one at a time, so the latest one present is the one being played."""
-    matches = await db.get_neuro_season_matches(season_id, stage='playoff')
+    matches = await db.get_reborn_season_matches(season_id, stage='playoff')
     rounds = {m['round'] for m in matches}
     for rname in reversed(ROUND_ORDER):
         if rname in rounds:
@@ -1402,8 +1402,8 @@ async def _current_playoff_round(season_id: int) -> str | None:
 
 async def _open_playoffs(season: dict, lang: str) -> str:
     season_id = season['id']
-    members = await db.get_neuro_season_members(season_id)
-    matches = await db.get_neuro_season_matches(season_id, stage='regular')
+    members = await db.get_reborn_season_members(season_id)
+    matches = await db.get_reborn_season_matches(season_id, stage='regular')
     standings = compute_standings(members, matches)
     field = season['playoff_teams'] or playoff_field_size(len(members))
     seeded = compute_seeds(standings, matches, field)
@@ -1412,37 +1412,37 @@ async def _open_playoffs(season: dict, lang: str) -> str:
     # seed from an earlier call, and this function can legitimately run more
     # than once if a result is corrected after the regular season ends.
     for m in members:
-        await db.set_neuro_season_member_seed(season_id, m['player_id'], None)
+        await db.set_reborn_season_member_seed(season_id, m['player_id'], None)
     for rows in seeded.values():
         for row in rows:
-            await db.set_neuro_season_member_seed(season_id, row['player_id'], row['seed'])
+            await db.set_reborn_season_member_seed(season_id, row['player_id'], row['seed'])
 
     round_matches = build_playoff_round(seeded)
     for m in round_matches:
         m['stage'] = 'playoff'
-    await db.insert_neuro_season_matches(season_id, round_matches)
-    await db.update_neuro_season(season_id, status='playoffs')
+    await db.insert_reborn_season_matches(season_id, round_matches)
+    await db.update_reborn_season(season_id, status='playoffs')
 
     rname = round_matches[0]['round'] if round_matches else 'final'
-    return i18n.t('neuroseason.playoffs.opened', lang, name=season['name'], field=field,
-                  round=i18n.t(f'neuroseason.round.{rname}', lang), count=len(round_matches))
+    return i18n.t('rebornseason.playoffs.opened', lang, name=season['name'], field=field,
+                  round=i18n.t(f'rebornseason.round.{rname}', lang), count=len(round_matches))
 
 
 async def _advance_playoff_round(season: dict, current: str, lang: str) -> str | None:
     season_id = season['id']
-    matches = await db.get_neuro_season_matches(season_id, stage='playoff', round_name=current)
+    matches = await db.get_reborn_season_matches(season_id, stage='playoff', round_name=current)
     winners = [m['winner_player_id'] for m in matches if m['winner_player_id']]
 
     if current == 'final':
         champion = winners[0] if winners else None
-        await db.update_neuro_season(
+        await db.update_reborn_season(
             season_id, status='complete', champion_player_id=champion,
             completed_at=datetime.datetime.now().isoformat(timespec='seconds'))
         row = await db.fetchone("SELECT ign FROM players WHERE id=?", (champion,))
-        return i18n.t('neuroseason.playoffs.champion', lang, name=season['name'],
+        return i18n.t('rebornseason.playoffs.champion', lang, name=season['name'],
                       player=(row or {}).get('ign', '?'))
 
-    members = {m['player_id']: m for m in await db.get_neuro_season_members(season_id)}
+    members = {m['player_id']: m for m in await db.get_reborn_season_members(season_id)}
     remaining: dict[str, list[dict]] = {c: [] for c in CONFERENCES}
     for pid in winners:
         m = members.get(pid)
@@ -1456,7 +1456,7 @@ async def _advance_playoff_round(season: dict, current: str, lang: str) -> str |
         m['stage'] = 'playoff'
     if not next_matches:
         return None
-    await db.insert_neuro_season_matches(season_id, next_matches)
+    await db.insert_reborn_season_matches(season_id, next_matches)
     rname = next_matches[0]['round']
-    return i18n.t('neuroseason.playoffs.next_round', lang, name=season['name'],
-                  round=i18n.t(f'neuroseason.round.{rname}', lang), count=len(next_matches))
+    return i18n.t('rebornseason.playoffs.next_round', lang, name=season['name'],
+                  round=i18n.t(f'rebornseason.round.{rname}', lang), count=len(next_matches))

@@ -160,70 +160,70 @@ TRANSLATIONS['manual.page1.fields'] = {
         ("/score", "Record a player's score.\n`/score player:Grizzly points:22`\nUse M for missed drives, E for excused absence. Optional: DEF OVR faced, 4th down stats."),
         ("/dscore", "Record a player's defensive score for a day — for the common case where one opponent faced all 3 drives.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — each drive is 0-8 (points allowed) or F/I/S (fumble/interception/safety). Points allowed is totaled automatically. No modal — the opponent's OVR is entered inline and applied to all 3 drives. For a day where more than one opponent faced the player, use `/dscore_multiple` instead."),
         ("/dscore_multiple", "Record a player's defensive score for a day, drive by drive — for when more than one opponent faced the player across the 3 drives.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — each drive is 0-8 (points allowed) or F/I/S (fumble/interception/safety). Points allowed is totaled automatically. A modal opens for Drive 1 right away (OVR faced, plus down/distance/play/forced-by if it was a turnover); a button then continues to Drive 2, then Drive 3, one modal at a time, ending with a full summary."),
-        ("/dstats", "A league\u2019s defensive totals and averages as an image \u2014 per player, best defense first, plus a league line.\n`/dstats league:NP include_inactive:false`\nPA = points allowed, TO = turnovers forced, 0-Pt Drv = drives held scoreless."),
+        ("/dstats", "A league\u2019s defensive totals and averages as an image \u2014 per player, best defense first, plus a league line.\n`/dstats league:RX include_inactive:false`\nPA = points allowed, TO = turnovers forced, 0-Pt Drv = drives held scoreless."),
         ("/dscores", "A player\u2019s defensive history over a date range.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nOne line per game: each drive\u2019s outcome, points allowed, turnovers forced and the offensive OVR faced, with totals underneath."),
         ("/ovr", "Update a player's OVR.\n`/ovr player:Grizzly`"),
         ("/avg", "Get a player's average.\n`/avg player:Grizzly` → pick type."),
         ("/player", "Full stats card for a player.\n`/player player:Grizzly`"),
         ("/history", "Score history over a date range.\n`/history player:Grizzly start:2026-06-01`"),
-        ("/status", "Today's matchup score and remaining players.\n`/status league:NP`"),
-        ("/scores", "All player scores for a league across a date range, shown as a grid.\n`/scores league:NP start:2026-07-01 end:2026-07-07`"),
+        ("/status", "Today's matchup score and remaining players.\n`/status league:RX`"),
+        ("/scores", "All player scores for a league across a date range, shown as a grid.\n`/scores league:RX start:2026-07-01 end:2026-07-07`"),
         ("/opp", "Show a player's opponent in today's ladder.\n`/opp player:Grizzly`"),
     ],
     'es': [
         ("/score", "Registra la puntuación de un jugador.\n`/score player:Grizzly points:22`\nUsa M para drives fallados, E para ausencia justificada. Opcional: DEF OVR enfrentado, estadísticas de 4to down."),
         ("/dscore", "Registra la puntuación defensiva de un jugador para el día — para el caso común donde un solo oponente enfrentó las 3 series.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — cada serie es 0-8 (puntos permitidos) o F/I/S (balón perdido/intercepción/safety). Los puntos totales se calculan automáticamente. Sin modal — el OVR del oponente se ingresa en línea y se aplica a las 3 series. Para un día con más de un oponente, usa `/dscore_multiple`."),
         ("/dscore_multiple", "Registra la puntuación defensiva de un jugador para el día, serie por serie — para cuando más de un oponente enfrentó al jugador en las 3 series.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — cada serie es 0-8 (puntos permitidos) o F/I/S (balón perdido/intercepción/safety). Los puntos totales se calculan automáticamente. Un modal se abre para la Serie 1 de inmediato (OVR enfrentado, más down/distancia/jugada/quién lo forzó si fue un balón perdido); un botón continúa luego a la Serie 2, y a la 3, un modal a la vez, terminando con un resumen completo."),
-        ("/dstats", "Totales y promedios defensivos de una liga como imagen \u2014 por jugador, mejor defensa primero, m\u00e1s una l\u00ednea de liga.\n`/dstats league:NP include_inactive:false`\nPA = puntos concedidos, TO = p\u00e9rdidas forzadas, 0-Pt Drv = drives sin anotar."),
+        ("/dstats", "Totales y promedios defensivos de una liga como imagen \u2014 por jugador, mejor defensa primero, m\u00e1s una l\u00ednea de liga.\n`/dstats league:RX include_inactive:false`\nPA = puntos concedidos, TO = p\u00e9rdidas forzadas, 0-Pt Drv = drives sin anotar."),
         ("/dscores", "Historial defensivo de un jugador en un rango de fechas.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUna l\u00ednea por partido: el resultado de cada drive, puntos concedidos, p\u00e9rdidas forzadas y el OVR ofensivo enfrentado, con totales al final."),
         ("/ovr", "Actualiza el OVR de un jugador.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtén el promedio de un jugador.\n`/avg player:Grizzly` → elige el tipo."),
         ("/player", "Ficha completa de estadísticas de un jugador.\n`/player player:Grizzly`"),
         ("/history", "Historial de puntuaciones en un rango de fechas.\n`/history player:Grizzly start:2026-06-01`"),
-        ("/status", "Puntuación del enfrentamiento de hoy y jugadores restantes.\n`/status league:NP`"),
-        ("/scores", "Todas las puntuaciones de una liga en un rango de fechas, en forma de tabla.\n`/scores league:NP start:2026-07-01 end:2026-07-07`"),
+        ("/status", "Puntuación del enfrentamiento de hoy y jugadores restantes.\n`/status league:RX`"),
+        ("/scores", "Todas las puntuaciones de una liga en un rango de fechas, en forma de tabla.\n`/scores league:RX start:2026-07-01 end:2026-07-07`"),
         ("/opp", "Muestra el oponente de un jugador en el escalafón de hoy.\n`/opp player:Grizzly`"),
     ],
     'fr': [
         ("/score", "Enregistre le score d'un joueur.\n`/score player:Grizzly points:22`\nUtilisez M pour un drive manqué, E pour une absence excusée. Optionnel : DEF OVR affronté, statistiques de 4e down."),
         ("/dscore", "Enregistre le score défensif d'un joueur pour la journée — pour le cas courant où un seul adversaire a affronté les 3 séries.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — chaque série vaut 0-8 (points concédés) ou F/I/S (ballon perdu/interception/sécurité). Le total des points est calculé automatiquement. Aucun formulaire — l'OVR de l'adversaire est saisi directement et appliqué aux 3 séries. Pour une journée avec plusieurs adversaires, utilisez `/dscore_multiple`."),
         ("/dscore_multiple", "Enregistre le score défensif d'un joueur pour la journée, série par série — pour quand plusieurs adversaires ont affronté le joueur sur les 3 séries.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — chaque série vaut 0-8 (points concédés) ou F/I/S (ballon perdu/interception/sécurité). Le total des points est calculé automatiquement. Un formulaire s'ouvre pour la Série 1 immédiatement (OVR affronté, plus down/distance/action/qui l'a provoqué si c'était un ballon perdu) ; un bouton continue ensuite vers la Série 2, puis la 3, un formulaire à la fois, avant un résumé complet."),
-        ("/dstats", "Totaux et moyennes d\u00e9fensifs d\u2019une ligue en image \u2014 par joueur, meilleure d\u00e9fense en premier, plus une ligne de ligue.\n`/dstats league:NP include_inactive:false`\nPA = points conc\u00e9d\u00e9s, TO = ballons pris, 0-Pt Drv = drives sans point."),
+        ("/dstats", "Totaux et moyennes d\u00e9fensifs d\u2019une ligue en image \u2014 par joueur, meilleure d\u00e9fense en premier, plus une ligne de ligue.\n`/dstats league:RX include_inactive:false`\nPA = points conc\u00e9d\u00e9s, TO = ballons pris, 0-Pt Drv = drives sans point."),
         ("/dscores", "Historique d\u00e9fensif d\u2019un joueur sur une p\u00e9riode.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUne ligne par match : le r\u00e9sultat de chaque drive, les points conc\u00e9d\u00e9s, les ballons pris et l\u2019OVR offensif affront\u00e9, avec les totaux en dessous."),
         ("/ovr", "Met à jour l'OVR d'un joueur.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtient la moyenne d'un joueur.\n`/avg player:Grizzly` → choisissez le type."),
         ("/player", "Fiche de statistiques complète d'un joueur.\n`/player player:Grizzly`"),
         ("/history", "Historique des scores sur une période.\n`/history player:Grizzly start:2026-06-01`"),
-        ("/status", "Score de l'affrontement du jour et joueurs restants.\n`/status league:NP`"),
-        ("/scores", "Tous les scores des joueurs d'une ligue sur une plage de dates, sous forme de grille.\n`/scores league:NP start:2026-07-01 end:2026-07-07`"),
+        ("/status", "Score de l'affrontement du jour et joueurs restants.\n`/status league:RX`"),
+        ("/scores", "Tous les scores des joueurs d'une ligue sur une plage de dates, sous forme de grille.\n`/scores league:RX start:2026-07-01 end:2026-07-07`"),
         ("/opp", "Affiche l'adversaire d'un joueur dans le classement du jour.\n`/opp player:Grizzly`"),
     ],
     'pt': [
         ("/score", "Registra a pontuação de um jogador.\n`/score player:Grizzly points:22`\nUse M para drives perdidos, E para ausência justificada. Opcional: DEF OVR enfrentado, estatísticas de 4th down."),
         ("/dscore", "Registra a pontuação defensiva de um jogador no dia — para o caso comum de um único adversário ter enfrentado as 3 séries.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — cada série é 0-8 (pontos permitidos) ou F/I/S (fumble/interceptação/safety). O total de pontos é calculado automaticamente. Sem modal — o OVR do adversário é inserido diretamente e aplicado às 3 séries. Para um dia com mais de um adversário, use `/dscore_multiple`."),
         ("/dscore_multiple", "Registra a pontuação defensiva de um jogador no dia, série por série — para quando mais de um adversário enfrentou o jogador nas 3 séries.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — cada série é 0-8 (pontos permitidos) ou F/I/S (fumble/interceptação/safety). O total de pontos é calculado automaticamente. Um modal abre para a Série 1 imediatamente (OVR enfrentado, mais down/distância/jogada/quem forçou se foi uma perda de bola); um botão continua então para a Série 2, e a 3, um modal de cada vez, terminando com um resumo completo."),
-        ("/dstats", "Totais e m\u00e9dias defensivas de uma liga como imagem \u2014 por jogador, melhor defesa primeiro, mais uma linha da liga.\n`/dstats league:NP include_inactive:false`\nPA = pontos sofridos, TO = perdas for\u00e7adas, 0-Pt Drv = drives sem pontos."),
+        ("/dstats", "Totais e m\u00e9dias defensivas de uma liga como imagem \u2014 por jogador, melhor defesa primeiro, mais uma linha da liga.\n`/dstats league:RX include_inactive:false`\nPA = pontos sofridos, TO = perdas for\u00e7adas, 0-Pt Drv = drives sem pontos."),
         ("/dscores", "Hist\u00f3rico defensivo de um jogador num intervalo de datas.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nUma linha por jogo: o resultado de cada drive, pontos sofridos, perdas for\u00e7adas e o OVR ofensivo enfrentado, com totais no fim."),
         ("/ovr", "Atualiza o OVR de um jogador.\n`/ovr player:Grizzly`"),
         ("/avg", "Obtém a média de um jogador.\n`/avg player:Grizzly` → escolha o tipo."),
         ("/player", "Ficha completa de estatísticas de um jogador.\n`/player player:Grizzly`"),
         ("/history", "Histórico de pontuações em um período.\n`/history player:Grizzly start:2026-06-01`"),
-        ("/status", "Placar do confronto de hoje e jogadores restantes.\n`/status league:NP`"),
-        ("/scores", "Todas as pontuações de uma liga em um intervalo de datas, em forma de grade.\n`/scores league:NP start:2026-07-01 end:2026-07-07`"),
+        ("/status", "Placar do confronto de hoje e jogadores restantes.\n`/status league:RX`"),
+        ("/scores", "Todas as pontuações de uma liga em um intervalo de datas, em forma de grade.\n`/scores league:RX start:2026-07-01 end:2026-07-07`"),
         ("/opp", "Mostra o oponente de um jogador no ranking de hoje.\n`/opp player:Grizzly`"),
     ],
     'de': [
         ("/score", "Erfasst den Punktestand eines Spielers.\n`/score player:Grizzly points:22`\nM für verpasste Drives, E für entschuldigtes Fehlen. Optional: gegnerischer DEF OVR, 4th-Down-Statistiken."),
         ("/dscore", "Erfasst die Defensivwertung eines Spielers für einen Tag — für den häufigen Fall, dass ein Gegner alle 3 Drives bestritten hat.\n`/dscore player:Grizzly drive1:3 drive2:F drive3:5 ovr:235` — jeder Drive ist 0-8 (zugelassene Punkte) oder F/I/S (Fumble/Interception/Safety). Die Gesamtpunktzahl wird automatisch berechnet. Kein Formular — der OVR des Gegners wird direkt eingegeben und auf alle 3 Drives angewendet. Für einen Tag mit mehreren Gegnern nutze `/dscore_multiple`."),
         ("/dscore_multiple", "Erfasst die Defensivwertung eines Spielers für einen Tag, Drive für Drive — für wenn mehrere Gegner den Spieler über die 3 Drives hinweg bestritten haben.\n`/dscore_multiple player:Grizzly drive1:3 drive2:F drive3:5` — jeder Drive ist 0-8 (zugelassene Punkte) oder F/I/S (Fumble/Interception/Safety). Die Gesamtpunktzahl wird automatisch berechnet. Ein Formular öffnet sich sofort für Drive 1 (gegnerischer OVR, plus Down/Distanz/Spielzug/wer ihn erzwungen hat bei einem Ballverlust); ein Button führt dann weiter zu Drive 2, dann 3, ein Formular nach dem anderen, mit einer abschließenden Zusammenfassung."),
-        ("/dstats", "Defensiv-Summen und -Durchschnitte einer Liga als Bild \u2014 pro Spieler, beste Defensive zuerst, plus eine Liga-Zeile.\n`/dstats league:NP include_inactive:false`\nPA = zugelassene Punkte, TO = erzwungene Ballverluste, 0-Pt Drv = punktlose Drives."),
+        ("/dstats", "Defensiv-Summen und -Durchschnitte einer Liga als Bild \u2014 pro Spieler, beste Defensive zuerst, plus eine Liga-Zeile.\n`/dstats league:RX include_inactive:false`\nPA = zugelassene Punkte, TO = erzwungene Ballverluste, 0-Pt Drv = punktlose Drives."),
         ("/dscores", "Defensiv-Verlauf eines Spielers \u00fcber einen Zeitraum.\n`/dscores player:Grizzly start:2026-08-01 end:2026-08-31`\nEine Zeile pro Spiel: Ergebnis jedes Drives, zugelassene Punkte, erzwungene Ballverluste und der gegnerische Offensiv-OVR, mit Summen darunter."),
         ("/ovr", "Aktualisiert den OVR eines Spielers.\n`/ovr player:Grizzly`"),
         ("/avg", "Ruft den Durchschnitt eines Spielers ab.\n`/avg player:Grizzly` → Typ auswählen."),
         ("/player", "Vollständige Statistikkarte eines Spielers.\n`/player player:Grizzly`"),
         ("/history", "Punkteverlauf über einen Zeitraum.\n`/history player:Grizzly start:2026-06-01`"),
-        ("/status", "Punktestand des heutigen Matchups und verbleibende Spieler.\n`/status league:NP`"),
-        ("/scores", "Alle Spielerwertungen einer Liga über einen Datumsbereich, als Raster.\n`/scores league:NP start:2026-07-01 end:2026-07-07`"),
+        ("/status", "Punktestand des heutigen Matchups und verbleibende Spieler.\n`/status league:RX`"),
+        ("/scores", "Alle Spielerwertungen einer Liga über einen Datumsbereich, als Raster.\n`/scores league:RX start:2026-07-01 end:2026-07-07`"),
         ("/opp", "Zeigt den Gegner eines Spielers in der heutigen Rangliste.\n`/opp player:Grizzly`"),
     ],
 }
@@ -234,57 +234,57 @@ TRANSLATIONS['manual.page1.fields'] = {
 
 TRANSLATIONS['manual.page2.fields'] = {
     'en': [
-        ("/matchup", "**Admin.** Full matchup editor — opponent, division, ranks, outcome, drives, all player scores.\n`/matchup league:NP` or `/matchup league:NP date:2026-07-07`\nOptional: `our_defaults`, `opp_defaults`."),
-        ("/ladder", "**Admin.** Build today's ladder matchups interactively.\n`/ladder league:NP` — manual flow.\n`/ladder league:NP screenshot1:[img]` — AI extracts both sides from screenshots, pre-selects your 16 sorted by ladder rank, pre-fills opponents. Reports OVR changes and unregistered players.\nOnce you hit **Done — Sort & Arrange** in the opponent step, that list is saved — if you have to abort and rerun `/ladder league:NP` with no screenshot, the opponent-entry modal reloads it for free."),
-        ("/show_ladder", "Display the ladder matchups for a league.\n`/show_ladder league:NP`"),
-        ("/rank", "Power ranking table for a league.\n`/rank league:NP`"),
-        ("/stats", "League-wide averages for a team — one row per stat category, not per-player (that's `/rank`).\n`/stats league:NP` — active players only.\n`/stats league:NP include_inactive:True` — also folds in inactive/transferred-away players who have historical scores for this league."),
-        ("/legacy", "**Read-only lookups against an archived past season.** Same subcommands and arguments as their live counterparts, plus `year`.\n`/legacy rank league:NP year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:NP year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:NP year:2026 start:2026-07-01`\n`/legacy show_ladder league:NP year:2026`\nOnly works for a season that's actually been archived on the server."),
-        ("/factors", "Current weight factors for a league.\n`/factors league:NP`"),
+        ("/matchup", "**Admin.** Full matchup editor — opponent, division, ranks, outcome, drives, all player scores.\n`/matchup league:RX` or `/matchup league:RX date:2026-07-07`\nOptional: `our_defaults`, `opp_defaults`."),
+        ("/ladder", "**Admin.** Build today's ladder matchups interactively.\n`/ladder league:RX` — manual flow.\n`/ladder league:RX screenshot1:[img]` — AI extracts both sides from screenshots, pre-selects your 16 sorted by ladder rank, pre-fills opponents. Reports OVR changes and unregistered players.\nOnce you hit **Done — Sort & Arrange** in the opponent step, that list is saved — if you have to abort and rerun `/ladder league:RX` with no screenshot, the opponent-entry modal reloads it for free."),
+        ("/show_ladder", "Display the ladder matchups for a league.\n`/show_ladder league:RX`"),
+        ("/rank", "Power ranking table for a league.\n`/rank league:RX`"),
+        ("/stats", "League-wide averages for a team — one row per stat category, not per-player (that's `/rank`).\n`/stats league:RX` — active players only.\n`/stats league:RX include_inactive:True` — also folds in inactive/transferred-away players who have historical scores for this league."),
+        ("/legacy", "**Read-only lookups against an archived past season.** Same subcommands and arguments as their live counterparts, plus `year`.\n`/legacy rank league:RX year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:RX year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:RX year:2026 start:2026-07-01`\n`/legacy show_ladder league:RX year:2026`\nOnly works for a season that's actually been archived on the server."),
+        ("/factors", "Current weight factors for a league.\n`/factors league:RX`"),
         ("/streak", "A player's current hot streaks: consecutive 24pt games (Kobe streak) and consecutive 18+pt games with no dropped drives (no-drop streak).\n`/streak player:Grizzly`"),
         ("/openspots", "How many open roster spots each league has (18 minus its current active player count), sorted by most open first.\n`/openspots`"),
     ],
     'es': [
-        ("/matchup", "**Admin.** Editor completo de enfrentamientos — oponente, división, rangos, resultado, drives, puntuaciones de todos los jugadores.\n`/matchup league:NP` o `/matchup league:NP date:2026-07-07`\nOpcional: `our_defaults`, `opp_defaults`."),
-        ("/ladder", "**Admin.** Arma el escalafón de hoy de forma interactiva.\n`/ladder league:NP` — flujo manual.\n`/ladder league:NP screenshot1:[img]` — la IA extrae ambos lados de las capturas, preselecciona tus 16 jugadores ordenados por rango de escalafón, y precompleta los oponentes. Informa cambios de OVR y jugadores no registrados.\nEn cuanto pulses **Done — Sort & Arrange** en el paso de oponentes, esa lista se guarda — si tienes que abortar y volver a ejecutar `/ladder league:NP` sin captura, el modal de ingreso de oponentes la recarga automáticamente."),
-        ("/show_ladder", "Muestra los enfrentamientos del escalafón de una liga.\n`/show_ladder league:NP`"),
-        ("/rank", "Tabla de clasificación por poder de una liga.\n`/rank league:NP`"),
-        ("/stats", "Promedios de toda la liga para un equipo — una fila por categoría de estadística, no por jugador (para eso está `/rank`).\n`/stats league:NP` — solo jugadores activos.\n`/stats league:NP include_inactive:True` — también incluye jugadores inactivos o transferidos con puntuaciones históricas en esta liga."),
-        ("/legacy", "**Consultas de solo lectura contra una temporada archivada.** Mismos subcomandos y argumentos que sus equivalentes en vivo, más `year`.\n`/legacy rank league:NP year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:NP year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:NP year:2026 start:2026-07-01`\n`/legacy show_ladder league:NP year:2026`\nSolo funciona para una temporada que realmente haya sido archivada en el servidor."),
-        ("/factors", "Factores de ponderación actuales de una liga.\n`/factors league:NP`"),
+        ("/matchup", "**Admin.** Editor completo de enfrentamientos — oponente, división, rangos, resultado, drives, puntuaciones de todos los jugadores.\n`/matchup league:RX` o `/matchup league:RX date:2026-07-07`\nOpcional: `our_defaults`, `opp_defaults`."),
+        ("/ladder", "**Admin.** Arma el escalafón de hoy de forma interactiva.\n`/ladder league:RX` — flujo manual.\n`/ladder league:RX screenshot1:[img]` — la IA extrae ambos lados de las capturas, preselecciona tus 16 jugadores ordenados por rango de escalafón, y precompleta los oponentes. Informa cambios de OVR y jugadores no registrados.\nEn cuanto pulses **Done — Sort & Arrange** en el paso de oponentes, esa lista se guarda — si tienes que abortar y volver a ejecutar `/ladder league:RX` sin captura, el modal de ingreso de oponentes la recarga automáticamente."),
+        ("/show_ladder", "Muestra los enfrentamientos del escalafón de una liga.\n`/show_ladder league:RX`"),
+        ("/rank", "Tabla de clasificación por poder de una liga.\n`/rank league:RX`"),
+        ("/stats", "Promedios de toda la liga para un equipo — una fila por categoría de estadística, no por jugador (para eso está `/rank`).\n`/stats league:RX` — solo jugadores activos.\n`/stats league:RX include_inactive:True` — también incluye jugadores inactivos o transferidos con puntuaciones históricas en esta liga."),
+        ("/legacy", "**Consultas de solo lectura contra una temporada archivada.** Mismos subcomandos y argumentos que sus equivalentes en vivo, más `year`.\n`/legacy rank league:RX year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:RX year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:RX year:2026 start:2026-07-01`\n`/legacy show_ladder league:RX year:2026`\nSolo funciona para una temporada que realmente haya sido archivada en el servidor."),
+        ("/factors", "Factores de ponderación actuales de una liga.\n`/factors league:RX`"),
         ("/streak", "Las rachas actuales de un jugador: juegos consecutivos de 24pts (racha Kobe) y juegos consecutivos de 18+pts sin drives perdidos (racha sin fumbles).\n`/streak player:Grizzly`"),
         ("/openspots", "Cuántos cupos abiertos tiene cada liga (18 menos su cantidad actual de jugadores activos), ordenados de más a menos abiertos.\n`/openspots`"),
     ],
     'fr': [
-        ("/matchup", "**Admin.** Éditeur complet d'affrontement — adversaire, division, rangs, résultat, drives, scores de tous les joueurs.\n`/matchup league:NP` ou `/matchup league:NP date:2026-07-07`\nOptionnel : `our_defaults`, `opp_defaults`."),
-        ("/ladder", "**Admin.** Construit le classement du jour de façon interactive.\n`/ladder league:NP` — mode manuel.\n`/ladder league:NP screenshot1:[img]` — l'IA extrait les deux côtés à partir des captures d'écran, présélectionne vos 16 joueurs triés par rang de classement, et pré-remplit les adversaires. Signale les changements d'OVR et les joueurs non enregistrés.\nDès que vous appuyez sur **Done — Sort & Arrange** à l'étape des adversaires, cette liste est enregistrée — si vous devez interrompre puis relancer `/ladder league:NP` sans capture d'écran, le formulaire de saisie des adversaires la recharge automatiquement."),
-        ("/show_ladder", "Affiche les affrontements du classement d'une ligue.\n`/show_ladder league:NP`"),
-        ("/rank", "Tableau de classement par puissance d'une ligue.\n`/rank league:NP`"),
-        ("/stats", "Moyennes globales de la ligue pour une équipe — une ligne par catégorie de statistique, pas par joueur (c'est le rôle de `/rank`).\n`/stats league:NP` — joueurs actifs uniquement.\n`/stats league:NP include_inactive:True` — inclut aussi les joueurs inactifs ou transférés ayant des scores historiques dans cette ligue."),
-        ("/legacy", "**Consultations en lecture seule d'une saison archivée.** Mêmes sous-commandes et arguments que leurs équivalents en direct, plus `year`.\n`/legacy rank league:NP year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:NP year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:NP year:2026 start:2026-07-01`\n`/legacy show_ladder league:NP year:2026`\nNe fonctionne que pour une saison réellement archivée sur le serveur."),
-        ("/factors", "Facteurs de pondération actuels d'une ligue.\n`/factors league:NP`"),
+        ("/matchup", "**Admin.** Éditeur complet d'affrontement — adversaire, division, rangs, résultat, drives, scores de tous les joueurs.\n`/matchup league:RX` ou `/matchup league:RX date:2026-07-07`\nOptionnel : `our_defaults`, `opp_defaults`."),
+        ("/ladder", "**Admin.** Construit le classement du jour de façon interactive.\n`/ladder league:RX` — mode manuel.\n`/ladder league:RX screenshot1:[img]` — l'IA extrait les deux côtés à partir des captures d'écran, présélectionne vos 16 joueurs triés par rang de classement, et pré-remplit les adversaires. Signale les changements d'OVR et les joueurs non enregistrés.\nDès que vous appuyez sur **Done — Sort & Arrange** à l'étape des adversaires, cette liste est enregistrée — si vous devez interrompre puis relancer `/ladder league:RX` sans capture d'écran, le formulaire de saisie des adversaires la recharge automatiquement."),
+        ("/show_ladder", "Affiche les affrontements du classement d'une ligue.\n`/show_ladder league:RX`"),
+        ("/rank", "Tableau de classement par puissance d'une ligue.\n`/rank league:RX`"),
+        ("/stats", "Moyennes globales de la ligue pour une équipe — une ligne par catégorie de statistique, pas par joueur (c'est le rôle de `/rank`).\n`/stats league:RX` — joueurs actifs uniquement.\n`/stats league:RX include_inactive:True` — inclut aussi les joueurs inactifs ou transférés ayant des scores historiques dans cette ligue."),
+        ("/legacy", "**Consultations en lecture seule d'une saison archivée.** Mêmes sous-commandes et arguments que leurs équivalents en direct, plus `year`.\n`/legacy rank league:RX year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:RX year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:RX year:2026 start:2026-07-01`\n`/legacy show_ladder league:RX year:2026`\nNe fonctionne que pour une saison réellement archivée sur le serveur."),
+        ("/factors", "Facteurs de pondération actuels d'une ligue.\n`/factors league:RX`"),
         ("/streak", "Les séries actuelles d'un joueur : matchs consécutifs à 24pts (série Kobe) et matchs consécutifs à 18+pts sans drive manqué (série sans drive manqué).\n`/streak player:Grizzly`"),
         ("/openspots", "Le nombre de places disponibles pour chaque ligue (18 moins son nombre actuel de joueurs actifs), triées des plus disponibles aux moins disponibles.\n`/openspots`"),
     ],
     'pt': [
-        ("/matchup", "**Admin.** Editor completo de confrontos — oponente, divisão, rankings, resultado, drives, pontuações de todos os jogadores.\n`/matchup league:NP` ou `/matchup league:NP date:2026-07-07`\nOpcional: `our_defaults`, `opp_defaults`."),
-        ("/ladder", "**Admin.** Monta o ranking de hoje de forma interativa.\n`/ladder league:NP` — fluxo manual.\n`/ladder league:NP screenshot1:[img]` — a IA extrai os dois lados das capturas de tela, pré-seleciona seus 16 jogadores ordenados por rank, e preenche os oponentes automaticamente. Relata mudanças de OVR e jogadores não registrados.\nAo clicar em **Done — Sort & Arrange** na etapa de oponentes, essa lista é salva — se precisar abortar e executar `/ladder league:NP` novamente sem captura de tela, o modal de entrada de oponentes a recarrega automaticamente."),
-        ("/show_ladder", "Exibe os confrontos do ranking de uma liga.\n`/show_ladder league:NP`"),
-        ("/rank", "Tabela de classificação por poder de uma liga.\n`/rank league:NP`"),
-        ("/stats", "Médias de toda a liga para um time — uma linha por categoria de estatística, não por jogador (esse é o papel do `/rank`).\n`/stats league:NP` — apenas jogadores ativos.\n`/stats league:NP include_inactive:True` — também inclui jogadores inativos ou transferidos com pontuações históricas nesta liga."),
-        ("/legacy", "**Consultas somente leitura em uma temporada arquivada.** Mesmos subcomandos e argumentos de seus equivalentes ao vivo, mais `year`.\n`/legacy rank league:NP year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:NP year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:NP year:2026 start:2026-07-01`\n`/legacy show_ladder league:NP year:2026`\nSó funciona para uma temporada que realmente foi arquivada no servidor."),
-        ("/factors", "Fatores de ponderação atuais de uma liga.\n`/factors league:NP`"),
+        ("/matchup", "**Admin.** Editor completo de confrontos — oponente, divisão, rankings, resultado, drives, pontuações de todos os jogadores.\n`/matchup league:RX` ou `/matchup league:RX date:2026-07-07`\nOpcional: `our_defaults`, `opp_defaults`."),
+        ("/ladder", "**Admin.** Monta o ranking de hoje de forma interativa.\n`/ladder league:RX` — fluxo manual.\n`/ladder league:RX screenshot1:[img]` — a IA extrai os dois lados das capturas de tela, pré-seleciona seus 16 jogadores ordenados por rank, e preenche os oponentes automaticamente. Relata mudanças de OVR e jogadores não registrados.\nAo clicar em **Done — Sort & Arrange** na etapa de oponentes, essa lista é salva — se precisar abortar e executar `/ladder league:RX` novamente sem captura de tela, o modal de entrada de oponentes a recarrega automaticamente."),
+        ("/show_ladder", "Exibe os confrontos do ranking de uma liga.\n`/show_ladder league:RX`"),
+        ("/rank", "Tabela de classificação por poder de uma liga.\n`/rank league:RX`"),
+        ("/stats", "Médias de toda a liga para um time — uma linha por categoria de estatística, não por jogador (esse é o papel do `/rank`).\n`/stats league:RX` — apenas jogadores ativos.\n`/stats league:RX include_inactive:True` — também inclui jogadores inativos ou transferidos com pontuações históricas nesta liga."),
+        ("/legacy", "**Consultas somente leitura em uma temporada arquivada.** Mesmos subcomandos e argumentos de seus equivalentes ao vivo, mais `year`.\n`/legacy rank league:RX year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:RX year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:RX year:2026 start:2026-07-01`\n`/legacy show_ladder league:RX year:2026`\nSó funciona para uma temporada que realmente foi arquivada no servidor."),
+        ("/factors", "Fatores de ponderação atuais de uma liga.\n`/factors league:RX`"),
         ("/streak", "As sequências atuais de um jogador: jogos consecutivos de 24pts (sequência Kobe) e jogos consecutivos de 18+pts sem drives perdidos (sequência sem drive perdido).\n`/streak player:Grizzly`"),
         ("/openspots", "Quantas vagas abertas cada liga tem (18 menos sua contagem atual de jogadores ativos), ordenadas das mais abertas às menos abertas.\n`/openspots`"),
     ],
     'de': [
-        ("/matchup", "**Admin.** Vollständiger Matchup-Editor — Gegner, Division, Ränge, Ergebnis, Drives, alle Spielerwertungen.\n`/matchup league:NP` oder `/matchup league:NP date:2026-07-07`\nOptional: `our_defaults`, `opp_defaults`."),
-        ("/ladder", "**Admin.** Baut die heutige Rangliste interaktiv auf.\n`/ladder league:NP` — manueller Ablauf.\n`/ladder league:NP screenshot1:[img]` — die KI liest beide Seiten aus Screenshots aus, wählt deine 16 Spieler nach Ranglistenrang vor und füllt Gegner automatisch aus. Meldet OVR-Änderungen und nicht registrierte Spieler.\nSobald du im Gegner-Schritt auf **Done — Sort & Arrange** klickst, wird diese Liste gespeichert — falls du abbrechen und `/ladder league:NP` ohne Screenshot erneut ausführen musst, lädt das Gegner-Eingabeformular sie automatisch neu."),
-        ("/show_ladder", "Zeigt die Ranglisten-Matchups einer Liga an.\n`/show_ladder league:NP`"),
-        ("/rank", "Power-Ranking-Tabelle einer Liga.\n`/rank league:NP`"),
-        ("/stats", "Liga-weite Durchschnitte für ein Team — eine Zeile pro Statistikkategorie, nicht pro Spieler (dafür ist `/rank`).\n`/stats league:NP` — nur aktive Spieler.\n`/stats league:NP include_inactive:True` — bezieht auch inaktive oder abgewanderte Spieler mit historischen Wertungen in dieser Liga ein."),
-        ("/legacy", "**Reine Lesezugriffe auf eine archivierte, vergangene Saison.** Gleiche Unterbefehle und Argumente wie die Live-Gegenstücke, plus `year`.\n`/legacy rank league:NP year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:NP year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:NP year:2026 start:2026-07-01`\n`/legacy show_ladder league:NP year:2026`\nFunktioniert nur für eine Saison, die tatsächlich auf dem Server archiviert wurde."),
-        ("/factors", "Aktuelle Gewichtungsfaktoren einer Liga.\n`/factors league:NP`"),
+        ("/matchup", "**Admin.** Vollständiger Matchup-Editor — Gegner, Division, Ränge, Ergebnis, Drives, alle Spielerwertungen.\n`/matchup league:RX` oder `/matchup league:RX date:2026-07-07`\nOptional: `our_defaults`, `opp_defaults`."),
+        ("/ladder", "**Admin.** Baut die heutige Rangliste interaktiv auf.\n`/ladder league:RX` — manueller Ablauf.\n`/ladder league:RX screenshot1:[img]` — die KI liest beide Seiten aus Screenshots aus, wählt deine 16 Spieler nach Ranglistenrang vor und füllt Gegner automatisch aus. Meldet OVR-Änderungen und nicht registrierte Spieler.\nSobald du im Gegner-Schritt auf **Done — Sort & Arrange** klickst, wird diese Liste gespeichert — falls du abbrechen und `/ladder league:RX` ohne Screenshot erneut ausführen musst, lädt das Gegner-Eingabeformular sie automatisch neu."),
+        ("/show_ladder", "Zeigt die Ranglisten-Matchups einer Liga an.\n`/show_ladder league:RX`"),
+        ("/rank", "Power-Ranking-Tabelle einer Liga.\n`/rank league:RX`"),
+        ("/stats", "Liga-weite Durchschnitte für ein Team — eine Zeile pro Statistikkategorie, nicht pro Spieler (dafür ist `/rank`).\n`/stats league:RX` — nur aktive Spieler.\n`/stats league:RX include_inactive:True` — bezieht auch inaktive oder abgewanderte Spieler mit historischen Wertungen in dieser Liga ein."),
+        ("/legacy", "**Reine Lesezugriffe auf eine archivierte, vergangene Saison.** Gleiche Unterbefehle und Argumente wie die Live-Gegenstücke, plus `year`.\n`/legacy rank league:RX year:2026`\n`/legacy player player:Grizzly year:2026`\n`/legacy stats league:RX year:2026`\n`/legacy history player:Grizzly start:2026-07-01 year:2026`\n`/legacy scores league:RX year:2026 start:2026-07-01`\n`/legacy show_ladder league:RX year:2026`\nFunktioniert nur für eine Saison, die tatsächlich auf dem Server archiviert wurde."),
+        ("/factors", "Aktuelle Gewichtungsfaktoren einer Liga.\n`/factors league:RX`"),
         ("/streak", "Die aktuellen Serien eines Spielers: aufeinanderfolgende 24-Punkte-Spiele (Kobe-Serie) und aufeinanderfolgende 18+-Punkte-Spiele ohne verlorene Drives (Serie ohne verlorenen Drive).\n`/streak player:Grizzly`"),
         ("/openspots", "Wie viele offene Kaderplätze jede Liga hat (18 minus ihrer aktuellen Anzahl aktiver Spieler), sortiert von den meisten zu den wenigsten offenen Plätzen.\n`/openspots`"),
     ],
@@ -296,54 +296,54 @@ TRANSLATIONS['manual.page2.fields'] = {
 
 TRANSLATIONS['manual.page3.fields'] = {
     'en': [
-        ("/siege", "**Admin.** Start a new siege match for a league.\n`/siege league:NP` → modal for opposing league, ranks, division. Only one active match per league at a time."),
-        ("/node", "Report a newly-visible opponent (node) once its path is cleared in-game.\n`/node league:NP mod:Run Plays Only` → modal for opponent name, OVR, points required to clear, points reward. Use mod `No Mod` for un-modded opponents (up to 6 per match). Each of the 10 named mods can only be reported once per match."),
-        ("/siegescore", "Log drives/points scored against an open node.\n`/siegescore league:NP player:Grizzly opponent:BigBoy87` → pick from the autocomplete list (shows every open node regardless of mod) → modal for drives played, points scored. Auto-clears the node once required points are met."),
-        ("/siegestatus", "Check the active match: open nodes (top 3 by reward ⭐), cleared totals, player totals, PPD, and league score.\n`/siegestatus league:NP`"),
-        ("/updatesiege", "**Admin.** Set the opponent's total points and correct any node or score entry in the active match.\n`/updatesiege league:NP`"),
-        ("/siegefinal", "**Admin.** Same corrections as `/updatesiege`, then closes out the active match.\n`/siegefinal league:NP`"),
+        ("/siege", "**Admin.** Start a new siege match for a league.\n`/siege league:RX` → modal for opposing league, ranks, division. Only one active match per league at a time."),
+        ("/node", "Report a newly-visible opponent (node) once its path is cleared in-game.\n`/node league:RX mod:Run Plays Only` → modal for opponent name, OVR, points required to clear, points reward. Use mod `No Mod` for un-modded opponents (up to 6 per match). Each of the 10 named mods can only be reported once per match."),
+        ("/siegescore", "Log drives/points scored against an open node.\n`/siegescore league:RX player:Grizzly opponent:BigBoy87` → pick from the autocomplete list (shows every open node regardless of mod) → modal for drives played, points scored. Auto-clears the node once required points are met."),
+        ("/siegestatus", "Check the active match: open nodes (top 3 by reward ⭐), cleared totals, player totals, PPD, and league score.\n`/siegestatus league:RX`"),
+        ("/updatesiege", "**Admin.** Set the opponent's total points and correct any node or score entry in the active match.\n`/updatesiege league:RX`"),
+        ("/siegefinal", "**Admin.** Same corrections as `/updatesiege`, then closes out the active match.\n`/siegefinal league:RX`"),
         ("/siegesplits", "A player's cumulative siege points/drives/PPD, broken down by mod, across every match they've played.\n`/siegesplits player:Grizzly`"),
-        ("/siegehistory", "Past completed siege matches for a league — opponent, date, final score.\n`/siegehistory league:NP`"),
+        ("/siegehistory", "Past completed siege matches for a league — opponent, date, final score.\n`/siegehistory league:RX`"),
     ],
     'es': [
-        ("/siege", "**Admin.** Inicia un nuevo combate de asedio para una liga.\n`/siege league:NP` → modal para liga oponente, rangos, división. Solo un combate activo por liga a la vez."),
-        ("/node", "Reporta un oponente recién visible (nodo) una vez que su camino esté despejado en el juego.\n`/node league:NP mod:Run Plays Only` → modal para nombre del oponente, OVR, puntos requeridos para despejarlo, puntos de recompensa. Usa el mod `No Mod` para oponentes sin modificador (hasta 6 por combate). Cada uno de los 10 mods con nombre solo puede reportarse una vez por combate."),
-        ("/siegescore", "Registra drives/puntos anotados contra un nodo abierto.\n`/siegescore league:NP player:Grizzly opponent:BigBoy87` → elige de la lista de autocompletado (muestra todos los nodos abiertos sin importar el mod) → modal para drives jugados, puntos anotados. Despeja el nodo automáticamente al alcanzar los puntos requeridos."),
-        ("/siegestatus", "Consulta el combate activo: nodos abiertos (los 3 mejores por recompensa ⭐), totales despejados, totales por jugador, PPD y puntuación de liga.\n`/siegestatus league:NP`"),
-        ("/updatesiege", "**Admin.** Establece los puntos totales del oponente y corrige cualquier nodo o registro de puntuación del combate activo.\n`/updatesiege league:NP`"),
-        ("/siegefinal", "**Admin.** Mismas correcciones que `/updatesiege`, y además cierra el combate activo.\n`/siegefinal league:NP`"),
+        ("/siege", "**Admin.** Inicia un nuevo combate de asedio para una liga.\n`/siege league:RX` → modal para liga oponente, rangos, división. Solo un combate activo por liga a la vez."),
+        ("/node", "Reporta un oponente recién visible (nodo) una vez que su camino esté despejado en el juego.\n`/node league:RX mod:Run Plays Only` → modal para nombre del oponente, OVR, puntos requeridos para despejarlo, puntos de recompensa. Usa el mod `No Mod` para oponentes sin modificador (hasta 6 por combate). Cada uno de los 10 mods con nombre solo puede reportarse una vez por combate."),
+        ("/siegescore", "Registra drives/puntos anotados contra un nodo abierto.\n`/siegescore league:RX player:Grizzly opponent:BigBoy87` → elige de la lista de autocompletado (muestra todos los nodos abiertos sin importar el mod) → modal para drives jugados, puntos anotados. Despeja el nodo automáticamente al alcanzar los puntos requeridos."),
+        ("/siegestatus", "Consulta el combate activo: nodos abiertos (los 3 mejores por recompensa ⭐), totales despejados, totales por jugador, PPD y puntuación de liga.\n`/siegestatus league:RX`"),
+        ("/updatesiege", "**Admin.** Establece los puntos totales del oponente y corrige cualquier nodo o registro de puntuación del combate activo.\n`/updatesiege league:RX`"),
+        ("/siegefinal", "**Admin.** Mismas correcciones que `/updatesiege`, y además cierra el combate activo.\n`/siegefinal league:RX`"),
         ("/siegesplits", "Puntos/drives/PPD acumulados de un jugador en asedio, desglosados por mod, en todos los combates que ha jugado.\n`/siegesplits player:Grizzly`"),
-        ("/siegehistory", "Combates de asedio ya completados de una liga — oponente, fecha, puntuación final.\n`/siegehistory league:NP`"),
+        ("/siegehistory", "Combates de asedio ya completados de una liga — oponente, fecha, puntuación final.\n`/siegehistory league:RX`"),
     ],
     'fr': [
-        ("/siege", "**Admin.** Démarre un nouveau siège pour une ligue.\n`/siege league:NP` → formulaire pour la ligue adverse, les rangs, la division. Un seul siège actif par ligue à la fois."),
-        ("/node", "Signale un adversaire nouvellement visible (nœud) une fois son chemin dégagé dans le jeu.\n`/node league:NP mod:Run Plays Only` → formulaire pour le nom de l'adversaire, l'OVR, les points requis pour le dégager, les points de récompense. Utilisez le mod `No Mod` pour les adversaires sans mod (jusqu'à 6 par siège). Chacun des 10 mods nommés ne peut être signalé qu'une seule fois par siège."),
-        ("/siegescore", "Enregistre les drives/points marqués contre un nœud ouvert.\n`/siegescore league:NP player:Grizzly opponent:BigBoy87` → choisissez dans la liste d'autocomplétion (affiche tous les nœuds ouverts, quel que soit le mod) → formulaire pour les drives joués, les points marqués. Dégage automatiquement le nœud une fois les points requis atteints."),
-        ("/siegestatus", "Consulte le siège actif : nœuds ouverts (top 3 par récompense ⭐), totaux dégagés, totaux par joueur, PPD et score de ligue.\n`/siegestatus league:NP`"),
-        ("/updatesiege", "**Admin.** Définit le total de points de l'adversaire et corrige n'importe quel nœud ou score du siège actif.\n`/updatesiege league:NP`"),
-        ("/siegefinal", "**Admin.** Mêmes corrections que `/updatesiege`, puis clôture le siège actif.\n`/siegefinal league:NP`"),
+        ("/siege", "**Admin.** Démarre un nouveau siège pour une ligue.\n`/siege league:RX` → formulaire pour la ligue adverse, les rangs, la division. Un seul siège actif par ligue à la fois."),
+        ("/node", "Signale un adversaire nouvellement visible (nœud) une fois son chemin dégagé dans le jeu.\n`/node league:RX mod:Run Plays Only` → formulaire pour le nom de l'adversaire, l'OVR, les points requis pour le dégager, les points de récompense. Utilisez le mod `No Mod` pour les adversaires sans mod (jusqu'à 6 par siège). Chacun des 10 mods nommés ne peut être signalé qu'une seule fois par siège."),
+        ("/siegescore", "Enregistre les drives/points marqués contre un nœud ouvert.\n`/siegescore league:RX player:Grizzly opponent:BigBoy87` → choisissez dans la liste d'autocomplétion (affiche tous les nœuds ouverts, quel que soit le mod) → formulaire pour les drives joués, les points marqués. Dégage automatiquement le nœud une fois les points requis atteints."),
+        ("/siegestatus", "Consulte le siège actif : nœuds ouverts (top 3 par récompense ⭐), totaux dégagés, totaux par joueur, PPD et score de ligue.\n`/siegestatus league:RX`"),
+        ("/updatesiege", "**Admin.** Définit le total de points de l'adversaire et corrige n'importe quel nœud ou score du siège actif.\n`/updatesiege league:RX`"),
+        ("/siegefinal", "**Admin.** Mêmes corrections que `/updatesiege`, puis clôture le siège actif.\n`/siegefinal league:RX`"),
         ("/siegesplits", "Points/drives/PPD cumulés d'un joueur en siège, répartis par mod, sur tous les sièges auxquels il a participé.\n`/siegesplits player:Grizzly`"),
-        ("/siegehistory", "Sièges déjà terminés d'une ligue — adversaire, date, score final.\n`/siegehistory league:NP`"),
+        ("/siegehistory", "Sièges déjà terminés d'une ligue — adversaire, date, score final.\n`/siegehistory league:RX`"),
     ],
     'pt': [
-        ("/siege", "**Admin.** Inicia um novo cerco para uma liga.\n`/siege league:NP` → modal para liga adversária, rankings, divisão. Apenas um cerco ativo por liga por vez."),
-        ("/node", "Reporta um oponente recém-visível (nó) assim que seu caminho é liberado no jogo.\n`/node league:NP mod:Run Plays Only` → modal para nome do oponente, OVR, pontos necessários para liberar, pontos de recompensa. Use o mod `No Mod` para oponentes sem modificador (até 6 por cerco). Cada um dos 10 mods nomeados só pode ser reportado uma vez por cerco."),
-        ("/siegescore", "Registra drives/pontos marcados contra um nó aberto.\n`/siegescore league:NP player:Grizzly opponent:BigBoy87` → escolha na lista de autocompletar (mostra todos os nós abertos, independente do mod) → modal para drives jogados, pontos marcados. Libera o nó automaticamente ao atingir os pontos necessários."),
-        ("/siegestatus", "Consulta o cerco ativo: nós abertos (top 3 por recompensa ⭐), totais liberados, totais por jogador, PPD e pontuação da liga.\n`/siegestatus league:NP`"),
-        ("/updatesiege", "**Admin.** Define o total de pontos do adversário e corrige qualquer nó ou registro de pontuação do cerco ativo.\n`/updatesiege league:NP`"),
-        ("/siegefinal", "**Admin.** Mesmas correções que `/updatesiege`, e também encerra o cerco ativo.\n`/siegefinal league:NP`"),
+        ("/siege", "**Admin.** Inicia um novo cerco para uma liga.\n`/siege league:RX` → modal para liga adversária, rankings, divisão. Apenas um cerco ativo por liga por vez."),
+        ("/node", "Reporta um oponente recém-visível (nó) assim que seu caminho é liberado no jogo.\n`/node league:RX mod:Run Plays Only` → modal para nome do oponente, OVR, pontos necessários para liberar, pontos de recompensa. Use o mod `No Mod` para oponentes sem modificador (até 6 por cerco). Cada um dos 10 mods nomeados só pode ser reportado uma vez por cerco."),
+        ("/siegescore", "Registra drives/pontos marcados contra um nó aberto.\n`/siegescore league:RX player:Grizzly opponent:BigBoy87` → escolha na lista de autocompletar (mostra todos os nós abertos, independente do mod) → modal para drives jogados, pontos marcados. Libera o nó automaticamente ao atingir os pontos necessários."),
+        ("/siegestatus", "Consulta o cerco ativo: nós abertos (top 3 por recompensa ⭐), totais liberados, totais por jogador, PPD e pontuação da liga.\n`/siegestatus league:RX`"),
+        ("/updatesiege", "**Admin.** Define o total de pontos do adversário e corrige qualquer nó ou registro de pontuação do cerco ativo.\n`/updatesiege league:RX`"),
+        ("/siegefinal", "**Admin.** Mesmas correções que `/updatesiege`, e também encerra o cerco ativo.\n`/siegefinal league:RX`"),
         ("/siegesplits", "Pontos/drives/PPD acumulados de um jogador em cercos, detalhados por mod, em todos os cercos que já jogou.\n`/siegesplits player:Grizzly`"),
-        ("/siegehistory", "Cercos já concluídos de uma liga — oponente, data, pontuação final.\n`/siegehistory league:NP`"),
+        ("/siegehistory", "Cercos já concluídos de uma liga — oponente, data, pontuação final.\n`/siegehistory league:RX`"),
     ],
     'de': [
-        ("/siege", "**Admin.** Startet eine neue Belagerung für eine Liga.\n`/siege league:NP` → Formular für gegnerische Liga, Ränge, Division. Immer nur eine aktive Belagerung pro Liga."),
-        ("/node", "Meldet einen neu sichtbaren Gegner (Knoten), sobald sein Pfad im Spiel freigeschaltet ist.\n`/node league:NP mod:Run Plays Only` → Formular für Gegnername, OVR, benötigte Punkte zum Freischalten, Belohnungspunkte. Verwende `No Mod` für Gegner ohne Modifikator (bis zu 6 pro Belagerung). Jeder der 10 benannten Mods kann nur einmal pro Belagerung gemeldet werden."),
-        ("/siegescore", "Erfasst Drives/Punkte gegen einen offenen Knoten.\n`/siegescore league:NP player:Grizzly opponent:BigBoy87` → aus der Autovervollständigungsliste wählen (zeigt alle offenen Knoten unabhängig vom Mod) → Formular für gespielte Drives, erzielte Punkte. Schließt den Knoten automatisch bei Erreichen der benötigten Punkte."),
-        ("/siegestatus", "Zeigt die aktive Belagerung: offene Knoten (Top 3 nach Belohnung ⭐), abgeschlossene Summen, Spielersummen, PPD und Liga-Punktzahl.\n`/siegestatus league:NP`"),
-        ("/updatesiege", "**Admin.** Legt die Gesamtpunktzahl des Gegners fest und korrigiert jeden Knoten- oder Punktestand-Eintrag der aktiven Belagerung.\n`/updatesiege league:NP`"),
-        ("/siegefinal", "**Admin.** Gleiche Korrekturen wie `/updatesiege`, schließt danach die aktive Belagerung ab.\n`/siegefinal league:NP`"),
+        ("/siege", "**Admin.** Startet eine neue Belagerung für eine Liga.\n`/siege league:RX` → Formular für gegnerische Liga, Ränge, Division. Immer nur eine aktive Belagerung pro Liga."),
+        ("/node", "Meldet einen neu sichtbaren Gegner (Knoten), sobald sein Pfad im Spiel freigeschaltet ist.\n`/node league:RX mod:Run Plays Only` → Formular für Gegnername, OVR, benötigte Punkte zum Freischalten, Belohnungspunkte. Verwende `No Mod` für Gegner ohne Modifikator (bis zu 6 pro Belagerung). Jeder der 10 benannten Mods kann nur einmal pro Belagerung gemeldet werden."),
+        ("/siegescore", "Erfasst Drives/Punkte gegen einen offenen Knoten.\n`/siegescore league:RX player:Grizzly opponent:BigBoy87` → aus der Autovervollständigungsliste wählen (zeigt alle offenen Knoten unabhängig vom Mod) → Formular für gespielte Drives, erzielte Punkte. Schließt den Knoten automatisch bei Erreichen der benötigten Punkte."),
+        ("/siegestatus", "Zeigt die aktive Belagerung: offene Knoten (Top 3 nach Belohnung ⭐), abgeschlossene Summen, Spielersummen, PPD und Liga-Punktzahl.\n`/siegestatus league:RX`"),
+        ("/updatesiege", "**Admin.** Legt die Gesamtpunktzahl des Gegners fest und korrigiert jeden Knoten- oder Punktestand-Eintrag der aktiven Belagerung.\n`/updatesiege league:RX`"),
+        ("/siegefinal", "**Admin.** Gleiche Korrekturen wie `/updatesiege`, schließt danach die aktive Belagerung ab.\n`/siegefinal league:RX`"),
         ("/siegesplits", "Kumulierte Belagerungspunkte/Drives/PPD eines Spielers, aufgeschlüsselt nach Mod, über alle gespielten Belagerungen.\n`/siegesplits player:Grizzly`"),
-        ("/siegehistory", "Bereits abgeschlossene Belagerungen einer Liga — Gegner, Datum, Endpunktzahl.\n`/siegehistory league:NP`"),
+        ("/siegehistory", "Bereits abgeschlossene Belagerungen einer Liga — Gegner, Datum, Endpunktzahl.\n`/siegehistory league:RX`"),
     ],
 }
 
@@ -353,7 +353,7 @@ TRANSLATIONS['manual.page3.fields'] = {
 
 TRANSLATIONS['manual.page4.fields'] = {
     'en': [
-        ("/register", "Register a new player.\n`/register league:NP`"),
+        ("/register", "Register a new player.\n`/register league:RX`"),
         ("/transfer", "Move a player to a different league.\n`/transfer player:Grizzly`"),
         ("/inactive", "Mark a player as having left.\n`/inactive player:Grizzly`"),
         ("/reactivate", "Restore a player to active status.\n`/reactivate player:Grizzly`"),
@@ -368,7 +368,7 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/test", "Run the unit test suite and post results."),
     ],
     'es': [
-        ("/register", "Registra un nuevo jugador.\n`/register league:NP`"),
+        ("/register", "Registra un nuevo jugador.\n`/register league:RX`"),
         ("/transfer", "Mueve a un jugador a otra liga.\n`/transfer player:Grizzly`"),
         ("/inactive", "Marca a un jugador como retirado.\n`/inactive player:Grizzly`"),
         ("/reactivate", "Restaura a un jugador al estado activo.\n`/reactivate player:Grizzly`"),
@@ -383,7 +383,7 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/test", "Ejecuta la suite de pruebas unitarias y publica los resultados."),
     ],
     'fr': [
-        ("/register", "Enregistre un nouveau joueur.\n`/register league:NP`"),
+        ("/register", "Enregistre un nouveau joueur.\n`/register league:RX`"),
         ("/transfer", "Déplace un joueur vers une autre ligue.\n`/transfer player:Grizzly`"),
         ("/inactive", "Marque un joueur comme parti.\n`/inactive player:Grizzly`"),
         ("/reactivate", "Restaure un joueur au statut actif.\n`/reactivate player:Grizzly`"),
@@ -398,7 +398,7 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/test", "Exécute la suite de tests unitaires et publie les résultats."),
     ],
     'pt': [
-        ("/register", "Registra um novo jogador.\n`/register league:NP`"),
+        ("/register", "Registra um novo jogador.\n`/register league:RX`"),
         ("/transfer", "Move um jogador para outra liga.\n`/transfer player:Grizzly`"),
         ("/inactive", "Marca um jogador como afastado.\n`/inactive player:Grizzly`"),
         ("/reactivate", "Restaura um jogador ao status ativo.\n`/reactivate player:Grizzly`"),
@@ -413,7 +413,7 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/test", "Executa a suíte de testes unitários e publica os resultados."),
     ],
     'de': [
-        ("/register", "Registriert einen neuen Spieler.\n`/register league:NP`"),
+        ("/register", "Registriert einen neuen Spieler.\n`/register league:RX`"),
         ("/transfer", "Verschiebt einen Spieler in eine andere Liga.\n`/transfer player:Grizzly`"),
         ("/inactive", "Markiert einen Spieler als ausgeschieden.\n`/inactive player:Grizzly`"),
         ("/reactivate", "Setzt einen Spieler wieder auf aktiv.\n`/reactivate player:Grizzly`"),
@@ -478,80 +478,80 @@ TRANSLATIONS['manual.page5.fields'] = {
 
 
 # -----------------------------------------------------------------------
-# Manual — page 6 fields (NeuroSeason)
+# Manual — page 6 fields (RebornSeason)
 # -----------------------------------------------------------------------
 
 TRANSLATIONS['manual.page6.title'] = {
-    'en': '📋 Commands — NeuroSeason (6/6)',
-    'es': '📋 Comandos — NeuroTemporada (6/6)',
-    'fr': '📋 Commandes — NeuroSaison (6/6)',
-    'pt': '📋 Comandos — NeuroTemporada (6/6)',
-    'de': '📋 Befehle — NeuroSaison (6/6)',
+    'en': '📋 Commands — RebornSeason (6/6)',
+    'es': '📋 Comandos — RebornTemporada (6/6)',
+    'fr': '📋 Commandes — RebornSaison (6/6)',
+    'pt': '📋 Comandos — RebornTemporada (6/6)',
+    'de': '📋 Befehle — RebornSaison (6/6)',
 }
 
 TRANSLATIONS['manual.page6.fields'] = {
     'en': [
-        ("/neuroseason create", "**Admin.** Open signups for a new season (up to 32 members).\n`/neuroseason create name:NeuroSeason 1`"),
-        ("/neuroseason join", "Sign up for a season that's taking signups.\n`/neuroseason join season:1 player:Grizzly`"),
-        ("/neuroseason leave", "Withdraw before the season starts.\n`/neuroseason leave season:1 player:Grizzly`"),
-        ("/neuroseason start", "**Admin.** Close signups, draw conferences and divisions, and build the schedule — 18 matchups each, whatever the field size.\n`/neuroseason start season:1`"),
-        ("/neuroseason list", "Every season and its status."),
-        ("/neuroseason standings", "Standings by division, each row showing overall, division and conference records plus points for/against.\n`/neuroseason standings season:1 division:Neuro East`\nBoth `conference:` and `division:` are optional filters; the division list comes from that season's own draw. Ties broken by head-to-head, then division record, then conference record, then points for."),
-        ("/neuroseason schedule", "The slate, optionally for one player or one week.\n`/neuroseason schedule season:1 player:Grizzly`"),
-        ("/neuroseason bracket", "The playoff bracket, once the regular season is done."),
-        ("/neuroseason advance", "**Admin.** Fallback only — the playoffs open themselves and each round generates the next. Use this if a corrected result left a stage stuck."),
+        ("/rebornseason create", "**Admin.** Open signups for a new season (up to 32 members).\n`/rebornseason create name:RebornSeason 1`"),
+        ("/rebornseason join", "Sign up for a season that's taking signups.\n`/rebornseason join season:1 player:Grizzly`"),
+        ("/rebornseason leave", "Withdraw before the season starts.\n`/rebornseason leave season:1 player:Grizzly`"),
+        ("/rebornseason start", "**Admin.** Close signups, draw conferences and divisions, and build the schedule — 18 matchups each, whatever the field size.\n`/rebornseason start season:1`"),
+        ("/rebornseason list", "Every season and its status."),
+        ("/rebornseason standings", "Standings by division, each row showing overall, division and conference records plus points for/against.\n`/rebornseason standings season:1 division:Reborn East`\nBoth `conference:` and `division:` are optional filters; the division list comes from that season's own draw. Ties broken by head-to-head, then division record, then conference record, then points for."),
+        ("/rebornseason schedule", "The slate, optionally for one player or one week.\n`/rebornseason schedule season:1 player:Grizzly`"),
+        ("/rebornseason bracket", "The playoff bracket, once the regular season is done."),
+        ("/rebornseason advance", "**Admin.** Fallback only — the playoffs open themselves and each round generates the next. Use this if a corrected result left a stage stuck."),
         ("/seasonmatch", "Log a played matchup. Once the match number is picked, only that match's two players are offered.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[attach]`\n**The screenshot is optional** — leave it off and enter every stat by hand. With one attached, left/right describe its columns and the reading is pre-filled. Either way, the menu lets you enter or correct any stat, and nothing is saved until you confirm."),
-        ("/seasonstats", "A player's season stats, or their whole NeuroSeason career with season: left blank.\n`/seasonstats player:Grizzly season:1`"),
+        ("/seasonstats", "A player's season stats, or their whole RebornSeason career with season: left blank.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'es': [
-        ("/neuroseason create", "**Admin.** Abre inscripciones para una temporada nueva (hasta 32 miembros).\n`/neuroseason create name:NeuroSeason 1`"),
-        ("/neuroseason join", "Inscríbete en una temporada abierta.\n`/neuroseason join season:1 player:Grizzly`"),
-        ("/neuroseason leave", "Retírate antes de que empiece la temporada.\n`/neuroseason leave season:1 player:Grizzly`"),
-        ("/neuroseason start", "**Admin.** Cierra las inscripciones, sortea conferencias y divisiones y genera el calendario — 18 enfrentamientos por miembro, sea cual sea el número de inscritos.\n`/neuroseason start season:1`"),
-        ("/neuroseason list", "Todas las temporadas y su estado."),
-        ("/neuroseason standings", "Clasificación por división; cada fila muestra el registro general, de división y de conferencia, más puntos a favor/en contra.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` y `division:` son filtros opcionales; la lista de divisiones sale del sorteo de esa temporada. Desempates: enfrentamiento directo, registro de división, registro de conferencia, puntos a favor."),
-        ("/neuroseason schedule", "El calendario, opcionalmente de un jugador o una semana.\n`/neuroseason schedule season:1 player:Grizzly`"),
-        ("/neuroseason bracket", "El cuadro de playoffs, una vez terminada la temporada regular."),
-        ("/neuroseason advance", "**Admin.** Solo como respaldo — los playoffs se abren solos y cada ronda genera la siguiente. Úsalo si un resultado corregido dejó una fase bloqueada."),
+        ("/rebornseason create", "**Admin.** Abre inscripciones para una temporada nueva (hasta 32 miembros).\n`/rebornseason create name:RebornSeason 1`"),
+        ("/rebornseason join", "Inscríbete en una temporada abierta.\n`/rebornseason join season:1 player:Grizzly`"),
+        ("/rebornseason leave", "Retírate antes de que empiece la temporada.\n`/rebornseason leave season:1 player:Grizzly`"),
+        ("/rebornseason start", "**Admin.** Cierra las inscripciones, sortea conferencias y divisiones y genera el calendario — 18 enfrentamientos por miembro, sea cual sea el número de inscritos.\n`/rebornseason start season:1`"),
+        ("/rebornseason list", "Todas las temporadas y su estado."),
+        ("/rebornseason standings", "Clasificación por división; cada fila muestra el registro general, de división y de conferencia, más puntos a favor/en contra.\n`/rebornseason standings season:1 division:Reborn East`\n`conference:` y `division:` son filtros opcionales; la lista de divisiones sale del sorteo de esa temporada. Desempates: enfrentamiento directo, registro de división, registro de conferencia, puntos a favor."),
+        ("/rebornseason schedule", "El calendario, opcionalmente de un jugador o una semana.\n`/rebornseason schedule season:1 player:Grizzly`"),
+        ("/rebornseason bracket", "El cuadro de playoffs, una vez terminada la temporada regular."),
+        ("/rebornseason advance", "**Admin.** Solo como respaldo — los playoffs se abren solos y cada ronda genera la siguiente. Úsalo si un resultado corregido dejó una fase bloqueada."),
         ("/seasonmatch", "Registra un enfrentamiento jugado. Al elegir el número de partido, solo se ofrecen sus dos jugadores.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[adjuntar]`\n**La captura es opcional** — omítela e ingresa cada estadística a mano. Con una adjunta, left/right describen sus columnas y la lectura viene precargada. En ambos casos, el menú permite ingresar o corregir cualquier estadística; nada se guarda hasta que confirmes."),
         ("/seasonstats", "Estadísticas de un jugador en una temporada, o de toda su carrera si dejas season: en blanco.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'fr': [
-        ("/neuroseason create", "**Admin.** Ouvre les inscriptions pour une nouvelle saison (jusqu'à 32 membres).\n`/neuroseason create name:NeuroSeason 1`"),
-        ("/neuroseason join", "Inscrivez-vous à une saison ouverte.\n`/neuroseason join season:1 player:Grizzly`"),
-        ("/neuroseason leave", "Retirez-vous avant le début de la saison.\n`/neuroseason leave season:1 player:Grizzly`"),
-        ("/neuroseason start", "**Admin.** Ferme les inscriptions, tire les conférences et divisions et génère le calendrier — 18 matchs chacun, quel que soit le nombre d'inscrits.\n`/neuroseason start season:1`"),
-        ("/neuroseason list", "Toutes les saisons et leur statut."),
-        ("/neuroseason standings", "Classement par division ; chaque ligne affiche le bilan global, de division et de conférence, plus les points pour/contre.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` et `division:` sont des filtres facultatifs ; la liste des divisions vient du tirage de cette saison. Départages : confrontation directe, bilan de division, bilan de conférence, points marqués."),
-        ("/neuroseason schedule", "Le calendrier, éventuellement pour un joueur ou une semaine.\n`/neuroseason schedule season:1 player:Grizzly`"),
-        ("/neuroseason bracket", "Le tableau des playoffs, une fois la saison régulière terminée."),
-        ("/neuroseason advance", "**Admin.** Secours uniquement — les playoffs s'ouvrent seuls et chaque tour génère le suivant. À utiliser si un résultat corrigé a bloqué une phase."),
+        ("/rebornseason create", "**Admin.** Ouvre les inscriptions pour une nouvelle saison (jusqu'à 32 membres).\n`/rebornseason create name:RebornSeason 1`"),
+        ("/rebornseason join", "Inscrivez-vous à une saison ouverte.\n`/rebornseason join season:1 player:Grizzly`"),
+        ("/rebornseason leave", "Retirez-vous avant le début de la saison.\n`/rebornseason leave season:1 player:Grizzly`"),
+        ("/rebornseason start", "**Admin.** Ferme les inscriptions, tire les conférences et divisions et génère le calendrier — 18 matchs chacun, quel que soit le nombre d'inscrits.\n`/rebornseason start season:1`"),
+        ("/rebornseason list", "Toutes les saisons et leur statut."),
+        ("/rebornseason standings", "Classement par division ; chaque ligne affiche le bilan global, de division et de conférence, plus les points pour/contre.\n`/rebornseason standings season:1 division:Reborn East`\n`conference:` et `division:` sont des filtres facultatifs ; la liste des divisions vient du tirage de cette saison. Départages : confrontation directe, bilan de division, bilan de conférence, points marqués."),
+        ("/rebornseason schedule", "Le calendrier, éventuellement pour un joueur ou une semaine.\n`/rebornseason schedule season:1 player:Grizzly`"),
+        ("/rebornseason bracket", "Le tableau des playoffs, une fois la saison régulière terminée."),
+        ("/rebornseason advance", "**Admin.** Secours uniquement — les playoffs s'ouvrent seuls et chaque tour génère le suivant. À utiliser si un résultat corrigé a bloqué une phase."),
         ("/seasonmatch", "Enregistre un match joué. Une fois le numéro de match choisi, seuls ses deux joueurs sont proposés.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[joindre]`\n**La capture est facultative** — omettez-la et saisissez chaque stat à la main. Avec une capture, left/right désignent ses colonnes et la lecture est pré-remplie. Dans les deux cas, le menu permet de saisir ou corriger n'importe quelle stat, et rien n'est enregistré avant confirmation."),
         ("/seasonstats", "Les stats d'un joueur sur une saison, ou toute sa carrière si season: est laissé vide.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'pt': [
-        ("/neuroseason create", "**Admin.** Abre inscrições para uma nova temporada (até 32 membros).\n`/neuroseason create name:NeuroSeason 1`"),
-        ("/neuroseason join", "Inscreva-se numa temporada aberta.\n`/neuroseason join season:1 player:Grizzly`"),
-        ("/neuroseason leave", "Retire-se antes de a temporada começar.\n`/neuroseason leave season:1 player:Grizzly`"),
-        ("/neuroseason start", "**Admin.** Encerra as inscrições, sorteia conferências e divisões e gera o calendário — 18 confrontos por membro, seja qual for o número de inscritos.\n`/neuroseason start season:1`"),
-        ("/neuroseason list", "Todas as temporadas e seu status."),
-        ("/neuroseason standings", "Classificação por divisão; cada linha mostra a campanha geral, na divisão e na conferência, além de pontos pró/contra.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` e `division:` são filtros opcionais; a lista de divisões vem do sorteio daquela temporada. Desempates: confronto direto, campanha na divisão, campanha na conferência, pontos a favor."),
-        ("/neuroseason schedule", "O calendário, opcionalmente de um jogador ou de uma semana.\n`/neuroseason schedule season:1 player:Grizzly`"),
-        ("/neuroseason bracket", "A chave dos playoffs, quando a temporada regular terminar."),
-        ("/neuroseason advance", "**Admin.** Apenas como reserva — os playoffs abrem sozinhos e cada rodada gera a seguinte. Use se um resultado corrigido travou uma fase."),
+        ("/rebornseason create", "**Admin.** Abre inscrições para uma nova temporada (até 32 membros).\n`/rebornseason create name:RebornSeason 1`"),
+        ("/rebornseason join", "Inscreva-se numa temporada aberta.\n`/rebornseason join season:1 player:Grizzly`"),
+        ("/rebornseason leave", "Retire-se antes de a temporada começar.\n`/rebornseason leave season:1 player:Grizzly`"),
+        ("/rebornseason start", "**Admin.** Encerra as inscrições, sorteia conferências e divisões e gera o calendário — 18 confrontos por membro, seja qual for o número de inscritos.\n`/rebornseason start season:1`"),
+        ("/rebornseason list", "Todas as temporadas e seu status."),
+        ("/rebornseason standings", "Classificação por divisão; cada linha mostra a campanha geral, na divisão e na conferência, além de pontos pró/contra.\n`/rebornseason standings season:1 division:Reborn East`\n`conference:` e `division:` são filtros opcionais; a lista de divisões vem do sorteio daquela temporada. Desempates: confronto direto, campanha na divisão, campanha na conferência, pontos a favor."),
+        ("/rebornseason schedule", "O calendário, opcionalmente de um jogador ou de uma semana.\n`/rebornseason schedule season:1 player:Grizzly`"),
+        ("/rebornseason bracket", "A chave dos playoffs, quando a temporada regular terminar."),
+        ("/rebornseason advance", "**Admin.** Apenas como reserva — os playoffs abrem sozinhos e cada rodada gera a seguinte. Use se um resultado corrigido travou uma fase."),
         ("/seasonmatch", "Registra um confronto jogado. Ao escolher o número da partida, só os dois jogadores dela são oferecidos.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anexar]`\n**A captura é opcional** — deixe-a de fora e insira cada estatística à mão. Com uma anexada, left/right descrevem suas colunas e a leitura vem preenchida. Nos dois casos, o menu permite inserir ou corrigir qualquer estatística; nada é salvo até confirmar."),
         ("/seasonstats", "Estatísticas de um jogador numa temporada, ou toda a carreira deixando season: em branco.\n`/seasonstats player:Grizzly season:1`"),
     ],
     'de': [
-        ("/neuroseason create", "**Admin.** Öffnet die Anmeldung für eine neue Saison (bis zu 32 Mitglieder).\n`/neuroseason create name:NeuroSeason 1`"),
-        ("/neuroseason join", "Melde dich für eine offene Saison an.\n`/neuroseason join season:1 player:Grizzly`"),
-        ("/neuroseason leave", "Zieh dich vor dem Saisonstart zurück.\n`/neuroseason leave season:1 player:Grizzly`"),
-        ("/neuroseason start", "**Admin.** Schließt die Anmeldung, lost Conferences und Divisions aus und erstellt den Spielplan — je 18 Spiele, unabhängig von der Teilnehmerzahl.\n`/neuroseason start season:1`"),
-        ("/neuroseason list", "Alle Saisons und ihr Status."),
-        ("/neuroseason standings", "Tabelle nach Division; jede Zeile zeigt Gesamt-, Division- und Conference-Bilanz sowie Punkte für/gegen.\n`/neuroseason standings season:1 division:Neuro East`\n`conference:` und `division:` sind optionale Filter; die Divisionsliste stammt aus der Auslosung dieser Saison. Gleichstand entschieden durch: direkter Vergleich, Division-Bilanz, Conference-Bilanz, erzielte Punkte."),
-        ("/neuroseason schedule", "Der Spielplan, wahlweise für einen Spieler oder eine Woche.\n`/neuroseason schedule season:1 player:Grizzly`"),
-        ("/neuroseason bracket", "Der Playoff-Baum, sobald die reguläre Saison vorbei ist."),
-        ("/neuroseason advance", "**Admin.** Nur als Rückfalloption — die Playoffs öffnen sich selbst und jede Runde erzeugt die nächste. Nutze es, wenn ein korrigiertes Ergebnis eine Phase blockiert hat."),
+        ("/rebornseason create", "**Admin.** Öffnet die Anmeldung für eine neue Saison (bis zu 32 Mitglieder).\n`/rebornseason create name:RebornSeason 1`"),
+        ("/rebornseason join", "Melde dich für eine offene Saison an.\n`/rebornseason join season:1 player:Grizzly`"),
+        ("/rebornseason leave", "Zieh dich vor dem Saisonstart zurück.\n`/rebornseason leave season:1 player:Grizzly`"),
+        ("/rebornseason start", "**Admin.** Schließt die Anmeldung, lost Conferences und Divisions aus und erstellt den Spielplan — je 18 Spiele, unabhängig von der Teilnehmerzahl.\n`/rebornseason start season:1`"),
+        ("/rebornseason list", "Alle Saisons und ihr Status."),
+        ("/rebornseason standings", "Tabelle nach Division; jede Zeile zeigt Gesamt-, Division- und Conference-Bilanz sowie Punkte für/gegen.\n`/rebornseason standings season:1 division:Reborn East`\n`conference:` und `division:` sind optionale Filter; die Divisionsliste stammt aus der Auslosung dieser Saison. Gleichstand entschieden durch: direkter Vergleich, Division-Bilanz, Conference-Bilanz, erzielte Punkte."),
+        ("/rebornseason schedule", "Der Spielplan, wahlweise für einen Spieler oder eine Woche.\n`/rebornseason schedule season:1 player:Grizzly`"),
+        ("/rebornseason bracket", "Der Playoff-Baum, sobald die reguläre Saison vorbei ist."),
+        ("/rebornseason advance", "**Admin.** Nur als Rückfalloption — die Playoffs öffnen sich selbst und jede Runde erzeugt die nächste. Nutze es, wenn ein korrigiertes Ergebnis eine Phase blockiert hat."),
         ("/seasonmatch", "Erfasst ein gespieltes Spiel. Nach Wahl der Spielnummer werden nur dessen zwei Spieler angeboten.\n`/seasonmatch season:1 match:37 left_player:Grizzly right_player:FHRITP screenshot:[anhängen]`\n**Der Screenshot ist optional** — lass ihn weg und gib jede Statistik von Hand ein. Mit Screenshot beschreiben left/right dessen Spalten und das Gelesene ist vorausgefüllt. In beiden Fällen kannst du über das Menü jede Statistik eingeben oder korrigieren; gespeichert wird erst nach Bestätigung."),
         ("/seasonstats", "Die Saison-Statistik eines Spielers, oder die gesamte Laufbahn, wenn season: leer bleibt.\n`/seasonstats player:Grizzly season:1`"),
     ],
@@ -1951,8 +1951,8 @@ TRANSLATIONS['stat.fourth_down_conv_pct'] = {'en': "4th Down Conv %", 'es': "% C
 # --- /league ---
 
 TRANSLATIONS['league.add_modal.title'] = {'en': "Add New League", 'es': "Agregar Nueva Liga", 'fr': "Ajouter une Nouvelle Ligue", 'pt': "Adicionar Nova Liga", 'de': "Neue Liga Hinzufügen"}
-TRANSLATIONS['league.add_modal.label_id'] = {'en': "League ID (2 letters, e.g. NX)", 'es': "ID de Liga (2 letras, ej. NX)", 'fr': "ID de Ligue (2 lettres, ex. NX)", 'pt': "ID da Liga (2 letras, ex. NX)", 'de': "Liga-ID (2 Buchstaben, z. B. NX)"}
-TRANSLATIONS['league.add_modal.label_name'] = {'en': "Full Name (e.g. NeuroChristians)", 'es': "Nombre Completo (ej. NeuroChristians)", 'fr': "Nom Complet (ex. NeuroChristians)", 'pt': "Nome Completo (ex. NeuroChristians)", 'de': "Vollständiger Name (z. B. NeuroChristians)"}
+TRANSLATIONS['league.add_modal.label_id'] = {'en': "League ID (2 letters, e.g. RX)", 'es': "ID de Liga (2 letras, ej. RX)", 'fr': "ID de Ligue (2 lettres, ex. RX)", 'pt': "ID da Liga (2 letras, ex. RX)", 'de': "Liga-ID (2 Buchstaben, z. B. RX)"}
+TRANSLATIONS['league.add_modal.label_name'] = {'en': "Full Name (e.g. CHRISTiansReborn)", 'es': "Nombre Completo (ej. CHRISTiansReborn)", 'fr': "Nom Complet (ex. CHRISTiansReborn)", 'pt': "Nome Completo (ex. CHRISTiansReborn)", 'de': "Vollständiger Name (z. B. CHRISTiansReborn)"}
 TRANSLATIONS['league.err.id_must_be_2_letters'] = {
     'en': "⚠️ League ID must be exactly 2 letters.", 'es': "⚠️ El ID de la liga debe tener exactamente 2 letras.",
     'fr': "⚠️ L'ID de la ligue doit comporter exactement 2 lettres.", 'pt': "⚠️ O ID da liga deve ter exatamente 2 letras.",
@@ -2359,84 +2359,84 @@ TRANSLATIONS['stats.no_data'] = {
 
 
 # -----------------------------------------------------------------------
-# NeuroSeason (/neuroseason, /seasonmatch, /seasonstats)
+# RebornSeason (/rebornseason, /seasonmatch, /seasonstats)
 # -----------------------------------------------------------------------
 #
-# Conference and division names (Neuro East, Verse West, ...) are
+# Conference and division names (Reborn East, Revival West, ...) are
 # deliberately NOT translated — they're proper nouns for this league's own
 # structure, the same way a league's name isn't translated either.
 
-TRANSLATIONS['neuroseason.err.no_player'] = {
+TRANSLATIONS['rebornseason.err.no_player'] = {
     'en': "⚠️ No player called `{player}`.",
     'es': "⚠️ No hay ningún jugador llamado `{player}`.",
     'fr': "⚠️ Aucun joueur nommé `{player}`.",
     'pt': "⚠️ Nenhum jogador chamado `{player}`.",
     'de': "⚠️ Kein Spieler namens `{player}`.",
 }
-TRANSLATIONS['neuroseason.err.no_season'] = {
-    'en': "⚠️ There's no season #{season}. Try `/neuroseason list`.",
-    'es': "⚠️ No existe la temporada #{season}. Prueba `/neuroseason list`.",
-    'fr': "⚠️ La saison #{season} n'existe pas. Essayez `/neuroseason list`.",
-    'pt': "⚠️ Não existe a temporada #{season}. Tente `/neuroseason list`.",
-    'de': "⚠️ Es gibt keine Saison #{season}. Versuche `/neuroseason list`.",
+TRANSLATIONS['rebornseason.err.no_season'] = {
+    'en': "⚠️ There's no season #{season}. Try `/rebornseason list`.",
+    'es': "⚠️ No existe la temporada #{season}. Prueba `/rebornseason list`.",
+    'fr': "⚠️ La saison #{season} n'existe pas. Essayez `/rebornseason list`.",
+    'pt': "⚠️ Não existe a temporada #{season}. Tente `/rebornseason list`.",
+    'de': "⚠️ Es gibt keine Saison #{season}. Versuche `/rebornseason list`.",
 }
-TRANSLATIONS['neuroseason.err.signups_closed'] = {
+TRANSLATIONS['rebornseason.err.signups_closed'] = {
     'en': "⚠️ Signups for **{name}** are closed.",
     'es': "⚠️ Las inscripciones para **{name}** están cerradas.",
     'fr': "⚠️ Les inscriptions pour **{name}** sont fermées.",
     'pt': "⚠️ As inscrições para **{name}** estão encerradas.",
     'de': "⚠️ Die Anmeldung für **{name}** ist geschlossen.",
 }
-TRANSLATIONS['neuroseason.err.full'] = {
+TRANSLATIONS['rebornseason.err.full'] = {
     'en': "⚠️ **{name}** is full ({max} members).",
     'es': "⚠️ **{name}** está llena ({max} miembros).",
     'fr': "⚠️ **{name}** est complète ({max} membres).",
     'pt': "⚠️ **{name}** está cheia ({max} membros).",
     'de': "⚠️ **{name}** ist voll ({max} Mitglieder).",
 }
-TRANSLATIONS['neuroseason.err.already_started'] = {
+TRANSLATIONS['rebornseason.err.already_started'] = {
     'en': "⚠️ **{name}** has already started — its roster is locked.",
     'es': "⚠️ **{name}** ya ha comenzado — su plantilla está bloqueada.",
     'fr': "⚠️ **{name}** a déjà commencé — son effectif est verrouillé.",
     'pt': "⚠️ **{name}** já começou — o elenco está bloqueado.",
     'de': "⚠️ **{name}** hat bereits begonnen — der Kader ist gesperrt.",
 }
-TRANSLATIONS['neuroseason.err.too_few'] = {
+TRANSLATIONS['rebornseason.err.too_few'] = {
     'en': "⚠️ Only {count} signed up — a season needs at least {min}.",
     'es': "⚠️ Solo {count} se inscribieron — una temporada necesita al menos {min}.",
     'fr': "⚠️ Seulement {count} inscrits — une saison en demande au moins {min}.",
     'pt': "⚠️ Apenas {count} se inscreveram — uma temporada precisa de pelo menos {min}.",
     'de': "⚠️ Nur {count} angemeldet — eine Saison braucht mindestens {min}.",
 }
-TRANSLATIONS['neuroseason.err.not_started'] = {
-    'en': "⚠️ **{name}** hasn't started yet — run `/neuroseason start` first.",
-    'es': "⚠️ **{name}** aún no ha comenzado — ejecuta `/neuroseason start` primero.",
-    'fr': "⚠️ **{name}** n'a pas encore commencé — lancez d'abord `/neuroseason start`.",
-    'pt': "⚠️ **{name}** ainda não começou — execute `/neuroseason start` primeiro.",
-    'de': "⚠️ **{name}** hat noch nicht begonnen — führe zuerst `/neuroseason start` aus.",
+TRANSLATIONS['rebornseason.err.not_started'] = {
+    'en': "⚠️ **{name}** hasn't started yet — run `/rebornseason start` first.",
+    'es': "⚠️ **{name}** aún no ha comenzado — ejecuta `/rebornseason start` primero.",
+    'fr': "⚠️ **{name}** n'a pas encore commencé — lancez d'abord `/rebornseason start`.",
+    'pt': "⚠️ **{name}** ainda não começou — execute `/rebornseason start` primeiro.",
+    'de': "⚠️ **{name}** hat noch nicht begonnen — führe zuerst `/rebornseason start` aus.",
 }
-TRANSLATIONS['neuroseason.err.no_match'] = {
-    'en': "⚠️ No match #{num} in **{name}**. Check `/neuroseason schedule`.",
-    'es': "⚠️ No existe el partido #{num} en **{name}**. Revisa `/neuroseason schedule`.",
-    'fr': "⚠️ Pas de match #{num} dans **{name}**. Vérifiez `/neuroseason schedule`.",
-    'pt': "⚠️ Nenhuma partida #{num} em **{name}**. Confira `/neuroseason schedule`.",
-    'de': "⚠️ Kein Spiel #{num} in **{name}**. Siehe `/neuroseason schedule`.",
+TRANSLATIONS['rebornseason.err.no_match'] = {
+    'en': "⚠️ No match #{num} in **{name}**. Check `/rebornseason schedule`.",
+    'es': "⚠️ No existe el partido #{num} en **{name}**. Revisa `/rebornseason schedule`.",
+    'fr': "⚠️ Pas de match #{num} dans **{name}**. Vérifiez `/rebornseason schedule`.",
+    'pt': "⚠️ Nenhuma partida #{num} em **{name}**. Confira `/rebornseason schedule`.",
+    'de': "⚠️ Kein Spiel #{num} in **{name}**. Siehe `/rebornseason schedule`.",
 }
-TRANSLATIONS['neuroseason.err.wrong_players'] = {
+TRANSLATIONS['rebornseason.err.wrong_players'] = {
     'en': "⚠️ Match #{num} is **{home}** vs **{away}** — those are the two players it needs.",
     'es': "⚠️ El partido #{num} es **{home}** vs **{away}** — esos son los dos jugadores que necesita.",
     'fr': "⚠️ Le match #{num} oppose **{home}** à **{away}** — ce sont les deux joueurs attendus.",
     'pt': "⚠️ A partida #{num} é **{home}** vs **{away}** — são esses os dois jogadores esperados.",
     'de': "⚠️ Spiel #{num} ist **{home}** gegen **{away}** — das sind die beiden erwarteten Spieler.",
 }
-TRANSLATIONS['neuroseason.err.extract_failed'] = {
+TRANSLATIONS['rebornseason.err.extract_failed'] = {
     'en': "⚠️ Couldn't read that screenshot: {error}",
     'es': "⚠️ No se pudo leer esa captura: {error}",
     'fr': "⚠️ Impossible de lire cette capture : {error}",
     'pt': "⚠️ Não foi possível ler essa captura: {error}",
     'de': "⚠️ Screenshot konnte nicht gelesen werden: {error}",
 }
-TRANSLATIONS['neuroseason.err.playoff_tie'] = {
+TRANSLATIONS['rebornseason.err.playoff_tie'] = {
     'en': "⚠️ A playoff match can't end tied — there's no way to send two players into the next round. Correct the score and confirm again.",
     'es': "⚠️ Un partido de playoffs no puede terminar empatado — no hay forma de pasar a dos jugadores a la siguiente ronda. Corrige el marcador y confirma de nuevo.",
     'fr': "⚠️ Un match de playoffs ne peut pas se terminer par une égalité — impossible d'envoyer deux joueurs au tour suivant. Corrigez le score et confirmez à nouveau.",
@@ -2444,35 +2444,35 @@ TRANSLATIONS['neuroseason.err.playoff_tie'] = {
     'de': "⚠️ Ein Playoff-Spiel kann nicht unentschieden enden — zwei Spieler können nicht in die nächste Runde. Korrigiere den Punktestand und bestätige erneut.",
 }
 
-TRANSLATIONS['neuroseason.create.success'] = {
-    'en': "🏈 **{name}** is open for signups (season #{season}, up to {max} members).\nJoin with `/neuroseason join season:{season} player:<your IGN>`.",
-    'es': "🏈 **{name}** está abierta a inscripciones (temporada #{season}, hasta {max} miembros).\nÚnete con `/neuroseason join season:{season} player:<tu IGN>`.",
-    'fr': "🏈 **{name}** est ouverte aux inscriptions (saison #{season}, jusqu'à {max} membres).\nRejoignez avec `/neuroseason join season:{season} player:<votre IGN>`.",
-    'pt': "🏈 **{name}** está aberta para inscrições (temporada #{season}, até {max} membros).\nEntre com `/neuroseason join season:{season} player:<seu IGN>`.",
-    'de': "🏈 **{name}** ist zur Anmeldung geöffnet (Saison #{season}, bis zu {max} Mitglieder).\nMit `/neuroseason join season:{season} player:<dein IGN>` beitreten.",
+TRANSLATIONS['rebornseason.create.success'] = {
+    'en': "🏈 **{name}** is open for signups (season #{season}, up to {max} members).\nJoin with `/rebornseason join season:{season} player:<your IGN>`.",
+    'es': "🏈 **{name}** está abierta a inscripciones (temporada #{season}, hasta {max} miembros).\nÚnete con `/rebornseason join season:{season} player:<tu IGN>`.",
+    'fr': "🏈 **{name}** est ouverte aux inscriptions (saison #{season}, jusqu'à {max} membres).\nRejoignez avec `/rebornseason join season:{season} player:<votre IGN>`.",
+    'pt': "🏈 **{name}** está aberta para inscrições (temporada #{season}, até {max} membros).\nEntre com `/rebornseason join season:{season} player:<seu IGN>`.",
+    'de': "🏈 **{name}** ist zur Anmeldung geöffnet (Saison #{season}, bis zu {max} Mitglieder).\nMit `/rebornseason join season:{season} player:<dein IGN>` beitreten.",
 }
-TRANSLATIONS['neuroseason.join.success'] = {
+TRANSLATIONS['rebornseason.join.success'] = {
     'en': "✅ **{player}** is in **{name}** ({count}/{max}).",
     'es': "✅ **{player}** está en **{name}** ({count}/{max}).",
     'fr': "✅ **{player}** rejoint **{name}** ({count}/{max}).",
     'pt': "✅ **{player}** está em **{name}** ({count}/{max}).",
     'de': "✅ **{player}** ist in **{name}** ({count}/{max}).",
 }
-TRANSLATIONS['neuroseason.join.already'] = {
+TRANSLATIONS['rebornseason.join.already'] = {
     'en': "ℹ️ **{player}** is already signed up for **{name}**.",
     'es': "ℹ️ **{player}** ya está inscrito en **{name}**.",
     'fr': "ℹ️ **{player}** est déjà inscrit à **{name}**.",
     'pt': "ℹ️ **{player}** já está inscrito em **{name}**.",
     'de': "ℹ️ **{player}** ist bereits für **{name}** angemeldet.",
 }
-TRANSLATIONS['neuroseason.leave.success'] = {
+TRANSLATIONS['rebornseason.leave.success'] = {
     'en': "✅ **{player}** has withdrawn from **{name}**.",
     'es': "✅ **{player}** se ha retirado de **{name}**.",
     'fr': "✅ **{player}** s'est retiré de **{name}**.",
     'pt': "✅ **{player}** se retirou de **{name}**.",
     'de': "✅ **{player}** hat sich von **{name}** zurückgezogen.",
 }
-TRANSLATIONS['neuroseason.leave.not_in'] = {
+TRANSLATIONS['rebornseason.leave.not_in'] = {
     'en': "⚠️ **{player}** isn't signed up for **{name}**.",
     'es': "⚠️ **{player}** no está inscrito en **{name}**.",
     'fr': "⚠️ **{player}** n'est pas inscrit à **{name}**.",
@@ -2480,12 +2480,12 @@ TRANSLATIONS['neuroseason.leave.not_in'] = {
     'de': "⚠️ **{player}** ist nicht für **{name}** angemeldet.",
 }
 
-TRANSLATIONS['neuroseason.start.title'] = {
+TRANSLATIONS['rebornseason.start.title'] = {
     'en': "🏈 {name} — kickoff", 'es': "🏈 {name} — arranque",
     'fr': "🏈 {name} — coup d'envoi", 'pt': "🏈 {name} — pontapé inicial",
     'de': "🏈 {name} — Anpfiff",
 }
-TRANSLATIONS['neuroseason.start.desc'] = {
+TRANSLATIONS['rebornseason.start.desc'] = {
     'en': "{count} members · {games} matchups each · {weeks} weeks · {matches} games total\nTop {playoff} make the playoffs.\nReport results with `/seasonmatch`.",
     'es': "{count} miembros · {games} enfrentamientos cada uno · {weeks} semanas · {matches} partidos en total\nLos {playoff} mejores llegan a los playoffs.\nRegistra resultados con `/seasonmatch`.",
     'fr': "{count} membres · {games} matchs chacun · {weeks} semaines · {matches} matchs au total\nLes {playoff} meilleurs vont en playoffs.\nEnregistrez les résultats avec `/seasonmatch`.",
@@ -2493,56 +2493,56 @@ TRANSLATIONS['neuroseason.start.desc'] = {
     'de': "{count} Mitglieder · je {games} Spiele · {weeks} Wochen · {matches} Spiele insgesamt\nDie besten {playoff} kommen in die Playoffs.\nErgebnisse mit `/seasonmatch` melden.",
 }
 
-TRANSLATIONS['neuroseason.list.title'] = {
-    'en': "🏈 NeuroSeasons", 'es': "🏈 NeuroTemporadas", 'fr': "🏈 NeuroSaisons",
-    'pt': "🏈 NeuroTemporadas", 'de': "🏈 NeuroSaisons",
+TRANSLATIONS['rebornseason.list.title'] = {
+    'en': "🏈 RebornSeasons", 'es': "🏈 RebornTemporadas", 'fr': "🏈 RebornSaisons",
+    'pt': "🏈 RebornTemporadas", 'de': "🏈 RebornSaisons",
 }
-TRANSLATIONS['neuroseason.list.header'] = {
+TRANSLATIONS['rebornseason.list.header'] = {
     'en': "Seasons", 'es': "Temporadas", 'fr': "Saisons", 'pt': "Temporadas", 'de': "Saisons",
 }
-TRANSLATIONS['neuroseason.list.row'] = {
+TRANSLATIONS['rebornseason.list.row'] = {
     'en': "`#{season}` **{name}** — {status} · {count} members",
     'es': "`#{season}` **{name}** — {status} · {count} miembros",
     'fr': "`#{season}` **{name}** — {status} · {count} membres",
     'pt': "`#{season}` **{name}** — {status} · {count} membros",
     'de': "`#{season}` **{name}** — {status} · {count} Mitglieder",
 }
-TRANSLATIONS['neuroseason.list.empty'] = {
-    'en': "No seasons yet. An admin can open one with `/neuroseason create`.",
-    'es': "Aún no hay temporadas. Un admin puede abrir una con `/neuroseason create`.",
-    'fr': "Aucune saison pour l'instant. Un admin peut en ouvrir une avec `/neuroseason create`.",
-    'pt': "Ainda não há temporadas. Um admin pode abrir uma com `/neuroseason create`.",
-    'de': "Noch keine Saisons. Ein Admin kann mit `/neuroseason create` eine eröffnen.",
+TRANSLATIONS['rebornseason.list.empty'] = {
+    'en': "No seasons yet. An admin can open one with `/rebornseason create`.",
+    'es': "Aún no hay temporadas. Un admin puede abrir una con `/rebornseason create`.",
+    'fr': "Aucune saison pour l'instant. Un admin peut en ouvrir une avec `/rebornseason create`.",
+    'pt': "Ainda não há temporadas. Um admin pode abrir uma com `/rebornseason create`.",
+    'de': "Noch keine Saisons. Ein Admin kann mit `/rebornseason create` eine eröffnen.",
 }
 
-TRANSLATIONS['neuroseason.status.signups'] = {
+TRANSLATIONS['rebornseason.status.signups'] = {
     'en': "signups open", 'es': "inscripciones abiertas", 'fr': "inscriptions ouvertes",
     'pt': "inscrições abertas", 'de': "Anmeldung offen",
 }
-TRANSLATIONS['neuroseason.status.active'] = {
+TRANSLATIONS['rebornseason.status.active'] = {
     'en': "regular season", 'es': "temporada regular", 'fr': "saison régulière",
     'pt': "temporada regular", 'de': "reguläre Saison",
 }
-TRANSLATIONS['neuroseason.status.playoffs'] = {
+TRANSLATIONS['rebornseason.status.playoffs'] = {
     'en': "playoffs", 'es': "playoffs", 'fr': "playoffs", 'pt': "playoffs", 'de': "Playoffs",
 }
-TRANSLATIONS['neuroseason.status.complete'] = {
+TRANSLATIONS['rebornseason.status.complete'] = {
     'en': "finished", 'es': "finalizada", 'fr': "terminée", 'pt': "encerrada", 'de': "beendet",
 }
 
-TRANSLATIONS['neuroseason.standings.title'] = {
+TRANSLATIONS['rebornseason.standings.title'] = {
     'en': "📊 {name} — standings", 'es': "📊 {name} — clasificación",
     'fr': "📊 {name} — classement", 'pt': "📊 {name} — classificação",
     'de': "📊 {name} — Tabelle",
 }
-TRANSLATIONS['neuroseason.standings.row'] = {
+TRANSLATIONS['rebornseason.standings.row'] = {
     'en': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PA {pa}",
     'es': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PC {pa}",
     'fr': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PP {pf} · PC {pa}",
     'pt': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PC {pa}",
     'de': "`{pos}.` **{player}** {rec} · Div {div} · Conf {conf} · PF {pf} · PA {pa}",
 }
-TRANSLATIONS['neuroseason.standings.footer'] = {
+TRANSLATIONS['rebornseason.standings.footer'] = {
     'en': "Ties broken by: head-to-head, division record, conference record, points for.",
     'es': "Desempates: enfrentamiento directo, registro de división, registro de conferencia, puntos a favor.",
     'fr': "Départages : confrontation directe, bilan de division, bilan de conférence, points marqués.",
@@ -2550,39 +2550,39 @@ TRANSLATIONS['neuroseason.standings.footer'] = {
     'de': "Gleichstand entschieden durch: direkter Vergleich, Division-Bilanz, Conference-Bilanz, erzielte Punkte.",
 }
 
-TRANSLATIONS['neuroseason.schedule.title'] = {
+TRANSLATIONS['rebornseason.schedule.title'] = {
     'en': "🗓️ {name} — schedule", 'es': "🗓️ {name} — calendario",
     'fr': "🗓️ {name} — calendrier", 'pt': "🗓️ {name} — calendário",
     'de': "🗓️ {name} — Spielplan",
 }
-TRANSLATIONS['neuroseason.schedule.header'] = {
+TRANSLATIONS['rebornseason.schedule.header'] = {
     'en': "Matchups", 'es': "Enfrentamientos", 'fr': "Matchs", 'pt': "Confrontos", 'de': "Spiele",
 }
-TRANSLATIONS['neuroseason.schedule.empty'] = {
+TRANSLATIONS['rebornseason.schedule.empty'] = {
     'en': "No matchups found for **{name}**.",
     'es': "No se encontraron enfrentamientos para **{name}**.",
     'fr': "Aucun match trouvé pour **{name}**.",
     'pt': "Nenhum confronto encontrado para **{name}**.",
     'de': "Keine Spiele für **{name}** gefunden.",
 }
-TRANSLATIONS['neuroseason.schedule.week'] = {
+TRANSLATIONS['rebornseason.schedule.week'] = {
     'en': "W{week}", 'es': "S{week}", 'fr': "S{week}", 'pt': "S{week}", 'de': "W{week}",
 }
-TRANSLATIONS['neuroseason.schedule.row_pending'] = {
+TRANSLATIONS['rebornseason.schedule.row_pending'] = {
     'en': "`#{num}` {where} · {home} vs {away}",
     'es': "`#{num}` {where} · {home} vs {away}",
     'fr': "`#{num}` {where} · {home} contre {away}",
     'pt': "`#{num}` {where} · {home} vs {away}",
     'de': "`#{num}` {where} · {home} gegen {away}",
 }
-TRANSLATIONS['neuroseason.schedule.row_done'] = {
+TRANSLATIONS['rebornseason.schedule.row_done'] = {
     'en': "`#{num}` {where} · {home} **{hs}–{as_}** {away}",
     'es': "`#{num}` {where} · {home} **{hs}–{as_}** {away}",
     'fr': "`#{num}` {where} · {home} **{hs}–{as_}** {away}",
     'pt': "`#{num}` {where} · {home} **{hs}–{as_}** {away}",
     'de': "`#{num}` {where} · {home} **{hs}–{as_}** {away}",
 }
-TRANSLATIONS['neuroseason.schedule.truncated'] = {
+TRANSLATIONS['rebornseason.schedule.truncated'] = {
     'en': "Too many matchups to show at once — narrow it down with player: or week:.",
     'es': "Demasiados enfrentamientos para mostrar — filtra con player: o week:.",
     'fr': "Trop de matchs à afficher — filtrez avec player: ou week:.",
@@ -2590,60 +2590,60 @@ TRANSLATIONS['neuroseason.schedule.truncated'] = {
     'de': "Zu viele Spiele auf einmal — grenze mit player: oder week: ein.",
 }
 
-TRANSLATIONS['neuroseason.round.wildcard'] = {
+TRANSLATIONS['rebornseason.round.wildcard'] = {
     'en': "Wild Card", 'es': "Comodín", 'fr': "Wild Card", 'pt': "Wild Card", 'de': "Wild Card",
 }
-TRANSLATIONS['neuroseason.round.divisional'] = {
+TRANSLATIONS['rebornseason.round.divisional'] = {
     'en': "Divisional", 'es': "Divisional", 'fr': "Divisionnel", 'pt': "Divisional",
     'de': "Divisionsrunde",
 }
-TRANSLATIONS['neuroseason.round.conference'] = {
+TRANSLATIONS['rebornseason.round.conference'] = {
     'en': "Conference Championship", 'es': "Final de Conferencia",
     'fr': "Finale de Conférence", 'pt': "Final de Conferência",
     'de': "Conference-Finale",
 }
-TRANSLATIONS['neuroseason.round.final'] = {
+TRANSLATIONS['rebornseason.round.final'] = {
     'en': "Final", 'es': "Final", 'fr': "Finale", 'pt': "Final", 'de': "Finale",
 }
 
-TRANSLATIONS['neuroseason.bracket.title'] = {
+TRANSLATIONS['rebornseason.bracket.title'] = {
     'en': "🏆 {name} — playoff bracket", 'es': "🏆 {name} — cuadro de playoffs",
     'fr': "🏆 {name} — tableau des playoffs", 'pt': "🏆 {name} — chave dos playoffs",
     'de': "🏆 {name} — Playoff-Baum",
 }
-TRANSLATIONS['neuroseason.bracket.none'] = {
+TRANSLATIONS['rebornseason.bracket.none'] = {
     'en': "**{name}** hasn't reached the playoffs yet.",
     'es': "**{name}** aún no ha llegado a los playoffs.",
     'fr': "**{name}** n'est pas encore en playoffs.",
     'pt': "**{name}** ainda não chegou aos playoffs.",
     'de': "**{name}** hat die Playoffs noch nicht erreicht.",
 }
-TRANSLATIONS['neuroseason.bracket.champion'] = {
+TRANSLATIONS['rebornseason.bracket.champion'] = {
     'en': "Champion", 'es': "Campeón", 'fr': "Champion", 'pt': "Campeão", 'de': "Champion",
 }
 
-TRANSLATIONS['neuroseason.playoffs.opened'] = {
-    'en': "🏆 **{name}** — the regular season is done. The top {field} are in; the {round} is set ({count} matchups). See `/neuroseason bracket`.",
-    'es': "🏆 **{name}** — terminó la temporada regular. Los {field} mejores están dentro; la ronda {round} está lista ({count} enfrentamientos). Mira `/neuroseason bracket`.",
-    'fr': "🏆 **{name}** — la saison régulière est terminée. Les {field} meilleurs sont qualifiés ; le tour {round} est prêt ({count} matchs). Voir `/neuroseason bracket`.",
-    'pt': "🏆 **{name}** — a temporada regular acabou. Os {field} melhores estão dentro; a rodada {round} está montada ({count} confrontos). Veja `/neuroseason bracket`.",
-    'de': "🏆 **{name}** — die reguläre Saison ist vorbei. Die besten {field} sind dabei; die {round} steht ({count} Spiele). Siehe `/neuroseason bracket`.",
+TRANSLATIONS['rebornseason.playoffs.opened'] = {
+    'en': "🏆 **{name}** — the regular season is done. The top {field} are in; the {round} is set ({count} matchups). See `/rebornseason bracket`.",
+    'es': "🏆 **{name}** — terminó la temporada regular. Los {field} mejores están dentro; la ronda {round} está lista ({count} enfrentamientos). Mira `/rebornseason bracket`.",
+    'fr': "🏆 **{name}** — la saison régulière est terminée. Les {field} meilleurs sont qualifiés ; le tour {round} est prêt ({count} matchs). Voir `/rebornseason bracket`.",
+    'pt': "🏆 **{name}** — a temporada regular acabou. Os {field} melhores estão dentro; a rodada {round} está montada ({count} confrontos). Veja `/rebornseason bracket`.",
+    'de': "🏆 **{name}** — die reguläre Saison ist vorbei. Die besten {field} sind dabei; die {round} steht ({count} Spiele). Siehe `/rebornseason bracket`.",
 }
-TRANSLATIONS['neuroseason.playoffs.next_round'] = {
+TRANSLATIONS['rebornseason.playoffs.next_round'] = {
     'en': "🏆 **{name}** — the {round} is set ({count} matchups).",
     'es': "🏆 **{name}** — la ronda {round} está lista ({count} enfrentamientos).",
     'fr': "🏆 **{name}** — le tour {round} est prêt ({count} matchs).",
     'pt': "🏆 **{name}** — a rodada {round} está montada ({count} confrontos).",
     'de': "🏆 **{name}** — die {round} steht ({count} Spiele).",
 }
-TRANSLATIONS['neuroseason.playoffs.champion'] = {
+TRANSLATIONS['rebornseason.playoffs.champion'] = {
     'en': "🏆🏆 **{player}** wins **{name}**! 🏆🏆",
     'es': "🏆🏆 ¡**{player}** gana **{name}**! 🏆🏆",
     'fr': "🏆🏆 **{player}** remporte **{name}** ! 🏆🏆",
     'pt': "🏆🏆 **{player}** vence **{name}**! 🏆🏆",
     'de': "🏆🏆 **{player}** gewinnt **{name}**! 🏆🏆",
 }
-TRANSLATIONS['neuroseason.advance.nothing'] = {
+TRANSLATIONS['rebornseason.advance.nothing'] = {
     'en': "Nothing to advance — the current stage still has matchups outstanding.",
     'es': "Nada que avanzar — la etapa actual aún tiene enfrentamientos pendientes.",
     'fr': "Rien à faire avancer — le tour actuel a encore des matchs en attente.",
@@ -2651,197 +2651,197 @@ TRANSLATIONS['neuroseason.advance.nothing'] = {
     'de': "Nichts weiterzuschalten — in der aktuellen Phase stehen noch Spiele aus.",
 }
 
-TRANSLATIONS['neuroseason.match.review_title'] = {
+TRANSLATIONS['rebornseason.match.review_title'] = {
     'en': "Match #{num} — {name}", 'es': "Partido #{num} — {name}",
     'fr': "Match #{num} — {name}", 'pt': "Partida #{num} — {name}",
     'de': "Spiel #{num} — {name}",
 }
-TRANSLATIONS['neuroseason.match.review_desc'] = {
+TRANSLATIONS['rebornseason.match.review_desc'] = {
     'en': "**{left} {lpts} — {rpts} {right}**\nLeft column vs right column, as read from the screenshot.",
     'es': "**{left} {lpts} — {rpts} {right}**\nColumna izquierda vs columna derecha, según la captura.",
     'fr': "**{left} {lpts} — {rpts} {right}**\nColonne de gauche contre colonne de droite, telles que lues sur la capture.",
     'pt': "**{left} {lpts} — {rpts} {right}**\nColuna esquerda vs coluna direita, conforme a captura.",
     'de': "**{left} {lpts} — {rpts} {right}**\nLinke gegen rechte Spalte, wie aus dem Screenshot gelesen.",
 }
-TRANSLATIONS['neuroseason.match.review_footer'] = {
+TRANSLATIONS['rebornseason.match.review_footer'] = {
     'en': "Read by AI — check it before confirming. Nothing is saved until you do.",
     'es': "Leído por IA — revísalo antes de confirmar. Nada se guarda hasta entonces.",
     'fr': "Lu par IA — vérifiez avant de confirmer. Rien n'est enregistré avant.",
     'pt': "Lido por IA — confira antes de confirmar. Nada é salvo até lá.",
     'de': "Von KI gelesen — prüfe es vor dem Bestätigen. Vorher wird nichts gespeichert.",
 }
-TRANSLATIONS['neuroseason.match.confirm'] = {
+TRANSLATIONS['rebornseason.match.confirm'] = {
     'en': "Confirm", 'es': "Confirmar", 'fr': "Confirmer", 'pt': "Confirmar", 'de': "Bestätigen",
 }
-TRANSLATIONS['neuroseason.match.cancel'] = {
+TRANSLATIONS['rebornseason.match.cancel'] = {
     'en': "Cancel", 'es': "Cancelar", 'fr': "Annuler", 'pt': "Cancelar", 'de': "Abbrechen",
 }
-TRANSLATIONS['neuroseason.match.saved'] = {
+TRANSLATIONS['rebornseason.match.saved'] = {
     'en': "✅ Match #{num} logged: **{left} {lpts} — {rpts} {right}**",
     'es': "✅ Partido #{num} registrado: **{left} {lpts} — {rpts} {right}**",
     'fr': "✅ Match #{num} enregistré : **{left} {lpts} — {rpts} {right}**",
     'pt': "✅ Partida #{num} registrada: **{left} {lpts} — {rpts} {right}**",
     'de': "✅ Spiel #{num} erfasst: **{left} {lpts} — {rpts} {right}**",
 }
-TRANSLATIONS['neuroseason.match.cancelled'] = {
+TRANSLATIONS['rebornseason.match.cancelled'] = {
     'en': "Cancelled — nothing was saved.", 'es': "Cancelado — no se guardó nada.",
     'fr': "Annulé — rien n'a été enregistré.", 'pt': "Cancelado — nada foi salvo.",
     'de': "Abgebrochen — nichts wurde gespeichert.",
 }
 
-TRANSLATIONS['neuroseason.stats.title'] = {
+TRANSLATIONS['rebornseason.stats.title'] = {
     'en': "📈 {player} — {name}", 'es': "📈 {player} — {name}", 'fr': "📈 {player} — {name}",
     'pt': "📈 {player} — {name}", 'de': "📈 {player} — {name}",
 }
-TRANSLATIONS['neuroseason.stats.none'] = {
+TRANSLATIONS['rebornseason.stats.none'] = {
     'en': "**{player}** hasn't played a match in **{name}** yet.",
     'es': "**{player}** aún no ha jugado un partido en **{name}**.",
     'fr': "**{player}** n'a pas encore joué de match dans **{name}**.",
     'pt': "**{player}** ainda não jogou nenhuma partida em **{name}**.",
     'de': "**{player}** hat in **{name}** noch kein Spiel bestritten.",
 }
-TRANSLATIONS['neuroseason.stats.no_career'] = {
-    'en': "**{player}** hasn't played in any NeuroSeason yet.",
-    'es': "**{player}** aún no ha jugado ninguna NeuroTemporada.",
-    'fr': "**{player}** n'a encore joué aucune NeuroSaison.",
-    'pt': "**{player}** ainda não jogou nenhuma NeuroTemporada.",
-    'de': "**{player}** hat noch an keiner NeuroSaison teilgenommen.",
+TRANSLATIONS['rebornseason.stats.no_career'] = {
+    'en': "**{player}** hasn't played in any RebornSeason yet.",
+    'es': "**{player}** aún no ha jugado ninguna RebornTemporada.",
+    'fr': "**{player}** n'a encore joué aucune RebornSaison.",
+    'pt': "**{player}** ainda não jogou nenhuma RebornTemporada.",
+    'de': "**{player}** hat noch an keiner RebornSaison teilgenommen.",
 }
-TRANSLATIONS['neuroseason.stats.career_title'] = {
-    'en': "📈 {player} — every NeuroSeason", 'es': "📈 {player} — todas las NeuroTemporadas",
-    'fr': "📈 {player} — toutes les NeuroSaisons", 'pt': "📈 {player} — todas as NeuroTemporadas",
-    'de': "📈 {player} — alle NeuroSaisons",
+TRANSLATIONS['rebornseason.stats.career_title'] = {
+    'en': "📈 {player} — every RebornSeason", 'es': "📈 {player} — todas las RebornTemporadas",
+    'fr': "📈 {player} — toutes les RebornSaisons", 'pt': "📈 {player} — todas as RebornTemporadas",
+    'de': "📈 {player} — alle RebornSaisons",
 }
-TRANSLATIONS['neuroseason.stats.career_header'] = {
+TRANSLATIONS['rebornseason.stats.career_header'] = {
     'en': "By season", 'es': "Por temporada", 'fr': "Par saison", 'pt': "Por temporada",
     'de': "Nach Saison",
 }
-TRANSLATIONS['neuroseason.stats.career_row'] = {
+TRANSLATIONS['rebornseason.stats.career_row'] = {
     'en': "`#{season}` **{name}** — {w}-{l}-{t} · {pf} pts · {td} TD",
     'es': "`#{season}` **{name}** — {w}-{l}-{t} · {pf} pts · {td} TD",
     'fr': "`#{season}` **{name}** — {w}-{l}-{t} · {pf} pts · {td} TD",
     'pt': "`#{season}` **{name}** — {w}-{l}-{t} · {pf} pts · {td} TD",
     'de': "`#{season}` **{name}** — {w}-{l}-{t} · {pf} Pkt · {td} TD",
 }
-TRANSLATIONS['neuroseason.stats.record'] = {
+TRANSLATIONS['rebornseason.stats.record'] = {
     'en': "Record", 'es': "Registro", 'fr': "Bilan", 'pt': "Campanha", 'de': "Bilanz",
 }
-TRANSLATIONS['neuroseason.stats.games'] = {
+TRANSLATIONS['rebornseason.stats.games'] = {
     'en': "Games", 'es': "Partidos", 'fr': "Matchs", 'pt': "Jogos", 'de': "Spiele",
 }
-TRANSLATIONS['neuroseason.stats.pf_pa'] = {
+TRANSLATIONS['rebornseason.stats.pf_pa'] = {
     'en': "Points For / Against", 'es': "Puntos a Favor / En Contra",
     'fr': "Points Pour / Contre", 'pt': "Pontos Pró / Contra",
     'de': "Punkte Für / Gegen",
 }
-TRANSLATIONS['neuroseason.stats.division'] = {
+TRANSLATIONS['rebornseason.stats.division'] = {
     'en': "Division", 'es': "División", 'fr': "Division", 'pt': "Divisão", 'de': "Division",
 }
-TRANSLATIONS['neuroseason.stats.seed'] = {
+TRANSLATIONS['rebornseason.stats.seed'] = {
     'en': "Playoff Seed", 'es': "Cabeza de Serie", 'fr': "Tête de Série",
     'pt': "Cabeça de Chave", 'de': "Playoff-Setzung",
 }
 
-TRANSLATIONS['neuroseason.stat.rush'] = {
+TRANSLATIONS['rebornseason.stat.rush'] = {
     'en': "Rushing YDs", 'es': "Yardas Terrestres", 'fr': "Yards à la Course",
     'pt': "Jardas Terrestres", 'de': "Lauf-Yards",
 }
-TRANSLATIONS['neuroseason.stat.pass'] = {
+TRANSLATIONS['rebornseason.stat.pass'] = {
     'en': "Passing YDs", 'es': "Yardas Aéreas", 'fr': "Yards à la Passe",
     'pt': "Jardas Aéreas", 'de': "Pass-Yards",
 }
-TRANSLATIONS['neuroseason.stat.kr'] = {
+TRANSLATIONS['rebornseason.stat.kr'] = {
     'en': "Kick Return YDs", 'es': "Yardas de Retorno", 'fr': "Yards sur Retour",
     'pt': "Jardas de Retorno", 'de': "Return-Yards",
 }
-TRANSLATIONS['neuroseason.stat.td'] = {
+TRANSLATIONS['rebornseason.stat.td'] = {
     'en': "Touchdowns", 'es': "Touchdowns", 'fr': "Touchdowns", 'pt': "Touchdowns",
     'de': "Touchdowns",
 }
-TRANSLATIONS['neuroseason.stat.to'] = {
+TRANSLATIONS['rebornseason.stat.to'] = {
     'en': "Turnovers", 'es': "Pérdidas de Balón", 'fr': "Ballons Perdus",
     'pt': "Perdas de Posse", 'de': "Ballverluste",
 }
-TRANSLATIONS['neuroseason.stat.fg'] = {
+TRANSLATIONS['rebornseason.stat.fg'] = {
     'en': "Field Goals", 'es': "Goles de Campo", 'fr': "Field Goals",
     'pt': "Field Goals", 'de': "Field Goals",
 }
 
 # --- /seasonmatch manual stat entry (screenshot optional) ---
 
-TRANSLATIONS['neuroseason.stat.pts'] = {
+TRANSLATIONS['rebornseason.stat.pts'] = {
     'en': "Points", 'es': "Puntos", 'fr': "Points", 'pt': "Pontos", 'de': "Punkte",
 }
-TRANSLATIONS['neuroseason.match.page_score'] = {
+TRANSLATIONS['rebornseason.match.page_score'] = {
     'en': "Score & yards", 'es': "Marcador y yardas", 'fr': "Score et yards",
     'pt': "Placar e jardas", 'de': "Punkte & Yards",
 }
-TRANSLATIONS['neuroseason.match.page_score_desc'] = {
+TRANSLATIONS['rebornseason.match.page_score_desc'] = {
     'en': "Points, rushing, passing, kick return",
     'es': "Puntos, terrestres, aéreas, retorno",
     'fr': "Points, course, passe, retour de coup de pied",
     'pt': "Pontos, terrestres, aéreas, retorno",
     'de': "Punkte, Lauf, Pass, Return",
 }
-TRANSLATIONS['neuroseason.match.page_counts'] = {
+TRANSLATIONS['rebornseason.match.page_counts'] = {
     'en': "TDs, turnovers & FGs", 'es': "TDs, pérdidas y FGs",
     'fr': "TDs, ballons perdus & FGs", 'pt': "TDs, perdas e FGs",
     'de': "TDs, Ballverluste & FGs",
 }
-TRANSLATIONS['neuroseason.match.page_counts_desc'] = {
+TRANSLATIONS['rebornseason.match.page_counts_desc'] = {
     'en': "Touchdowns, turnovers, field goals",
     'es': "Touchdowns, pérdidas de balón, goles de campo",
     'fr': "Touchdowns, ballons perdus, field goals",
     'pt': "Touchdowns, perdas de posse, field goals",
     'de': "Touchdowns, Ballverluste, Field Goals",
 }
-TRANSLATIONS['neuroseason.match.edit_select_placeholder'] = {
+TRANSLATIONS['rebornseason.match.edit_select_placeholder'] = {
     'en': "Enter or correct stats…",
     'es': "Ingresa o corrige estadísticas…",
     'fr': "Saisir ou corriger des stats…",
     'pt': "Inserir ou corrigir estatísticas…",
     'de': "Statistiken eingeben oder korrigieren…",
 }
-TRANSLATIONS['neuroseason.match.edit_page_title'] = {
+TRANSLATIONS['rebornseason.match.edit_page_title'] = {
     'en': "{player}: {page}", 'es': "{player}: {page}", 'fr': "{player} : {page}",
     'pt': "{player}: {page}", 'de': "{player}: {page}",
 }
-TRANSLATIONS['neuroseason.match.manual_footer'] = {
+TRANSLATIONS['rebornseason.match.manual_footer'] = {
     'en': "No screenshot — use the menu to enter each stat. Nothing is saved until you confirm.",
     'es': "Sin captura — usa el menú para ingresar cada estadística. Nada se guarda hasta que confirmes.",
     'fr': "Pas de capture — utilisez le menu pour saisir chaque stat. Rien n'est enregistré avant confirmation.",
     'pt': "Sem captura — use o menu para inserir cada estatística. Nada é salvo até você confirmar.",
     'de': "Kein Screenshot — gib jede Statistik über das Menü ein. Gespeichert wird erst nach Bestätigung.",
 }
-TRANSLATIONS['neuroseason.err.bad_stat'] = {
+TRANSLATIONS['rebornseason.err.bad_stat'] = {
     'en': "⚠️ **{stat}**: `{value}` isn't a whole number. Leave a box empty if you don't have that stat.",
     'es': "⚠️ **{stat}**: `{value}` no es un número entero. Deja la casilla vacía si no tienes ese dato.",
     'fr': "⚠️ **{stat}** : `{value}` n'est pas un nombre entier. Laissez la case vide si vous n'avez pas cette stat.",
     'pt': "⚠️ **{stat}**: `{value}` não é um número inteiro. Deixe a caixa vazia se não tiver esse dado.",
     'de': "⚠️ **{stat}**: `{value}` ist keine ganze Zahl. Lass das Feld leer, wenn du den Wert nicht hast.",
 }
-TRANSLATIONS['neuroseason.err.negative_stat'] = {
+TRANSLATIONS['rebornseason.err.negative_stat'] = {
     'en': "⚠️ **{stat}** can't be negative.",
     'es': "⚠️ **{stat}** no puede ser negativo.",
     'fr': "⚠️ **{stat}** ne peut pas être négatif.",
     'pt': "⚠️ **{stat}** não pode ser negativo.",
     'de': "⚠️ **{stat}** darf nicht negativ sein.",
 }
-TRANSLATIONS['neuroseason.err.missing_points'] = {
+TRANSLATIONS['rebornseason.err.missing_points'] = {
     'en': "⚠️ Both final scores are needed before this can be saved — the rest of the stats are optional. Use the menu to enter them.",
     'es': "⚠️ Se necesitan ambos marcadores finales antes de guardar — el resto de las estadísticas son opcionales. Usa el menú para ingresarlos.",
     'fr': "⚠️ Les deux scores finaux sont requis avant d'enregistrer — le reste des stats est facultatif. Utilisez le menu pour les saisir.",
     'pt': "⚠️ Ambos os placares finais são necessários antes de salvar — o resto das estatísticas é opcional. Use o menu para inseri-los.",
     'de': "⚠️ Beide Endstände werden zum Speichern benötigt — die übrigen Statistiken sind optional. Gib sie über das Menü ein.",
 }
-TRANSLATIONS['neuroseason.err.extract_failed_manual'] = {
+TRANSLATIONS['rebornseason.err.extract_failed_manual'] = {
     'en': "⚠️ Couldn't read that screenshot ({error}) — enter the stats by hand below instead.",
     'es': "⚠️ No se pudo leer esa captura ({error}) — ingresa las estadísticas a mano abajo.",
     'fr': "⚠️ Impossible de lire cette capture ({error}) — saisissez les stats à la main ci-dessous.",
     'pt': "⚠️ Não foi possível ler essa captura ({error}) — insira as estatísticas à mão abaixo.",
     'de': "⚠️ Screenshot konnte nicht gelesen werden ({error}) — gib die Statistiken unten von Hand ein.",
 }
-TRANSLATIONS['neuroseason.err.no_scores_manual'] = {
+TRANSLATIONS['rebornseason.err.no_scores_manual'] = {
     'en': "⚠️ Couldn't read both final scores from that screenshot — fill them in with the menu below before confirming.",
     'es': "⚠️ No se pudieron leer ambos marcadores finales — complétalos con el menú de abajo antes de confirmar.",
     'fr': "⚠️ Impossible de lire les deux scores finaux — complétez-les avec le menu ci-dessous avant de confirmer.",
@@ -2849,14 +2849,14 @@ TRANSLATIONS['neuroseason.err.no_scores_manual'] = {
     'de': "⚠️ Beide Endstände konnten nicht gelesen werden — trage sie unten über das Menü nach, bevor du bestätigst.",
 }
 
-TRANSLATIONS['neuroseason.err.no_division'] = {
+TRANSLATIONS['rebornseason.err.no_division'] = {
     'en': "⚠️ No division called `{division}` in this season. It has: {divisions}.",
     'es': "⚠️ No existe la división `{division}` en esta temporada. Tiene: {divisions}.",
     'fr': "⚠️ Pas de division `{division}` dans cette saison. Elle a : {divisions}.",
     'pt': "⚠️ Nenhuma divisão `{division}` nesta temporada. Ela tem: {divisions}.",
     'de': "⚠️ Keine Division `{division}` in dieser Saison. Vorhanden: {divisions}.",
 }
-TRANSLATIONS['neuroseason.standings.legend'] = {
+TRANSLATIONS['rebornseason.standings.legend'] = {
     'en': "Record · Div = division record · Conf = conference record · PF/PA = points for/against",
     'es': "Registro · Div = registro de división · Conf = registro de conferencia · PF/PC = puntos a favor/en contra",
     'fr': "Bilan · Div = bilan de division · Conf = bilan de conférence · PP/PC = points pour/contre",
@@ -2864,7 +2864,7 @@ TRANSLATIONS['neuroseason.standings.legend'] = {
     'de': "Bilanz · Div = Division-Bilanz · Conf = Conference-Bilanz · PF/PA = Punkte für/gegen",
 }
 
-TRANSLATIONS['neuroseason.err.empty_filter'] = {
+TRANSLATIONS['rebornseason.err.empty_filter'] = {
     'en': "⚠️ No members of **{name}** match that — conference `{conference}`, division `{division}`. A division only sits in one conference.",
     'es': "⚠️ Ningún miembro de **{name}** coincide — conferencia `{conference}`, división `{division}`. Una división pertenece a una sola conferencia.",
     'fr': "⚠️ Aucun membre de **{name}** ne correspond — conférence `{conference}`, division `{division}`. Une division n'appartient qu'à une seule conférence.",
