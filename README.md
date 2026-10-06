@@ -105,7 +105,7 @@ of two instead of being padded with byes.
 ### Past seasons
 `/legacy rank|stats|player|history|scores|show_ladder year:YYYY` — identical arguments to the live commands, plus a season year.
 
-Admin-gated commands require one of the roles `Administrator`, `League Owner`, or `Madden Admin`.
+Admin-gated commands require one of the roles `Administrator`, `Admin`, `League Owner`, or `Madden Admin`. `/addgif` and `/reloadgifs` also accept `Gif Master`.
 
 ---
 

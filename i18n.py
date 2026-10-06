@@ -574,11 +574,11 @@ TRANSLATIONS['common.player_not_found'] = {
     'de': "⚠️ Spieler `{player}` nicht gefunden.",
 }
 TRANSLATIONS['common.admin_required'] = {
-    'en': "⛔ This command requires the **Administrator**, **League Owner**, or **Madden Admin** role.",
-    'es': "⛔ Este comando requiere el rol de **Administrador**, **League Owner** o **Madden Admin**.",
-    'fr': "⛔ Cette commande nécessite le rôle **Administrateur**, **League Owner** ou **Madden Admin**.",
-    'pt': "⛔ Este comando requer o cargo de **Administrador**, **League Owner** ou **Madden Admin**.",
-    'de': "⛔ Dieser Befehl erfordert die Rolle **Administrator**, **League Owner** oder **Madden Admin**.",
+    'en': "⛔ This command requires the **Administrator**, **Admin**, **League Owner**, or **Madden Admin** role.",
+    'es': "⛔ Este comando requiere el rol de **Administrador**, **Admin**, **League Owner** o **Madden Admin**.",
+    'fr': "⛔ Cette commande nécessite le rôle **Administrateur**, **Admin**, **League Owner** ou **Madden Admin**.",
+    'pt': "⛔ Este comando requer o cargo de **Administrador**, **Admin**, **League Owner** ou **Madden Admin**.",
+    'de': "⛔ Dieser Befehl erfordert die Rolle **Administrator**, **Admin**, **League Owner** oder **Madden Admin**.",
 }
 TRANSLATIONS['common.invalid_league'] = {
     'en': "Invalid league '{league}'. Use: {leagues}",
@@ -2010,11 +2010,11 @@ TRANSLATIONS['sync.success'] = {
 # --- gifs ---
 
 TRANSLATIONS['gif.role_required'] = {
-    'en': "⛔ Requires **Administrator**, **League Owner**, **Madden Admin**, or **Gif Master** role.",
-    'es': "⛔ Requiere el rol de **Administrador**, **League Owner**, **Madden Admin** o **Gif Master**.",
-    'fr': "⛔ Nécessite le rôle **Administrateur**, **League Owner**, **Madden Admin** ou **Gif Master**.",
-    'pt': "⛔ Requer o cargo de **Administrador**, **League Owner**, **Madden Admin** ou **Gif Master**.",
-    'de': "⛔ Erfordert die Rolle **Administrator**, **League Owner**, **Madden Admin** oder **Gif Master**.",
+    'en': "⛔ Requires **Administrator**, **Admin**, **League Owner**, **Madden Admin**, or **Gif Master** role.",
+    'es': "⛔ Requiere el rol de **Administrador**, **Admin**, **League Owner**, **Madden Admin** o **Gif Master**.",
+    'fr': "⛔ Nécessite le rôle **Administrateur**, **Admin**, **League Owner**, **Madden Admin** ou **Gif Master**.",
+    'pt': "⛔ Requer o cargo de **Administrador**, **Admin**, **League Owner**, **Madden Admin** ou **Gif Master**.",
+    'de': "⛔ Erfordert die Rolle **Administrator**, **Admin**, **League Owner**, **Madden Admin** oder **Gif Master**.",
 }
 TRANSLATIONS['gif.reload_success'] = {
     'en': "✅ Reloaded GIF folders.", 'es': "✅ Carpetas de GIF recargadas.", 'fr': "✅ Dossiers de GIF rechargés.",

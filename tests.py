@@ -2236,6 +2236,23 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         inter.user.roles = [role]
         self.assertTrue(_is_admin(inter))
 
+    def test_is_admin_true_for_plain_admin_role(self):
+        """A role named exactly "Admin" grants access on this branch.
+
+        Note this deliberately reverses an older Neuroverse-side decision:
+        that server renamed its Admin role to Administrator and a test here
+        (now test_is_admin_rejects_a_role_that_merely_contains_admin) pinned
+        "Admin" as revoked, so a leftover copy of the old role couldn't keep
+        granting privileges. Reborn is a new server with no such leftover,
+        and "Admin" was added back to the whitelist on request. If this is
+        ever merged toward main, that history is the thing to check first."""
+        from optimized_bot import _is_admin
+        inter = self._make_interaction()
+        role = MagicMock()
+        role.name = "Admin"
+        inter.user.roles = [role]
+        self.assertTrue(_is_admin(inter))
+
     def test_is_admin_true_for_league_owner(self):
         from optimized_bot import _is_admin
         inter = self._make_interaction()
@@ -2260,14 +2277,20 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         inter.user.roles = [role]
         self.assertFalse(_is_admin(inter))
 
-    def test_is_admin_old_role_name_no_longer_works(self):
-        """The role was renamed Admin -> Administrator; the old name must not grant access."""
+    def test_is_admin_rejects_a_role_that_merely_contains_admin(self):
+        """The whitelist is an exact name match, not a substring test, so a
+        role that only *looks* adminish grants nothing. This is what stops
+        "Admin" being re-admitted by accident through sloppy matching — it's
+        on the whitelist now (see above) because it was put there
+        deliberately, not because `in` would have matched it anyway."""
         from optimized_bot import _is_admin
         inter = self._make_interaction()
-        role = MagicMock()
-        role.name = "Admin"
-        inter.user.roles = [role]
-        self.assertFalse(_is_admin(inter))
+        for name in ("Adminibot", "Not Admin", "admin", "ADMIN"):
+            with self.subTest(role=name):
+                role = MagicMock()
+                role.name = name
+                inter.user.roles = [role]
+                self.assertFalse(_is_admin(inter))
 
     def test_is_admin_no_guild(self):
         from optimized_bot import _is_admin

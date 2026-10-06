@@ -142,11 +142,11 @@ def _validate_league(league: str, lang: str = 'en') -> str:
     return key
 
 
-ADMIN_EQUIVALENT_ROLES = {'Administrator', 'League Owner', 'Madden Admin'}
+ADMIN_EQUIVALENT_ROLES = {'Administrator', 'Admin', 'League Owner', 'Madden Admin'}
 
 
 def _is_admin(interaction: discord.Interaction) -> bool:
-    """Check if the user has an admin-equivalent role (Administrator, League Owner, or Madden Admin)."""
+    """Check if the user has an admin-equivalent role (Administrator, Admin, League Owner, or Madden Admin)."""
     if not interaction.guild:
         return False
     return any(r.name in ADMIN_EQUIVALENT_ROLES for r in interaction.user.roles)
