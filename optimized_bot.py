@@ -30,16 +30,29 @@ import i18n
 from status import get_status
 import sheet_image
 from sheet_image import send_rank_image, send_stats_image, clear_cache as clear_rank_cache
-from newday import newday
+from newday import newday, eastern_today
 from tournament import TournamentManager
 tournaments = TournamentManager()
-from logger_config import global_logger as logger
+from logger_config import global_logger as logger, configure_logging
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 load_dotenv()
+
+# logger_config configures itself at import, which happens on the line above
+# this block — i.e. before load_dotenv() has run. Re-apply now so a LOG_LEVEL
+# or DISCORD_LOG_LEVEL set in a .env file (rather than as a real environment
+# variable, which is how the host panel supplies them) actually takes effect.
+#
+# This also has to happen because the bot starts with bot.start(), not
+# bot.run(): discord.py only calls its own setup_logging() inside run(), so
+# without this nothing configures discord.* and the library's tracebacks —
+# including the view-callback ones behind "This interaction failed" — go to a
+# logger with no handler. See logger_config's docstring.
+configure_logging(force=True)
+
 TOKEN = os.getenv('DISCORD_TOKEN')
 DEV   = os.getenv('DEV')
 
@@ -3114,7 +3127,10 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 @tasks.loop(time=new_day_time)
 async def scheduled_newday():
     try:
-        result = await newday()
+        # eastern_today(), not the default game_day(): this fires at 13:00 ET,
+        # the same instant game_day() rolls over, so a tick landing a fraction
+        # early would re-initialise the day that just ended. See newday.py.
+        result = await newday(eastern_today())
         clear_rank_cache()
         if result['failed'] or not result['ok']:
             logger.error(f"Scheduled newday for {result['date']} incomplete: "

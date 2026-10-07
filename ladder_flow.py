@@ -36,6 +36,38 @@ def _sort_options(lang: str):
     return [(i18n.t(key, lang), col) for key, col in SORT_OPTION_KEYS]
 
 
+async def report_ui_error(interaction: discord.Interaction, error: BaseException,
+                          where: str, lang: str = 'en'):
+    """
+    What a view or modal in this flow does when its callback raises.
+
+    discord.py's default View.on_error logs to the `discord.ui.view` logger
+    and nothing else, so with the library's logging unconfigured (which it
+    was until logger_config started wiring discord.* up explicitly — see that
+    module's docstring) the clicker got Discord's bare "This interaction
+    failed" and the traceback went nowhere at all.
+
+    Two jobs here: get the traceback into the log with the step name
+    attached, and tell the person who clicked something true about what
+    happened. Best-effort on the second — if the interaction is already dead
+    (that being one of the ways to get here) the followup raises too, and
+    that must not mask the original error.
+    """
+    logger.error(
+        "Ladder UI error in %s: %s: %s", where, type(error).__name__, error,
+        exc_info=error,
+    )
+    try:
+        msg = i18n.t('ladder.ui_error', lang, where=where,
+                     error=f"{type(error).__name__}: {error}")
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+    except Exception:
+        logger.exception("Could not report the ladder UI error to the user")
+
+
 # Loaded from the db's teams table at import (see db.load_league_names_sync)
 # rather than imported from optimized_bot, which would be a circular import.
 LEAGUE_NAMES = db.load_league_names_sync()
@@ -107,6 +139,9 @@ def sanitize_selection(selected: list[str], players: list[dict]) -> tuple[list[s
 # ---------------------------------------------------------------------------
 
 class PlayerToggleView(View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None):
+        await report_ui_error(interaction, error, "step 1 (player selection)", self.state.lang)
+
     def __init__(self, state: LadderState):
         super().__init__(timeout=300)
         self.state = state
@@ -194,14 +229,30 @@ class PlayerToggleView(View):
         await interaction.response.edit_message(embed=self._build_embed(), view=self)
 
     async def _advance(self, interaction: discord.Interaction):
+        """
+        Step 1 -> step 2. Answers Discord and nothing else.
+
+        This used to loop over every player in the pool running
+        `UPDATE players SET status='A' WHERE ign=? AND team_id=?`, one
+        db.execute (and therefore one commit, and therefore one fsync) per
+        player, *before* responding to the click.
+
+        That write was a guaranteed no-op: state.players comes from
+        db.get_team_stats(), whose query is `team_id=? AND status='A'`, so
+        every row it touched was already 'A'. Selection for a ladder is not
+        stored on players.status at all — it lives in LadderState.selected
+        and then in matchup_ladder (see this file's header on the
+        active/rostered vs playing distinction).
+
+        So it bought nothing and cost one fsync per rostered player on the
+        critical path to Discord's 3-second acknowledgement deadline. Blow
+        that deadline and the clicker gets "This interaction failed" with no
+        further explanation, which is exactly the symptom this caused. The
+        same failure mode is documented on db.upsert_ladder_slots, which was
+        batched into a single transaction for this reason — this path just
+        never got the same treatment.
+        """
         self.stop()
-        all_igns = [p['ign'] for p in self.state.players]
-        for ign in all_igns:
-            new_status = 'A'  # all roster players stay Active; ladder stores selection separately
-            await db.execute(
-                "UPDATE players SET status=? WHERE ign=? AND team_id=?",
-                (new_status, ign, self.state.team_id)
-            )
         view = OpponentEntryView(self.state)
         await interaction.response.edit_message(embed=view._build_embed(), view=view)
 
@@ -245,8 +296,12 @@ def _parse_csv_opponents(text: str) -> list[dict]:
 
 
 class OpponentCSVModal(Modal, title="Enter All 16 Opponents"):
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        await report_ui_error(interaction, error, "step 2 (opponent entry)", self.lang)
+
     def __init__(self, lang: str = 'en'):
         super().__init__()
+        self.lang = lang
         self.title = i18n.t('ladder.opponent_csv.modal_title', lang)
 
         self.opponents = TextInput(
@@ -266,6 +321,9 @@ class LadderMatchupInfoModal(Modal, title="Matchup Info"):
     matchup-level context an AI screenshot extraction would capture, for
     admins building the ladder by hand (CSV entry or manual toggling) instead.
     """
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        await report_ui_error(interaction, error, "step 2 (matchup info)", self.state.lang)
+
     def __init__(self, state: LadderState):
         super().__init__()
         self.state = state
@@ -296,6 +354,9 @@ class LadderMatchupInfoModal(Modal, title="Matchup Info"):
 
 
 class OpponentEntryView(View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None):
+        await report_ui_error(interaction, error, "step 2 (opponent entry)", self.state.lang)
+
     def __init__(self, state: LadderState):
         super().__init__(timeout=300)
         self.state = state
@@ -439,6 +500,9 @@ class OpponentEntryView(View):
 # ---------------------------------------------------------------------------
 
 class SortPickerView(View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None):
+        await report_ui_error(interaction, error, "step 3 (sort picker)", self.state.lang)
+
     def __init__(self, state: LadderState):
         super().__init__(timeout=60)
         self.state = state
@@ -465,6 +529,9 @@ class SortPickerView(View):
 # ---------------------------------------------------------------------------
 
 class ReorderView(View):
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item=None):
+        await report_ui_error(interaction, error, "step 4 (reorder)", self.state.lang)
+
     def __init__(self, state: LadderState, our_sort_col: str = 'pwr_rank'):
         super().__init__(timeout=300)
         self.state      = state

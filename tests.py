@@ -2240,7 +2240,7 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
     def test_is_admin_true_for_plain_admin_role(self):
         """A role named exactly "Admin" grants access on this branch.
 
-        Note this deliberately reverses an older Neuroverse-side decision:
+        Note this deliberately reverses an older decision on main's side:
         that server renamed its Admin role to Administrator and a test here
         (now test_is_admin_rejects_a_role_that_merely_contains_admin) pinned
         "Admin" as revoked, so a leftover copy of the old role couldn't keep
@@ -7219,7 +7219,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         import datetime as _dt
         teams = await db.list_teams()
         await newday_mod.newday()
-        today = str(newday_mod.eastern_today())
+        today = str(newday_mod.game_day())
         for tid in teams:
             row = await db.fetchone(
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
@@ -7235,7 +7235,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         safe to re-run by hand mid-day."""
         import newday as newday_mod
         import datetime as _dt
-        today = str(newday_mod.eastern_today())
+        today = str(newday_mod.game_day())
         await newday_mod.newday()
         # A day's real data lands on the placeholder row
         await db.execute(
@@ -7252,6 +7252,54 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['opp_ign'], 'Legends of Valhalla', 'a re-run wiped the recorded opponent')
         self.assertEqual((rows[0]['opp_score'], rows[0]['our_score']), (14, 22),
                          'a re-run reset the recorded scores')
+
+    async def test_manual_newday_uses_the_game_day_not_the_calendar_date(self):
+        """The reported bug: /newday "didn't add a row".
+
+        It did — just under a date nothing else reads. A manual run must use
+        game_day() (the 1pm-ET-to-1pm-ET window /status, /ladder, /score and
+        /matchup all mean by "today"), not the Eastern calendar date. The two
+        disagree for thirteen hours out of every twenty-four: at 09:00 ET on
+        10/07 the calendar says 10/07 while the game day is still 10/06, so
+        the old code filed the placeholder a day ahead of everything looking
+        for it.
+        """
+        import newday as newday_mod
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        # 09:00 ET on 10/07 — after midnight, before the 1pm rollover.
+        fixed = _dt.datetime(2026, 10, 7, 9, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        class _FakeDateTime(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed.astimezone(tz) if tz else fixed
+
+        with patch.object(newday_mod.datetime, "datetime", _FakeDateTime):
+            self.assertEqual(newday_mod.eastern_today(), _dt.date(2026, 10, 7),
+                             "fixture is not exercising the window where the two differ")
+            result = await newday_mod.newday()
+
+        self.assertEqual(result['date'], _dt.date(2026, 10, 6),
+                         "a manual /newday filed the placeholder under the calendar date")
+        self.assertIsNotNone(
+            await db.fetchone("SELECT 1 FROM matchup_day WHERE team_id='RX' AND game_date='2026-10-06'"),
+            "no placeholder row on the current game day")
+        self.assertIsNone(
+            await db.fetchone("SELECT 1 FROM matchup_day WHERE team_id='RX' AND game_date='2026-10-07'"),
+            "placeholder landed a day ahead, where nothing will look for it")
+
+    async def test_scheduled_newday_can_still_pin_the_calendar_date(self):
+        """The 13:00 ET scheduler passes eastern_today() explicitly, because a
+        tick landing a fraction early would make game_day() read as yesterday
+        and re-initialise the day that just ended. The explicit argument has
+        to win over the game_day() default."""
+        import newday as newday_mod
+        import datetime as _dt
+        result = await newday_mod.newday(_dt.date(2026, 11, 20))
+        self.assertEqual(result['date'], _dt.date(2026, 11, 20))
+        self.assertIsNotNone(
+            await db.fetchone("SELECT 1 FROM matchup_day WHERE team_id='RX' AND game_date='2026-11-20'"))
 
     async def test_newday_uses_the_eastern_date_not_the_host_clock(self):
         """At 23:30 ET on 10/06 a European host already reads 10/07. The
@@ -7314,7 +7362,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         await newday_mod.newday()   # must not raise
         row = await db.fetchone(
             "SELECT team_id FROM matchup_day WHERE team_id='RX' AND game_date=?",
-            (str(newday_mod.eastern_today()),))
+            (str(newday_mod.game_day()),))
         self.assertIsNone(row, 'created a matchup_day row for a league that no longer exists')
 
     async def test_one_failing_team_does_not_skip_the_rest(self):
@@ -7340,7 +7388,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         finally:
             db.new_day = real_new_day
 
-        today = str(newday_mod.eastern_today())
+        today = str(newday_mod.game_day())
         for tid in rest:
             row = await db.fetchone(
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
@@ -7353,6 +7401,106 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # Test: /ladder step 1 selection count matching what's actually selected
 # ---------------------------------------------------------------------------
+
+class TestLadderStepOneAdvance(unittest.IsolatedAsyncioTestCase):
+    """
+    Reported bug: clicking the step-1 "Next" button answered with Discord's
+    bare "This interaction failed", and the ladder was never written.
+
+    _advance used to run one `UPDATE players SET status='A'` per player in
+    the pool — a separate db.execute, so a separate commit and fsync each —
+    *before* answering the interaction. Discord fails a click that isn't
+    acknowledged within 3 seconds, so on a slow host disk an 18-player
+    roster was 18 fsyncs racing that deadline for no benefit at all: every
+    row it touched was already 'A', because the pool comes from
+    get_team_stats(), whose query is `team_id=? AND status='A'`.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import ladder_flow
+        self.lf = ladder_flow
+        for i in range(15):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, def_ovr, total_ovr) "
+                "VALUES ('RX',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _view(self):
+        players = await db.get_team_stats("RX")
+        state = self.lf.LadderState("RX", "2026-09-29", MagicMock(), lang='en')
+        state.players = [dict(p) for p in players]
+        return self.lf.PlayerToggleView(state)
+
+    async def test_advance_writes_nothing_before_answering_the_click(self):
+        view = await self._view()
+
+        calls = []
+        real_execute = db.execute
+
+        async def counting_execute(sql, args=()):
+            calls.append(sql)
+            return await real_execute(sql, args)
+
+        answered = []
+
+        class _Response:
+            """Only the methods a real InteractionResponse has. A MagicMock
+            would invent anything asked of it and hide the very mistake this
+            is checking for."""
+            def is_done(self_inner):
+                return bool(answered)
+
+            async def edit_message(self_inner, **kwargs):
+                # Record how many writes had already happened by the time
+                # Discord got its answer — that is the number racing the
+                # 3-second deadline.
+                answered.append(len(calls))
+
+        inter = MagicMock()
+        inter.response = _Response()
+
+        db.execute = counting_execute
+        try:
+            await view._advance(inter)
+        finally:
+            db.execute = real_execute
+
+        self.assertEqual(answered, [0],
+                         f"{answered and answered[0]} db writes ran before the click was "
+                         f"acknowledged; that race is what produced 'This interaction failed'")
+        self.assertEqual(calls, [], f"_advance wrote to the database at all: {calls}")
+
+    async def test_advance_hands_off_to_the_opponent_step(self):
+        """The no-op writes are gone; the actual job still has to happen."""
+        view = await self._view()
+        handed = {}
+
+        class _Response:
+            def is_done(self_inner):
+                return False
+
+            async def edit_message(self_inner, **kwargs):
+                handed.update(kwargs)
+
+        inter = MagicMock()
+        inter.response = _Response()
+        await view._advance(inter)
+        self.assertIsInstance(handed.get('view'), self.lf.OpponentEntryView)
+
+    async def test_pool_players_are_all_already_active(self):
+        """The premise the removal rests on: every player _advance used to
+        write 'A' to was already 'A', so the loop could not have been doing
+        anything. If get_team_stats ever stops filtering on status, this
+        fails and the removal needs rethinking."""
+        players = await db.get_team_stats("RX")
+        self.assertTrue(players)
+        self.assertEqual({p['status'] for p in players}, {'A'})
+
 
 class TestLadderSelectionCount(unittest.IsolatedAsyncioTestCase):
     """
@@ -9071,6 +9219,142 @@ class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
         prompt = self.agent.SEASON_MATCH_SYSTEM_PROMPT
         self.assertIn("left", prompt.lower())
         self.assertIn("Do not reorder", prompt)
+
+
+class TestLoggingConfiguration(unittest.TestCase):
+    """
+    discord.py only calls its own setup_logging() inside Client.run(). This
+    bot uses `await bot.start(TOKEN)` (safe_start needs its own retry loop
+    around the 429 case), and start() takes no logging arguments and
+    configures nothing — verified against the v2.7.1 source.
+
+    The consequence was that `discord.ui.view`'s "Ignoring exception in view
+    %r for item %r" record — the one carrying the traceback behind Discord's
+    "This interaction failed" — went to a logger with no handler on it. These
+    tests pin that logger_config, not Client.run(), is what wires it up.
+    """
+
+    def setUp(self):
+        import logging
+        import logger_config
+        self.logging = logging
+        self.logger_config = logger_config
+        # Keep the suite from dropping a logs/bot.log into the project dir.
+        patcher = patch.dict(os.environ, {"LOG_TO_FILE": "0"}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(logger_config.configure_logging, True)
+
+    def test_discord_loggers_actually_have_a_handler(self):
+        self.logger_config.configure_logging(force=True)
+        for name in ("discord", "discord.http", "discord.gateway"):
+            with self.subTest(logger=name):
+                self.assertTrue(
+                    self.logging.getLogger(name).handlers,
+                    f"{name} has no handler — discord.py's own logs go nowhere")
+
+    def test_the_app_logger_is_configured_too(self):
+        self.logger_config.configure_logging(force=True)
+        self.assertTrue(self.logging.getLogger("global_logger").handlers)
+
+    def test_reconfiguring_does_not_stack_handlers(self):
+        """configure_logging runs at import and again after load_dotenv().
+        If it appended rather than replaced, every line would print twice
+        (and then three times, and so on)."""
+        self.logger_config.configure_logging(force=True)
+        before = len(self.logging.getLogger("discord").handlers)
+        self.logger_config.configure_logging(force=True)
+        self.logger_config.configure_logging(force=True)
+        self.assertEqual(len(self.logging.getLogger("discord").handlers), before)
+
+    def test_levels_come_from_the_environment(self):
+        """The point of the env vars is turning verbosity up on the panel
+        without a redeploy."""
+        with patch.dict(os.environ, {"DISCORD_LOG_LEVEL": "DEBUG",
+                                     "HTTP_LOG_LEVEL": "ERROR"}, clear=False):
+            self.logger_config.configure_logging(force=True)
+            self.assertEqual(self.logging.getLogger("discord").level, self.logging.DEBUG)
+            self.assertEqual(self.logging.getLogger("discord.http").level, self.logging.ERROR)
+        self.logger_config.configure_logging(force=True)
+
+    def test_a_nonsense_level_falls_back_instead_of_raising(self):
+        """A typo in a panel environment variable must not stop the bot from
+        starting."""
+        with patch.dict(os.environ, {"DISCORD_LOG_LEVEL": "LOUD"}, clear=False):
+            self.logger_config.configure_logging(force=True)
+            self.assertEqual(self.logging.getLogger("discord").level, self.logging.INFO)
+        self.logger_config.configure_logging(force=True)
+
+    def test_http_and_gateway_default_quieter_than_the_rest(self):
+        """At DEBUG these two log every REST call and every heartbeat. They
+        are useful on demand and drown everything else by default."""
+        with patch.dict(os.environ, {}, clear=False):
+            for var in ("DISCORD_LOG_LEVEL", "HTTP_LOG_LEVEL", "GATEWAY_LOG_LEVEL"):
+                os.environ.pop(var, None)
+            self.logger_config.configure_logging(force=True)
+            self.assertLess(self.logging.getLogger("discord").level,
+                            self.logging.getLogger("discord.http").level)
+            self.assertLess(self.logging.getLogger("discord").level,
+                            self.logging.getLogger("discord.gateway").level)
+
+
+class TestLadderUIErrorReporting(unittest.IsolatedAsyncioTestCase):
+    """A raising view callback must leave a traceback in the log and say
+    something true to the person who clicked, rather than letting Discord
+    show its bare "This interaction failed"."""
+
+    def setUp(self):
+        import ladder_flow
+        self.lf = ladder_flow
+
+    async def test_report_ui_error_logs_and_tells_the_user(self):
+        sent = []
+
+        class _Response:
+            def is_done(self_inner):
+                return False
+
+            async def send_message(self_inner, msg, ephemeral=False):
+                sent.append(msg)
+
+        inter = MagicMock()
+        inter.response = _Response()
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            await self.lf.report_ui_error(inter, ValueError("boom"), "step 1", "en")
+        self.assertTrue(any("step 1" in line for line in captured.output))
+        self.assertTrue(any("ValueError" in line for line in captured.output))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("step 1", sent[0])
+
+    async def test_a_dead_interaction_does_not_mask_the_original_error(self):
+        """Reporting is best-effort: an expired interaction is one of the
+        ways to get here, so the followup raising must not replace the
+        traceback that actually matters."""
+        class _Response:
+            def is_done(self_inner):
+                return True
+
+        inter = MagicMock()
+        inter.response = _Response()
+
+        async def dead(*a, **k):
+            raise RuntimeError("404 Not Found (error code: 10062): Unknown interaction")
+
+        inter.followup.send = dead
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            await self.lf.report_ui_error(inter, ValueError("boom"), "step 2", "en")
+        self.assertTrue(any("ValueError" in line for line in captured.output),
+                        "the original error was lost behind the reporting failure")
+
+    def test_every_ladder_view_and_modal_defines_on_error(self):
+        """Without on_error, discord.py's default logs to the `discord.ui`
+        logger and the clicker is told nothing at all."""
+        for cls_name in ("PlayerToggleView", "OpponentEntryView", "SortPickerView",
+                         "ReorderView", "OpponentCSVModal", "LadderMatchupInfoModal"):
+            with self.subTest(cls=cls_name):
+                cls = getattr(self.lf, cls_name)
+                self.assertIn("on_error", vars(cls),
+                              f"{cls_name} has no on_error of its own")
 
 
 # ---------------------------------------------------------------------------
