@@ -287,6 +287,7 @@ class _FakeDBConn:
     async def executemany(self, sql, args_list):
         return _FakeCursor(self._c.executemany(sql, args_list))
     async def commit(self): self._c.commit()
+    async def rollback(self): self._c.rollback()
     async def close(self): self._c.close()
 
 # Stub aiosqlite minimally so db.py imports
@@ -3849,6 +3850,87 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(row)
 
+    # --- "Done — Sort & Arrange" / "Confirm": acknowledge before saving ---
+
+    def _full_ladder_state(self):
+        from ladder_flow import LadderState, MATCHUP_SIZE
+        state = LadderState("RX", TODAY, None)
+        state.players   = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected  = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        state.opponents = [{"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200 + i}
+                           for i in range(MATCHUP_SIZE)]
+        return state
+
+    async def test_done_button_answers_discord_before_saving(self):
+        """The click used to fail on the Reborn server: 16 committed upserts
+        ran before the interaction was answered, outlasting Discord's
+        3-second window. The response must come first."""
+        import ladder_flow
+        from ladder_flow import OpponentEntryView
+        state = self._full_ladder_state()
+        view = OpponentEntryView(state)
+        inter = _FakeInteraction()
+        answered_at_save = []
+        real_save = ladder_flow.save_ladder_to_db
+
+        async def spy(*a, **kw):
+            answered_at_save.append(inter.response.is_done())
+            return await real_save(*a, **kw)
+
+        with patch.object(ladder_flow, "save_ladder_to_db", spy):
+            await view._advance(inter)
+        self.assertEqual(answered_at_save, [True])
+        self.assertEqual(len(inter.response.edits), 1)
+        rows = await db.fetchall("SELECT * FROM matchup_ladder WHERE team_id='RX' AND game_date=?", (TODAY,))
+        self.assertEqual(len(rows), 16)
+
+    async def test_confirm_button_answers_discord_before_saving(self):
+        import ladder_flow
+        from ladder_flow import ReorderView
+        state = self._full_ladder_state()
+        view = ReorderView(state)
+        inter = _FakeInteraction()
+        inter.channel.send = AsyncMock()
+        answered_at_save = []
+
+        async def spy(*a, **kw):
+            answered_at_save.append(inter.response.is_done())
+
+        with patch.object(ladder_flow, "save_ladder_to_db", spy):
+            await view._confirm(inter)
+        self.assertEqual(answered_at_save, [True])
+        inter.channel.send.assert_awaited_once()
+
+    async def test_save_failure_is_reported_not_swallowed(self):
+        """A save that raises after the click is answered must reach the user
+        as a followup — not escape into discord.py's handler unseen — and the
+        final ladder must not be posted as if it had been recorded."""
+        import ladder_flow
+        from ladder_flow import ReorderView
+        state = self._full_ladder_state()
+        view = ReorderView(state)
+        inter = _FakeInteraction()
+        inter.channel.send = AsyncMock()
+
+        async def boom(*a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+
+        with patch.object(ladder_flow, "save_ladder_to_db", boom):
+            await view._confirm(inter)
+        self.assertEqual(len(inter.followup.messages), 1)
+        self.assertIn("database is locked", inter.followup.messages[0]["content"])
+        inter.channel.send.assert_not_awaited()
+
+    async def test_upsert_ladder_slots_is_all_or_nothing(self):
+        """One bad slot (opp_ign is NOT NULL) must not leave the good ones
+        half-written — they'd get committed by whatever write came next."""
+        slots = [{"slot": 1, "opp_ign": "Good"}, {"slot": 2, "opp_ign": None}]
+        with self.assertRaises(sqlite3.IntegrityError):
+            await db.upsert_ladder_slots("RX", TODAY, slots)
+        await db.execute("UPDATE teams SET name=name WHERE id='RX'")  # any later commit
+        rows = await db.fetchall("SELECT * FROM matchup_ladder WHERE team_id='RX' AND game_date=?", (TODAY,))
+        self.assertEqual(rows, [])
+
     async def test_start_ladder_flow_threads_extracted_context_into_state(self):
         from ladder_flow import start_ladder_flow
         inter = MagicMock()
@@ -7137,7 +7219,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         import datetime as _dt
         teams = await db.list_teams()
         await newday_mod.newday()
-        today = str(_dt.date.today())
+        today = str(newday_mod.eastern_today())
         for tid in teams:
             row = await db.fetchone(
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
@@ -7153,7 +7235,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         safe to re-run by hand mid-day."""
         import newday as newday_mod
         import datetime as _dt
-        today = str(_dt.date.today())
+        today = str(newday_mod.eastern_today())
         await newday_mod.newday()
         # A day's real data lands on the placeholder row
         await db.execute(
@@ -7171,6 +7253,57 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((rows[0]['opp_score'], rows[0]['our_score']), (14, 22),
                          'a re-run reset the recorded scores')
 
+    async def test_newday_uses_the_eastern_date_not_the_host_clock(self):
+        """At 23:30 ET on 10/06 a European host already reads 10/07. The
+        placeholder must still go on 10/06 — the date /status and /matchup
+        will look up — not whatever the server's local calendar says."""
+        import newday as newday_mod
+        import datetime as _dt
+        from zoneinfo import ZoneInfo
+        fixed = _dt.datetime(2026, 10, 6, 23, 30, tzinfo=ZoneInfo("America/New_York"))
+
+        class _FakeDateTime(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed.astimezone(tz) if tz else fixed.astimezone(ZoneInfo("Europe/Berlin")).replace(tzinfo=None)
+
+        with patch.object(newday_mod.datetime, "datetime", _FakeDateTime):
+            result = await newday_mod.newday()
+        self.assertEqual(result['date'], _dt.date(2026, 10, 6))
+        row = await db.fetchone(
+            "SELECT 1 FROM matchup_day WHERE team_id='RX' AND game_date='2026-10-06'")
+        self.assertIsNotNone(row)
+
+    async def test_newday_reports_failures_instead_of_success(self):
+        """/newday used to reply '✅ New day initialised' even when every
+        insert failed. The result has to carry the failure through."""
+        import newday as newday_mod
+        import optimized_bot
+        real_new_day = db.new_day
+
+        async def broken(team_id, game_date):
+            raise sqlite3.OperationalError('attempt to write a readonly database')
+
+        db.new_day = broken
+        try:
+            result = await newday_mod.newday()
+        finally:
+            db.new_day = real_new_day
+        self.assertEqual(result['ok'], [])
+        self.assertTrue(result['failed'])
+        text = optimized_bot._newday_result_text(result, 'en')
+        self.assertNotIn('✅', text)
+        self.assertIn('could not create', text)
+
+    async def test_newday_reports_an_empty_teams_table(self):
+        import newday as newday_mod
+        import optimized_bot
+        await db.execute("DELETE FROM players")
+        await db.execute("DELETE FROM teams")
+        result = await newday_mod.newday()
+        text = optimized_bot._newday_result_text(result, 'en')
+        self.assertIn('no leagues were found', text)
+
     async def test_newday_does_not_insert_for_a_deleted_league(self):
         """The actual production crash: a league removed from `teams` must not
         be inserted for, because matchup_day.team_id is a foreign key to it."""
@@ -7181,7 +7314,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         await newday_mod.newday()   # must not raise
         row = await db.fetchone(
             "SELECT team_id FROM matchup_day WHERE team_id='RX' AND game_date=?",
-            (str(_dt.date.today()),))
+            (str(newday_mod.eastern_today()),))
         self.assertIsNone(row, 'created a matchup_day row for a league that no longer exists')
 
     async def test_one_failing_team_does_not_skip_the_rest(self):
@@ -7207,7 +7340,7 @@ class TestNewDay(unittest.IsolatedAsyncioTestCase):
         finally:
             db.new_day = real_new_day
 
-        today = str(_dt.date.today())
+        today = str(newday_mod.eastern_today())
         for tid in rest:
             row = await db.fetchone(
                 "SELECT team_id FROM matchup_day WHERE team_id=? AND game_date=?", (tid, today))
@@ -7830,6 +7963,7 @@ class _FakeResponse:
         self.modals.append(modal)
 
     async def edit_message(self, *, content=None, embed=None, view=None):
+        self._done = True   # a real edit_message answers the interaction too
         self.edits.append({'content': content, 'embed': embed, 'view': view})
 
 

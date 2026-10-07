@@ -1583,6 +1583,13 @@ TRANSLATIONS['ladder.step2.done_btn'] = {
     'en': "Done — Sort & Arrange", 'es': "Listo — Ordenar y Organizar", 'fr': "Terminé — Trier et Organiser",
     'pt': "Concluído — Ordenar e Organizar", 'de': "Fertig — Sortieren & Anordnen",
 }
+TRANSLATIONS['ladder.save_failed'] = {
+    'en': "⚠️ The ladder couldn't be saved to the database (`{error}`). Nothing was recorded — please try again or tell an admin.",
+    'es': "⚠️ No se pudo guardar el escalafón en la base de datos (`{error}`). No se registró nada — inténtalo de nuevo o avisa a un admin.",
+    'fr': "⚠️ Le classement n'a pas pu être enregistré dans la base de données (`{error}`). Rien n'a été enregistré — réessaie ou préviens un admin.",
+    'pt': "⚠️ Não foi possível salvar o ranking no banco de dados (`{error}`). Nada foi registrado — tente novamente ou avise um admin.",
+    'de': "⚠️ Die Rangliste konnte nicht in der Datenbank gespeichert werden (`{error}`). Es wurde nichts gespeichert — versuche es erneut oder sag einem Admin Bescheid.",
+}
 TRANSLATIONS['ladder.step2.title'] = {
     'en': "Step 2 — Enter Opponents  ({filled}/{total} filled)", 'es': "Paso 2 — Ingresar Oponentes  ({filled}/{total} completados)",
     'fr': "Étape 2 — Saisir les Adversaires  ({filled}/{total} remplis)", 'pt': "Passo 2 — Inserir Oponentes  ({filled}/{total} preenchidos)",
@@ -1995,9 +2002,25 @@ TRANSLATIONS['league.which_rename_prompt'] = {
 # --- /newday, /sync ---
 
 TRANSLATIONS['newday.success'] = {
-    'en': "✅ New day initialised and rank cache cleared.", 'es': "✅ Nuevo día inicializado y caché de rango eliminada.",
-    'fr': "✅ Nouveau jour initialisé et cache de classement vidé.", 'pt': "✅ Novo dia iniciado e cache de rank limpo.",
-    'de': "✅ Neuer Tag initialisiert und Rangdaten-Cache geleert.",
+    'en': "✅ New day **{date}** initialised for {leagues} and rank cache cleared.",
+    'es': "✅ Nuevo día **{date}** inicializado para {leagues} y caché de rango eliminada.",
+    'fr': "✅ Nouveau jour **{date}** initialisé pour {leagues} et cache de classement vidé.",
+    'pt': "✅ Novo dia **{date}** iniciado para {leagues} e cache de rank limpo.",
+    'de': "✅ Neuer Tag **{date}** für {leagues} initialisiert und Rangdaten-Cache geleert.",
+}
+TRANSLATIONS['newday.failed'] = {
+    'en': "⚠️ New day **{date}**: could not create the matchup row for {failed}. Check the bot log for the error.",
+    'es': "⚠️ Nuevo día **{date}**: no se pudo crear el enfrentamiento para {failed}. Revisa el registro del bot para ver el error.",
+    'fr': "⚠️ Nouveau jour **{date}** : impossible de créer l'affrontement pour {failed}. Consulte le journal du bot pour l'erreur.",
+    'pt': "⚠️ Novo dia **{date}**: não foi possível criar o confronto para {failed}. Verifique o log do bot para ver o erro.",
+    'de': "⚠️ Neuer Tag **{date}**: Matchup-Eintrag für {failed} konnte nicht erstellt werden. Den Fehler findest du im Bot-Log.",
+}
+TRANSLATIONS['newday.no_teams'] = {
+    'en': "⚠️ New day did nothing: no leagues were found in the database. The bot may have opened the wrong database file.",
+    'es': "⚠️ El nuevo día no hizo nada: no se encontraron ligas en la base de datos. Puede que el bot haya abierto el archivo de base de datos equivocado.",
+    'fr': "⚠️ Le nouveau jour n'a rien fait : aucune ligue trouvée dans la base de données. Le bot a peut-être ouvert le mauvais fichier de base de données.",
+    'pt': "⚠️ O novo dia não fez nada: nenhuma liga foi encontrada no banco de dados. O bot pode ter aberto o arquivo de banco de dados errado.",
+    'de': "⚠️ Neuer Tag hat nichts bewirkt: keine Ligen in der Datenbank gefunden. Der Bot hat möglicherweise die falsche Datenbankdatei geöffnet.",
 }
 TRANSLATIONS['sync.success'] = {
     'en': "✅ Synced {count} commands to this server. Globals cleared.",

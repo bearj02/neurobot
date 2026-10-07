@@ -2127,3 +2127,51 @@ how the root-cause fix was briefly untested. The `ORDER BY` is likewise
 pinned by source inspection: SQLite returns the lowest rowid first for a
 small table, so a behavioural test stays green with the clause removed —
 verified by removing it.
+
+## /ladder "Done — Sort & Arrange" failing on the Reborn server (Oct 2026)
+
+Reported: on the Reborn server, clicking step 2's **Done — Sort & Arrange**
+consistently showed Discord's "This interaction failed". That handler
+(`OpponentEntryView._advance`) — and step 4's Confirm (`ReorderView._confirm`)
+— ran `save_ladder_to_db` **before** answering the interaction, and that was
+16 separate `db.upsert_ladder_slot` calls, **each with its own commit/fsync**.
+Discord fails any click not acknowledged within 3 seconds, so a slower host
+disk is enough to cause it, and so is the save raising — either way the user
+sees the same generic failure with nothing in the channel. Root cause was not
+confirmed from server logs; the fix covers both:
+
+- Both handlers now `edit_message` first and save second.
+- The save goes through `db.upsert_ladder_slots()` — one `executemany`, one
+  commit, rollback on error — so it's both fast and all-or-nothing.
+- `_save_or_report()` catches a save failure after the response, logs the
+  traceback, and tells the clicker via an ephemeral followup
+  (`ladder.save_failed`, includes the exception text). Confirm then does
+  **not** post the final ladder, since it wasn't recorded.
+
+If it's still failing after this deploy, the ephemeral message names the real
+exception. Test stub note: `_FakeResponse.edit_message` didn't set `_done`,
+unlike the real one — fixed, since the new ordering tests depend on it.
+
+## /newday reported success no matter what (Oct 2026)
+
+Reported alongside the ladder failure: `/newday` said it ran, but Reborn had
+no `matchup_day` row for 10/07. `newday()` already isolated per-team failures
+(logged, then carried on), but **both callers reported success
+unconditionally** — `/newday` replied "✅ New day initialised" and
+`scheduled_newday` logged "complete" even when every insert failed or the
+teams table was empty. `newday()` now returns `{'date', 'ok', 'failed'}` and
+`_newday_result_text()` turns that into the reply (`newday.success` names the
+date and leagues; `newday.failed` / `newday.no_teams` otherwise).
+
+It also used `datetime.date.today()` — the **host's** local date — while
+everything else runs on Eastern. Now `newday.eastern_today()`. Deliberately the
+ET calendar date rather than `game_day()`: the schedule fires at 13:00 ET,
+exactly when `game_day()` flips, so a tick landing a hair early would read as
+yesterday.
+
+Worth noting for diagnosis: the two Reborn failures (ladder save, newday
+insert) are both inserts into tables with a `FOREIGN KEY (team_id) REFERENCES
+teams(id)`, while the ladder's step-1 `UPDATE players` (no FK) works. If the
+new error messages name a foreign-key or "no such table" error, check
+`PRAGMA foreign_key_list(matchup_day)` on `reborn.db` — a table rebuild during
+the NX→RX conversion could have left the FK pointing somewhere else.

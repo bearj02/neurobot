@@ -3114,9 +3114,13 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 @tasks.loop(time=new_day_time)
 async def scheduled_newday():
     try:
-        await newday()
+        result = await newday()
         clear_rank_cache()
-        logger.info("Scheduled newday complete")
+        if result['failed'] or not result['ok']:
+            logger.error(f"Scheduled newday for {result['date']} incomplete: "
+                         f"ok={result['ok']} failed={result['failed']}")
+        else:
+            logger.info(f"Scheduled newday complete for {result['date']}: {result['ok']}")
     except Exception as e:
         logger.error(f"Error in scheduled_newday: {e}", exc_info=True)
 
@@ -4595,9 +4599,22 @@ async def newday_slash(interaction: discord.Interaction):
     if not await _require_admin(interaction): return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
-    await newday()
+    result = await newday()
     clear_rank_cache()
-    await interaction.followup.send(i18n.t('newday.success', lang))
+    await interaction.followup.send(_newday_result_text(result, lang))
+
+
+def _newday_result_text(result: dict, lang: str) -> str:
+    """What /newday actually did — it used to say success no matter what."""
+    date = result['date']
+    if not result['ok'] and not result['failed']:
+        return i18n.t('newday.no_teams', lang)
+    lines = []
+    if result['ok']:
+        lines.append(i18n.t('newday.success', lang, date=date, leagues=", ".join(result['ok'])))
+    if result['failed']:
+        lines.append(i18n.t('newday.failed', lang, date=date, failed=", ".join(result['failed'])))
+    return "\n".join(lines)
 
 
 # ============================================================================

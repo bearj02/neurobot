@@ -383,19 +383,23 @@ class OpponentEntryView(View):
 
     async def _advance(self, interaction: discord.Interaction):
         self.stop()
-        # Save now, the same way the final "Confirm Matchups" step does — this
-        # is the point the opponent list is confirmed. If the flow gets aborted
-        # after this, re-running /ladder will pick it back up via _enter above.
-        # Finishing the ladder later just overwrites these same rows.
-        identity = list(range(MATCHUP_SIZE))
-        await save_ladder_to_db(self.state, identity, identity)
         picker = SortPickerView(self.state)
         embed  = discord.Embed(
             title=i18n.t('ladder.step3.title', self.state.lang),
             description=i18n.t('ladder.step3.desc', self.state.lang),
             color=discord.Color.purple()
         )
+        # Answer Discord BEFORE touching the db. Discord fails the click if it
+        # isn't acknowledged within 3 seconds, and the save used to come first
+        # — on a slow disk (or if it raised) the button just "failed" with
+        # nothing in the channel to say why.
         await interaction.response.edit_message(embed=embed, view=picker)
+        # Save now, the same way the final "Confirm Matchups" step does — this
+        # is the point the opponent list is confirmed. If the flow gets aborted
+        # after this, re-running /ladder will pick it back up via _enter above.
+        # Finishing the ladder later just overwrites these same rows.
+        identity = list(range(MATCHUP_SIZE))
+        await _save_or_report(interaction, self.state, identity, identity)
 
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang
@@ -605,10 +609,12 @@ class ReorderView(View):
     async def _confirm(self, interaction: discord.Interaction):
         self.stop()
         embed = build_final_embed(self.state, self.our_order, self.opp_order)
-        await save_ladder_to_db(self.state, self.our_order, self.opp_order)
+        # Acknowledge first, save second — see OpponentEntryView._advance.
         await interaction.response.edit_message(
             content=i18n.t('ladder.step4.finalized_content', self.state.lang), embed=None, view=None
         )
+        if not await _save_or_report(interaction, self.state, self.our_order, self.opp_order):
+            return
         channel = interaction.channel or self.state.channel
         await channel.send(embed=embed)
 
@@ -709,16 +715,17 @@ def build_final_embed(state: LadderState,
 async def save_ladder_to_db(state: LadderState,
                              our_order: list[int],
                              opp_order: list[int]):
+    slots = []
     for slot in range(MATCHUP_SIZE):
-        our_ign = state.selected[our_order[slot]]
-        opp     = state.opponents[opp_order[slot]]
-        await db.upsert_ladder_slot(
-            state.team_id, state.game_date, slot + 1,
-            opp_ign=opp['name'],
-            opp_def_ovr=opp['def_ovr'],
-            our_total_ovr=opp['total_ovr'],
-            our_ign=our_ign,
-        )
+        opp = state.opponents[opp_order[slot]]
+        slots.append({
+            'slot':          slot + 1,
+            'opp_ign':       opp['name'],
+            'opp_def_ovr':   opp.get('def_ovr'),
+            'our_total_ovr': opp.get('total_ovr'),
+            'our_ign':       state.selected[our_order[slot]],
+        })
+    await db.upsert_ladder_slots(state.team_id, state.game_date, slots)
 
     # Matchup-level context from screenshot extraction, if any of it was
     # actually visible/readable — set_matchup_info preserves whatever's
@@ -734,6 +741,29 @@ async def save_ladder_to_db(state: LadderState,
             event_type=state.event_type,
             our_rank=state.our_rank,
         )
+
+
+async def _save_or_report(interaction: discord.Interaction, state: LadderState,
+                          our_order: list[int], opp_order: list[int]) -> bool:
+    """
+    save_ladder_to_db for a button handler that has already answered the
+    interaction. A failure is logged with its traceback and reported to the
+    clicker via followup, rather than escaping into discord.py's handler where
+    nobody in the channel would ever see it. Returns whether the save worked.
+    """
+    try:
+        await save_ladder_to_db(state, our_order, opp_order)
+        return True
+    except Exception as e:
+        logger.exception(f"Ladder save failed for {state.team_id} on {state.game_date}: {e}")
+        try:
+            await interaction.followup.send(
+                i18n.t('ladder.save_failed', state.lang, error=f"{type(e).__name__}: {e}"),
+                ephemeral=True
+            )
+        except Exception:
+            logger.exception("Could not report ladder save failure to the user")
+        return False
 
 
 # ---------------------------------------------------------------------------
