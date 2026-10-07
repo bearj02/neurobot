@@ -19,9 +19,23 @@ import asyncio
 from logger_config import global_logger as logger
 import db
 import i18n
+from utils import EMBED_FIELD_LIMIT, chunk_lines_to_fit, truncate_cell
 
 MATCHUP_SIZE     = 16  # how many of a league's active/rostered players actually play a given ladder — see this file's header docstring for the playing-vs-active distinction
 PLAYERS_PER_PAGE = 20
+
+# Width of the two name columns in the final monospace table. Names longer
+# than this are cut with '..' — the format specs pad but never truncate, so
+# without this one long IGN both wrecks the column alignment and makes its
+# row long enough to breach the field limit on its own, which no amount of
+# chunking can fix.
+_NAME_COL = 18
+
+# A code fence costs 8 characters ("```\n" + chunk + "\n```") and they count
+# toward the same 1024 Discord allows for the whole field value, so the
+# chunks themselves have to be budgeted smaller than the limit.
+_CODE_FENCE_OVERHEAD = len("```\n") + len("\n```")
+_TABLE_BUDGET = EMBED_FIELD_LIMIT - _CODE_FENCE_OVERHEAD
 SORT_OPTION_KEYS = [
     ("ladder.sort.pwr_rank",    "pwr_rank"),
     ("ladder.sort.yearly_avg",  "avg_yearly"),
@@ -268,9 +282,14 @@ class PlayerToggleView(View):
             color=discord.Color.blurple()
         )
         if self.state.selected:
+            # One comma-joined line rather than one line per player, so this
+            # is clamped directly instead of chunked. Same 1024 limit.
+            value = ", ".join(f"`{truncate_cell(p, _NAME_COL)}`" for p in self.state.selected)
+            if len(value) > EMBED_FIELD_LIMIT:
+                value = value[:EMBED_FIELD_LIMIT - 3] + "..."
             embed.add_field(
                 name=i18n.t('ladder.step1.selected_label', lang),
-                value=", ".join(f"`{p}`" for p in self.state.selected),
+                value=value,
                 inline=False
             )
         return embed
@@ -485,13 +504,22 @@ class OpponentEntryView(View):
         for i, o in enumerate(self.state.opponents):
             icon  = "✅" if o['name'] != '-' else "⬜"
             ovr   = f"  DEF:{o['def_ovr']}" if o['def_ovr'] else ""
-            entry = f"{icon} `#{i+1}` {o['name']}{ovr}"
+            # Opponent names arrive from a free-text modal (1600 chars for
+            # the whole CSV), so one of them can overrun the 1024-character
+            # field limit unaided and take the whole message down with it.
+            entry = f"{icon} `#{i+1}` {truncate_cell(o['name'], _NAME_COL)}{ovr}"
             if i < 8:
                 lines_1.append(entry)
             else:
                 lines_2.append(entry)
-        embed.add_field(name=i18n.t('ladder.step2.slots1_8', lang),  value="\n".join(lines_1), inline=True)
-        embed.add_field(name=i18n.t('ladder.step2.slots9_16', lang), value="\n".join(lines_2), inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(lines_1, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step2.slots1_8', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(lines_2, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step2.slots9_16', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
         return embed
 
 
@@ -695,23 +723,35 @@ class ReorderView(View):
             color=discord.Color.purple()
         )
 
+        # Same 1024-per-field limit that broke build_final_embed below, and
+        # the same cause if it ever fires here: these join one line per slot
+        # with no budget. Names are clamped so a single long one can't
+        # overrun the field on its own, and the join is chunked so sixteen
+        # ordinary ones can't either.
         our_lines = []
         for rank, idx in enumerate(self.our_order):
             ign    = self.state.selected[idx]
             p      = next((x for x in self.state.players if x['ign'] == ign), {})
             pwr    = f"{p['pwr_rank']:.1f}" if p.get('pwr_rank') else '-'
             marker = "**>**" if self.panel == 'ours' and rank == self.our_cursor else "   "
-            our_lines.append(f"{marker} `{rank+1:02d}` {ign} *({pwr})*")
+            our_lines.append(f"{marker} `{rank+1:02d}` {truncate_cell(ign, _NAME_COL)} *({pwr})*")
 
         opp_lines = []
         for rank, idx in enumerate(self.opp_order):
             opp    = self.state.opponents[idx]
             def_s  = str(opp['def_ovr']) if opp['def_ovr'] else '-'
             marker = "**>**" if self.panel == 'opps' and rank == self.opp_cursor else "   "
-            opp_lines.append(f"{marker} `{rank+1:02d}` {opp['name']} *(DEF {def_s})*")
+            opp_lines.append(
+                f"{marker} `{rank+1:02d}` {truncate_cell(opp['name'], _NAME_COL)} *(DEF {def_s})*")
 
-        embed.add_field(name=i18n.t('ladder.step4.field_our', lang), value="\n".join(our_lines), inline=True)
-        embed.add_field(name=i18n.t('ladder.step4.field_opp', lang), value="\n".join(opp_lines), inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(our_lines, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step4.field_our', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(opp_lines, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step4.field_opp', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
         return embed
 
 
@@ -745,32 +785,31 @@ def build_final_embed(state: LadderState,
     col_player   = i18n.t('ladder.final.col_player', lang)
     col_opponent = i18n.t('ladder.final.col_opponent', lang)
     rows = [
-        f"{'#':>2}  {col_player:<18}  vs  {col_opponent:<18}  {'TOT':>5}  {'DEF':>5}",
+        f"{'#':>2}  {truncate_cell(col_player, _NAME_COL):<{_NAME_COL}}  vs  "
+        f"{truncate_cell(col_opponent, _NAME_COL):<{_NAME_COL}}  {'TOT':>5}  {'DEF':>5}",
         "-" * 62
     ]
     for slot in range(MATCHUP_SIZE):
         our_idx = our_order[slot]
         opp_idx = opp_order[slot]
-        player  = state.selected[our_idx]
+        player  = truncate_cell(state.selected[our_idx], _NAME_COL)
         opp     = state.opponents[opp_idx]
+        name    = truncate_cell(opp['name'], _NAME_COL)
         tot_str = str(opp['total_ovr']) if opp['total_ovr'] else '-'
         def_str = str(opp['def_ovr'])   if opp['def_ovr']   else '-'
         rows.append(
-            f"{slot+1:>2}  {player:<18}  vs  {opp['name']:<18}  {tot_str:>5}  {def_str:>5}"
+            f"{slot+1:>2}  {player:<{_NAME_COL}}  vs  {name:<{_NAME_COL}}  {tot_str:>5}  {def_str:>5}"
         )
 
-    chunks, current, cur_len = [], [], 0
-    for row in rows:
-        if cur_len + len(row) + 1 > 1985:
-            chunks.append("\n".join(current))
-            current, cur_len = [row], len(row)
-        else:
-            current.append(row)
-            cur_len += len(row) + 1
-    if current:
-        chunks.append("\n".join(current))
-
-    for i, chunk in enumerate(chunks):
+    # This used to chunk at 1985 characters, which is a *description* budget,
+    # not a field one — and then wrap each chunk in a code fence on top. An
+    # embed field's value is capped at 1024, and Discord rejects the whole
+    # message with a 400 if any field exceeds it. A full 16-slot ladder is
+    # 18 lines of 60-62 characters, i.e. ~1100 before the fence, so this
+    # never fit: /ladder's final step failed every single time it was run to
+    # completion. Caught from a real traceback once discord.py's logging was
+    # actually configured (see logger_config).
+    for i, chunk in enumerate(chunk_lines_to_fit(rows, max_chars=_TABLE_BUDGET, max_chunks=4)):
         embed.add_field(
             name=i18n.t('ladder.final.field_matchups', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
             value=f"```\n{chunk}\n```",

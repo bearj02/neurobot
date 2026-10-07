@@ -9221,6 +9221,157 @@ class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Do not reorder", prompt)
 
 
+class TestLadderEmbedFieldLimits(unittest.IsolatedAsyncioTestCase):
+    """
+    Reproduces the reported production crash, from a real traceback:
+
+        Ladder UI error in step 4 (reorder): HTTPException: 400 Bad Request
+        (error code: 50035): Invalid Form Body
+        In embeds.0.fields.1.value: Must be 1024 or fewer in length.
+
+    build_final_embed chunked its table at 1985 characters — a *description*
+    budget, not a field one — and then wrapped each chunk in a code fence,
+    which costs 8 more. An embed field's value is capped at 1024 and Discord
+    rejects the entire message if any field exceeds it.
+
+    A full 16-slot ladder is 18 lines of 60-62 characters: ~1099 plus the
+    fence. It was never under the limit, so /ladder's final step failed every
+    single time it was run to completion, regardless of how long the names
+    were.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import ladder_flow
+        self.lf = ladder_flow
+        for i in range(15):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, def_ovr, total_ovr) "
+                "VALUES ('RX',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _state(self, opp_name_len=12):
+        players = await db.get_team_stats("RX")
+        state = self.lf.LadderState("RX", "2026-10-07", MagicMock(), lang='en')
+        state.players = [dict(p) for p in players]
+        state.selected = [p['ign'] for p in state.players[:self.lf.MATCHUP_SIZE]]
+        state.opponents = [
+            {'name': ('Opp%d' % i).ljust(opp_name_len, 'x'),
+             'total_ovr': 6400 + i, 'def_ovr': 210 + i}
+            for i in range(self.lf.MATCHUP_SIZE)
+        ]
+        return state
+
+    @staticmethod
+    def _field_values(embed):
+        """The stub's Embed keeps no real .fields list — add_field is a plain
+        mock, so embed.fields is always [] no matter what was passed. Inspect
+        the recorded calls instead (the same approach the siege field-limit
+        tests use)."""
+        return [(c.kwargs.get("name", ""), c.kwargs.get("value", ""))
+                for c in embed.add_field.call_args_list]
+
+    async def test_final_embed_fields_stay_within_the_1024_limit(self):
+        state = await self._state()
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        fields = self._field_values(embed)
+        self.assertTrue(fields, "no fields were added at all")
+        for name, value in fields:
+            self.assertLessEqual(len(value), 1024,
+                                 f"field {name!r} is {len(value)} chars — Discord rejects the message")
+        self.assertLessEqual(len(fields), 25)
+
+    async def test_the_full_table_really_would_have_overflowed(self):
+        """Guards the test above against passing for the wrong reason. If a
+        16-slot table ever got short enough to fit in one field, the test
+        would still pass with the bug reintroduced — so assert the premise:
+        the whole table, joined and fenced the old way, is over the limit."""
+        state = await self._state()
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        table_fields = [v for n, v in self._field_values(embed) if v.startswith("```")]
+        # Strip each chunk's fence and rejoin to recover the whole table.
+        whole = sum(len(v) - 8 for v in table_fields)
+        self.assertGreater(whole, 1024,
+                           "fixture no longer exercises the overflow this test exists for")
+        self.assertGreater(len(table_fields), 1, "the table should have been split across fields")
+
+    async def test_a_pathologically_long_opponent_name_cannot_overflow_a_field(self):
+        """Opponent names come from a free-text modal with max_length=1600 for
+        the whole CSV, so one name alone can exceed the field limit. Chunking
+        cannot help there — a chunker only splits between lines — so the
+        column has to be truncated."""
+        state = await self._state()
+        state.opponents[3]['name'] = "W" * 900
+        state.selected[5] = "P" * 900
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed on a long name")
+
+    async def test_reorder_step_embed_also_stays_within_the_limit(self):
+        """Step 4's own embed joins one line per slot into a single field the
+        same way, and it is redrawn on every cursor and move click — so if it
+        overflows, every button in the step fails, not just Confirm."""
+        state = await self._state()
+        state.opponents[0]['name'] = "Z" * 600
+        view = self.lf.ReorderView(state)
+        embed = view._build_embed()
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+            self.assertGreaterEqual(len(value), 1, f"field {name!r} is empty — Discord rejects that too")
+
+    async def test_opponent_entry_embed_stays_within_the_limit(self):
+        state = await self._state()
+        state.opponents[9]['name'] = "Q" * 700
+        view = self.lf.OpponentEntryView(state)
+        embed = view._build_embed()
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+            self.assertGreaterEqual(len(value), 1)
+
+    async def test_player_toggle_embed_stays_within_the_limit(self):
+        state = await self._state()
+        view = self.lf.PlayerToggleView(state)
+        # Set this *after* construction on purpose: PlayerToggleView.__init__
+        # runs sanitize_selection, which drops any ign not in the pool — so
+        # assigning long names before it would leave `selected` empty, no
+        # field would be added, and the assertion below would pass without
+        # checking anything.
+        view.state.selected = ["N" * 300 for _ in range(self.lf.MATCHUP_SIZE)]
+        embed = view._build_embed()
+        values = [v for _, v in self._field_values(embed)]
+        self.assertTrue(values, "fixture did not produce the selected-players field")
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+
+    def test_truncate_cell_marks_the_cut_and_respects_the_width(self):
+        from utils import truncate_cell
+        self.assertEqual(truncate_cell("short", 18), "short")
+        self.assertEqual(len(truncate_cell("x" * 50, 18)), 18)
+        self.assertTrue(truncate_cell("x" * 50, 18).endswith(".."))
+        self.assertEqual(truncate_cell(None, 18), "-")
+        self.assertEqual(truncate_cell("", 18), "-")
+
+    def test_siege_still_exposes_the_chunker_under_its_old_name(self):
+        """The implementation moved to utils so ladder_flow could share it
+        rather than grow a second copy that drifts. siege keeps the old
+        private alias so nothing referencing it had to change."""
+        import siege
+        import utils
+        self.assertIs(siege._chunk_lines_to_fit, utils.chunk_lines_to_fit)
+
+    def test_the_code_fence_overhead_is_subtracted_from_the_budget(self):
+        """The specific arithmetic error behind the crash: budgeting the full
+        field limit and then wrapping the chunk anyway."""
+        self.assertEqual(self.lf._TABLE_BUDGET, 1024 - 8)
+
+
 class TestLoggingConfiguration(unittest.TestCase):
     """
     discord.py only calls its own setup_logging() inside Client.run(). This
