@@ -6708,6 +6708,40 @@ class TestBundledDisplayFonts(unittest.TestCase):
                                  f'{name} uses the retired Nabla font')
 
 
+class TestRankTableLadderColumns(unittest.TestCase):
+    """/rank shows every player's ladder rank and their position by it."""
+
+    def _rows(self, players):
+        import sheet_image
+        headers, aligns, rows = sheet_image._rank_table_rows(players)
+        self.assertEqual(len(headers), len(aligns))
+        return headers, [dict(zip(headers, r)) for r in rows]
+
+    def test_ladder_rank_and_position_shown_for_every_player(self):
+        # Sorted by pwr_rank (as get_rank_table returns), but ladder order differs.
+        players = [
+            {'ign': 'A', 'pwr_rank': 90.0, 'ladder_rank': 50.0},
+            {'ign': 'B', 'pwr_rank': 80.0, 'ladder_rank': 70.0},
+            {'ign': 'C', 'pwr_rank': 70.0, 'ladder_rank': 60.0},
+        ]
+        headers, rows = self._rows(players)
+        self.assertIn('Ladder Rank', headers)
+        self.assertEqual([r['Player'] for r in rows], ['A', 'B', 'C'])  # pwr order kept
+        self.assertEqual([r['Ladder Rank'] for r in rows], ['50.00', '70.00', '60.00'])
+        self.assertEqual([r['Ldr #'] for r in rows], ['3', '1', '2'])
+
+    def test_zero_ladder_rank_is_a_value_and_missing_gets_no_position(self):
+        players = [
+            {'ign': 'A', 'pwr_rank': 90.0, 'ladder_rank': None},
+            {'ign': 'B', 'pwr_rank': 80.0, 'ladder_rank': 0.0},
+        ]
+        _, rows = self._rows(players)
+        self.assertEqual(rows[0]['Ladder Rank'], '--')
+        self.assertEqual(rows[0]['Ldr #'], '--')
+        self.assertEqual(rows[1]['Ladder Rank'], '0.00')
+        self.assertEqual(rows[1]['Ldr #'], '1')
+
+
 class TestLadderRowFieldsAndCentering(unittest.TestCase):
     """
     Covers the ladder row readouts: our side showing *offensive* OVR (not a

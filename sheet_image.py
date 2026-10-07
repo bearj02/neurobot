@@ -245,6 +245,39 @@ def _render_table(title, headers, rows, aligns=None, subtitle=None):
 # Rank table
 # ---------------------------------------------------------------------------
 
+def _rank_table_rows(players):
+    """
+    /rank's headers, aligns and rows for a roster already sorted by pwr_rank
+    (db.get_rank_table). Alongside the power ranking it shows each player's
+    ladder rank score and their position by it ('Ldr #'), since the table
+    is ordered by pwr_rank and the two orders usually differ.
+    """
+    headers = ['#', 'Player', 'Pwr Rank', 'Ladder Rank', 'Ldr #', 'OVR', 'Games', 'Yearly', '7-Day', 'Kobes']
+    aligns  = ['R', 'L',      'R',        'R',           'R',     'R',   'R',     'R',      'R',     'R']
+
+    # Position by ladder_rank, best first. Players with no ladder_rank get no
+    # position rather than being ranked last as if they'd scored 0.
+    ranked = sorted((r for r in players if r.get('ladder_rank') is not None),
+                    key=lambda r: r['ladder_rank'], reverse=True)
+    ladder_pos = {id(r): n for n, r in enumerate(ranked, 1)}
+
+    rows = []
+    for i, r in enumerate(players, 1):
+        rows.append([
+            str(i),
+            str(r['ign'] or ''),
+            f"{r['pwr_rank']:.2f}"    if r.get('pwr_rank')                  else '--',
+            f"{r['ladder_rank']:.2f}" if r.get('ladder_rank') is not None   else '--',
+            str(ladder_pos.get(id(r), '--')),
+            str(r.get('total_ovr')    or '--'),
+            str(r.get('games')        or '--'),
+            f"{r['avg_yearly']:.2f}"  if r.get('avg_yearly')                else '--',
+            f"{r['avg_7day']:.2f}"    if r.get('avg_7day')                  else '--',
+            str(r.get('kobes')        or '--'),
+        ])
+    return headers, aligns, rows
+
+
 async def send_rank_image(ctx, team_id, conn=None, season_label=None, league_name=None, **kwargs):
     """Fetch roster from DB, render as PNG, send as file.
     conn: optional archive connection (see db.get_archive_conn) for /legacy.
@@ -259,20 +292,7 @@ async def send_rank_image(ctx, team_id, conn=None, season_label=None, league_nam
             return
 
         league  = league_name or LEAGUE_NAMES.get(team_id, team_id)
-        headers = ['#', 'Player', 'Pwr Rank', 'OVR', 'Games', 'Yearly', '7-Day', 'Kobes']
-        aligns  = ['R', 'L',      'R',        'R',   'R',     'R',      'R',     'R']
-        rows = []
-        for i, r in enumerate(players, 1):
-            rows.append([
-                str(i),
-                str(r['ign'] or ''),
-                f"{r['pwr_rank']:.2f}"   if r.get('pwr_rank')   else '--',
-                str(r.get('total_ovr')   or '--'),
-                str(r.get('games')       or '--'),
-                f"{r['avg_yearly']:.2f}" if r.get('avg_yearly') else '--',
-                f"{r['avg_7day']:.2f}"   if r.get('avg_7day')   else '--',
-                str(r.get('kobes')       or '--'),
-            ])
+        headers, aligns, rows = _rank_table_rows(players)
 
         title = f"{league} - Power Rankings"
         if season_label:
