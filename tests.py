@@ -9369,7 +9369,78 @@ class TestLadderEmbedFieldLimits(unittest.IsolatedAsyncioTestCase):
     def test_the_code_fence_overhead_is_subtracted_from_the_budget(self):
         """The specific arithmetic error behind the crash: budgeting the full
         field limit and then wrapping the chunk anyway."""
+        import utils
         self.assertEqual(self.lf._TABLE_BUDGET, 1024 - 8)
+        self.assertEqual(utils.CODE_FENCE_OVERHEAD, len("```\n") + len("\n```"))
+        self.assertEqual(utils.FENCED_FIELD_LIMIT, utils.EMBED_FIELD_LIMIT - utils.CODE_FENCE_OVERHEAD)
+
+    def test_the_two_fenced_field_sites_budget_against_the_fenced_limit(self):
+        """Both places that wrap a field value in ``` must size the body
+        against FENCED_FIELD_LIMIT, not the raw 1024. Getting this wrong is
+        what broke /ladder's final embed and /test, so it's pinned in source
+        — neither function can be called directly (one needs a live
+        interaction, the other is @tree.command-decorated)."""
+        for mod, marker in (("ladder_flow.py", "_TABLE_BUDGET = FENCED_FIELD_LIMIT"),
+                            ("optimized_bot.py", "max_chars=FENCED_FIELD_LIMIT")):
+            with open(os.path.join(os.path.dirname(__file__), mod), encoding="utf-8") as f:
+                src = f.read()
+            with self.subTest(module=mod):
+                self.assertIn(marker, src)
+                self.assertNotIn("> 1020", src, f"{mod} still clamps to the pre-fence 1020")
+
+
+class TestTestCommandOutput(unittest.TestCase):
+    """
+    /test failed with the same 1024 error it exists to help diagnose:
+
+        Slash command error in /test: HTTPException: 400 Bad Request
+        In embeds.0.fields.1.value: Must be 1024 or fewer in length.
+
+    It clamped the failure text to 1020 characters and then wrapped it in a
+    code fence (+8), sending 1028. So /test reported nothing at all exactly
+    when it had the most to report.
+    """
+
+    def test_failure_detail_is_chunked_within_the_fenced_budget(self):
+        import utils
+        # A realistic multi-failure run: unittest -v emits several lines per
+        # failure, easily past a single field.
+        fail_lines = []
+        for i in range(40):
+            fail_lines += [
+                f"FAIL: test_some_reasonably_long_test_name_number_{i} (tests.TestSomething)",
+                "-" * 70,
+                "Traceback (most recent call last):",
+                f'  File "tests.py", line {1000 + i}, in test_some_reasonably_long_test_name_number_{i}',
+                "    self.assertEqual(expected, actual)",
+                "AssertionError: 1024 != 1028",
+            ]
+        chunks = utils.chunk_lines_to_fit(
+            fail_lines, max_chars=utils.FENCED_FIELD_LIMIT, max_chunks=4)
+        self.assertTrue(chunks)
+        for chunk in chunks:
+            fenced = f"```\n{chunk}\n```"
+            self.assertLessEqual(len(fenced), 1024,
+                                 f"fenced field is {len(fenced)} chars — Discord rejects the message")
+        self.assertLessEqual(len(chunks), 4)
+
+    def test_the_old_clamp_really_did_overflow(self):
+        """Proves the fix is not cosmetic: 1020 + a fence is 1028."""
+        detail = "x" * 1020
+        self.assertGreater(len(f"```\n{detail}\n```"), 1024)
+
+    def test_test_command_attaches_the_full_output(self):
+        """Chunking caps at four fields, so a long run still loses detail in
+        the embed. The whole stdout+stderr goes out as a file so nothing is
+        lost, and that send is wrapped so a missing Attach Files permission
+        degrades to the embed alone rather than failing the command."""
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"), encoding="utf-8") as f:
+            src = f.read()
+        start = src.index("async def test_slash")
+        body = src[start:start + 4000]
+        self.assertIn("discord.File", body)
+        self.assertIn("tests.txt", body)
+        self.assertIn("except discord.HTTPException", body)
 
 
 class TestLoggingConfiguration(unittest.TestCase):

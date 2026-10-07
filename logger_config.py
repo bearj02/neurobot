@@ -59,6 +59,7 @@ _DEFAULT_DATEFMT = "%Y-%m-%d %H:%M:%S"
 APP_LOGGER_NAME = "global_logger"
 
 _configured = False
+_last_applied: dict | None = None
 
 
 def _env_level(var: str, default: int) -> int:
@@ -155,14 +156,21 @@ def configure_logging(force: bool = False) -> logging.Logger:
         # every record a second time.
         logger.propagate = False
 
+    global _last_applied
     _configured = True
-    logging.getLogger(APP_LOGGER_NAME).info(
-        "Logging configured — app=%s discord=%s http=%s gateway=%s",
-        logging.getLevelName(targets[APP_LOGGER_NAME]),
-        logging.getLevelName(targets["discord"]),
-        logging.getLevelName(targets["discord.http"]),
-        logging.getLevelName(targets["discord.gateway"]),
-    )
+    # Announce only when the resolved levels actually changed. This runs
+    # twice on every startup by design — once at import, once after
+    # load_dotenv() — and logging an identical line both times just reads as
+    # something having gone wrong.
+    if targets != _last_applied:
+        logging.getLogger(APP_LOGGER_NAME).info(
+            "Logging configured — app=%s discord=%s http=%s gateway=%s",
+            logging.getLevelName(targets[APP_LOGGER_NAME]),
+            logging.getLevelName(targets["discord"]),
+            logging.getLevelName(targets["discord.http"]),
+            logging.getLevelName(targets["discord.gateway"]),
+        )
+        _last_applied = dict(targets)
     return logging.getLogger(APP_LOGGER_NAME)
 
 

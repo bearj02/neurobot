@@ -19,7 +19,8 @@ import asyncio
 from logger_config import global_logger as logger
 import db
 import i18n
-from utils import EMBED_FIELD_LIMIT, chunk_lines_to_fit, truncate_cell
+from utils import (EMBED_FIELD_LIMIT, FENCED_FIELD_LIMIT,
+                   chunk_lines_to_fit, truncate_cell)
 
 MATCHUP_SIZE     = 16  # how many of a league's active/rostered players actually play a given ladder — see this file's header docstring for the playing-vs-active distinction
 PLAYERS_PER_PAGE = 20
@@ -31,11 +32,9 @@ PLAYERS_PER_PAGE = 20
 # chunking can fix.
 _NAME_COL = 18
 
-# A code fence costs 8 characters ("```\n" + chunk + "\n```") and they count
-# toward the same 1024 Discord allows for the whole field value, so the
-# chunks themselves have to be budgeted smaller than the limit.
-_CODE_FENCE_OVERHEAD = len("```\n") + len("\n```")
-_TABLE_BUDGET = EMBED_FIELD_LIMIT - _CODE_FENCE_OVERHEAD
+# The table is wrapped in a code fence, so it gets the fenced budget — see
+# utils.CODE_FENCE_OVERHEAD for why that is not just EMBED_FIELD_LIMIT.
+_TABLE_BUDGET = FENCED_FIELD_LIMIT
 SORT_OPTION_KEYS = [
     ("ladder.sort.pwr_rank",    "pwr_rank"),
     ("ladder.sort.yearly_avg",  "avg_yearly"),

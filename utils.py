@@ -12,6 +12,14 @@ from logger_config import global_logger as logger
 # called, never caught afterwards.
 EMBED_FIELD_LIMIT = 1024
 
+# A markdown code fence costs 8 characters ("```\n" + body + "\n```") and
+# they count toward EMBED_FIELD_LIMIT like any others. Budgeting the full
+# 1024 for the body and then wrapping it is how both build_final_embed and
+# /test came to send fields of 1028-1107 characters, which Discord rejects
+# outright. Anything fencing a field value budgets FENCED_FIELD_LIMIT.
+CODE_FENCE_OVERHEAD = len("```\n") + len("\n```")
+FENCED_FIELD_LIMIT = EMBED_FIELD_LIMIT - CODE_FENCE_OVERHEAD
+
 
 def truncate_cell(text, width: int) -> str:
     """

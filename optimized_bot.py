@@ -8,6 +8,7 @@ keep their prefix style but get confirmation embeds and buttons.
 """
 
 import os
+import io
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -34,6 +35,7 @@ from newday import newday, eastern_today
 from tournament import TournamentManager
 tournaments = TournamentManager()
 from logger_config import global_logger as logger, configure_logging
+from utils import EMBED_FIELD_LIMIT, FENCED_FIELD_LIMIT, chunk_lines_to_fit
 
 # ============================================================================
 # CONFIGURATION
@@ -1857,8 +1859,12 @@ async def _build_dscores_embed(player: str, start_date, end_date, lang: str,
         if idx == len(pages) - 1:
             block_lines += footer
         value = "```\n" + "\n".join(block_lines) + "\n```"
-        if len(value) > 1020:
-            value = "```\n" + "\n".join(block_lines[:15]) + "\n...```"
+        if len(value) > EMBED_FIELD_LIMIT:
+            # The old fallback took the first 15 lines, which guarantees
+            # nothing — 15 long ones still overflow. Chunking to a single
+            # fenced-budget chunk does, and carries its own "...and N more".
+            kept = chunk_lines_to_fit(block_lines, max_chars=FENCED_FIELD_LIMIT, max_chunks=1)
+            value = f"```\n{kept[0]}\n```" if kept else "```\n...\n```"
         embed.add_field(
             name=(i18n.t('dscores.field.paged', lang, page=idx + 1, total=len(pages))
                   if len(pages) > 1 else i18n.t('dscores.field.entries', lang)),
@@ -3835,9 +3841,13 @@ async def _build_history_embed(player: str, start_date, end_date, lang: str, con
         if idx == len(pages) - 1:
             block_lines += footer
         value = "```\n" + "\n".join(block_lines) + "\n```"
-        # Safety check — truncate if somehow still over 1024
-        if len(value) > 1020:
-            value = "```\n" + "".join(block_lines[:15]) + "...```"
+        # Safety check — the old one took the first 15 lines, which is not
+        # actually a bound (15 long rows still overflow). Chunking to a
+        # single fenced-budget chunk is, and it keeps the line breaks the
+        # old "".join silently dropped.
+        if len(value) > EMBED_FIELD_LIMIT:
+            kept = chunk_lines_to_fit(block_lines, max_chars=FENCED_FIELD_LIMIT, max_chunks=1)
+            value = f"```\n{kept[0]}\n```" if kept else "```\n...\n```"
         embed.add_field(
             name=i18n.t('history.field.scores_paged', lang, page=idx+1, total=len(pages)) if len(pages) > 1 else i18n.t('history.field.scores', lang),
             value=value,
@@ -4855,13 +4865,36 @@ async def test_slash(interaction: discord.Interaction):
                 fail_lines.append(line)
             if in_block and line.startswith("---"):
                 in_block = False
-        detail = "\n".join(fail_lines)
-        if len(detail) > 1020:
-            detail = detail[:1017] + "..."
-        if detail:
-            embed.add_field(name=i18n.t('test_cmd.field_failures', lang), value=f"```\n{detail}\n```", inline=False)
 
-    await interaction.followup.send(embed=embed)
+        # This used to clamp the joined text to 1020 and *then* wrap it in a
+        # code fence, which adds 8 — so a long failure list was sent as a
+        # 1028-character field and Discord rejected the whole message with
+        # `embeds.0.fields.1.value: Must be 1024 or fewer in length`. Exactly
+        # the arithmetic error behind the /ladder final embed. The upshot was
+        # that /test reported nothing at all precisely when it had the most
+        # to report.
+        #
+        # Chunked rather than truncated for the same reason: one 1016-char
+        # window off the front of a multi-failure run is rarely the part you
+        # need.
+        for i, chunk in enumerate(chunk_lines_to_fit(
+                fail_lines, max_chars=FENCED_FIELD_LIMIT, max_chunks=4)):
+            embed.add_field(
+                name=i18n.t('test_cmd.field_failures', lang) if i == 0
+                     else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=f"```\n{chunk}\n```", inline=False)
+
+    # The full stdout+stderr as an attachment, so nothing is lost to the
+    # embed limits no matter how many tests failed. Best-effort: if the bot
+    # lacks Attach Files in this channel the embed still goes out on its own.
+    try:
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(io.BytesIO(output.encode("utf-8")), filename="tests.txt"),
+        )
+    except discord.HTTPException as e:
+        logger.warning(f"/test could not attach the full output ({e}); sending the embed alone")
+        await interaction.followup.send(embed=embed)
 
 
 
