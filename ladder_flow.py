@@ -363,11 +363,14 @@ class LadderMatchupInfoModal(Modal, title="Matchup Info"):
         if state.our_rank:
             self.rank.default = str(state.our_rank)
 
-    async def on_submit(self, interaction: discord.Interaction):
+    def apply_to_state(self):
         self.state.opponent_league_name = self.opp_name.value.strip() or None
         self.state.event_type = self.division.value.strip().upper() or None
         rank_val = self.rank.value.strip()
         self.state.our_rank = int(rank_val) if rank_val.isdigit() else None
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.apply_to_state()
         await interaction.response.defer()
 
 
@@ -419,9 +422,11 @@ class OpponentEntryView(View):
         modal = LadderMatchupInfoModal(self.state)
 
         async def on_submit(inter):
-            await LadderMatchupInfoModal.on_submit(modal, inter)
+            modal.apply_to_state()
             self._rebuild()
-            await inter.message.edit(embed=self._build_embed(), view=self)
+            # Update the ladder message AS the response to this submit — see
+            # _enter's on_submit for why this must not be inter.message.edit.
+            await inter.response.edit_message(embed=self._build_embed(), view=self)
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
@@ -450,12 +455,20 @@ class OpponentEntryView(View):
             modal.opponents.default = existing
 
         async def on_submit(inter):
-            await OpponentCSVModal.on_submit(modal, inter)
             parsed = _parse_csv_opponents(modal.opponents.value)
             for i, opp in enumerate(parsed[:MATCHUP_SIZE]):
                 self.state.opponents[i] = opp
             self._rebuild()
-            await inter.message.edit(embed=self._build_embed(), view=self)
+            # Must be the interaction response, NOT defer() + inter.message.edit().
+            # message.edit goes through the channel REST endpoint, which needs the
+            # bot to have View Channel there; an interaction response needs no
+            # channel permissions at all. On Reborn the bot couldn't see the
+            # ladder channel, so the edit raised 403 Missing Access (50001) —
+            # after _rebuild() had already swapped in buttons with new custom
+            # ids. Discord kept showing the old buttons, so the next click
+            # (Done) carried an id the bot no longer knew and discord.py
+            # discarded it: "This interaction failed", no handler ever ran.
+            await inter.response.edit_message(embed=self._build_embed(), view=self)
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
@@ -709,8 +722,10 @@ class ReorderView(View):
         )
         if not await _save_or_report(interaction, self.state, self.our_order, self.opp_order):
             return
-        channel = interaction.channel or self.state.channel
-        await channel.send(embed=embed)
+        # Posted through the interaction's followup webhook, not channel.send:
+        # the latter needs Send Messages/Embed Links in the channel, the former
+        # needs nothing (same reasoning as the modal submits in step 2).
+        await interaction.followup.send(embed=embed)
 
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang

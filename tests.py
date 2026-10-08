@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import types
 logger_stub = types.ModuleType("logger_config")
 logger_stub.global_logger = MagicMock()
+logger_stub.configure_logging = lambda force=False: logger_stub.global_logger
 sys.modules.setdefault("logger_config", logger_stub)
 
 # Stub discord so tests can import optimized_bot and ladder_flow
@@ -3899,7 +3900,11 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         with patch.object(ladder_flow, "save_ladder_to_db", spy):
             await view._confirm(inter)
         self.assertEqual(answered_at_save, [True])
-        inter.channel.send.assert_awaited_once()
+        # Posted via the interaction webhook, never channel.send (which needs
+        # channel permissions the Reborn bot didn't have).
+        inter.channel.send.assert_not_awaited()
+        self.assertEqual(len(inter.followup.messages), 1)
+        self.assertIsNotNone(inter.followup.messages[0]["embed"])
 
     async def test_save_failure_is_reported_not_swallowed(self):
         """A save that raises after the click is answered must reach the user
@@ -3919,7 +3924,50 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
             await view._confirm(inter)
         self.assertEqual(len(inter.followup.messages), 1)
         self.assertIn("database is locked", inter.followup.messages[0]["content"])
+        self.assertIsNone(inter.followup.messages[0]["embed"])   # no ladder posted
         inter.channel.send.assert_not_awaited()
+
+    async def test_step2_modal_submits_need_no_channel_permissions(self):
+        """The real Reborn failure: the bot couldn't see the ladder channel, so
+        the post-paste inter.message.edit() raised 403 Missing Access (50001)
+        after the view had already rebuilt its buttons with new ids — and the
+        next click (Done) was discarded as an unknown view. Both step-2 modal
+        submits must update the message as the interaction response, which
+        needs no channel permissions."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+
+        class _NoAccessMessage:
+            async def edit(self, **kw):
+                raise RuntimeError("403 Forbidden (error code: 50001): Missing Access")
+
+        state = LadderState("RX", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        view = OpponentEntryView(state)
+
+        # paste opponents
+        opener = _FakeInteraction()
+        await view._enter(opener)
+        modal = opener.response.modals[0]
+        modal.opponents.value = "\n".join(f"T{i}, 7000, {200+i}" for i in range(MATCHUP_SIZE))
+        sub = _FakeInteraction()
+        sub.message = _NoAccessMessage()
+        await modal.on_submit(sub)
+        self.assertEqual(len(sub.response.edits), 1, "paste must update via the interaction response")
+        self.assertIs(sub.response.edits[0]["view"], view)
+        self.assertEqual(sum(o["name"] != "-" for o in state.opponents), MATCHUP_SIZE)
+
+        # matchup info
+        opener = _FakeInteraction()
+        await view._edit_matchup_info(opener)
+        modal = opener.response.modals[0]
+        modal.opp_name.value, modal.division.value, modal.rank.value = "Gridiron", "e1", "219"
+        sub = _FakeInteraction()
+        sub.message = _NoAccessMessage()
+        await modal.on_submit(sub)
+        self.assertEqual(len(sub.response.edits), 1)
+        self.assertEqual((state.opponent_league_name, state.event_type, state.our_rank),
+                         ("Gridiron", "E1", 219))
 
     async def test_upsert_ladder_slots_is_all_or_nothing(self):
         """One bad slot (opp_ign is NOT NULL) must not leave the good ones
@@ -9458,7 +9506,13 @@ class TestLoggingConfiguration(unittest.TestCase):
 
     def setUp(self):
         import logging
-        import logger_config
+        import importlib.util
+        # The suite stubs logger_config in sys.modules for every other test;
+        # these tests are about the real one, so load it from its file.
+        spec = importlib.util.spec_from_file_location(
+            "_real_logger_config", os.path.join(os.path.dirname(__file__), "logger_config.py"))
+        logger_config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(logger_config)
         self.logging = logging
         self.logger_config = logger_config
         # Keep the suite from dropping a logs/bot.log into the project dir.
@@ -9526,8 +9580,15 @@ class TestLadderUIErrorReporting(unittest.IsolatedAsyncioTestCase):
     show its bare "This interaction failed"."""
 
     def setUp(self):
+        import logging
         import ladder_flow
         self.lf = ladder_flow
+        # logger_config is stubbed suite-wide, so ladder_flow.logger is a
+        # MagicMock and assertLogs would never see anything. Swap in the real
+        # named logger these tests listen on.
+        patcher = patch.object(ladder_flow, "logger", logging.getLogger("global_logger"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     async def test_report_ui_error_logs_and_tells_the_user(self):
         sent = []

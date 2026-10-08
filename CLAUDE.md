@@ -2175,3 +2175,53 @@ teams(id)`, while the ladder's step-1 `UPDATE players` (no FK) works. If the
 new error messages name a foreign-key or "no such table" error, check
 `PRAGMA foreign_key_list(matchup_day)` on `reborn.db` — a table rebuild during
 the NX→RX conversion could have left the FK pointing somewhere else.
+
+## Root cause of the Reborn "Done — Sort & Arrange" failure: channel access (Oct 2026)
+
+Once discord.py's logging was wired up, the console showed it immediately:
+
+```
+ERROR Ladder UI error in step 2 (opponent entry): Forbidden: 403 Forbidden (error code: 50001): Missing Access
+  ladder_flow.py ... await inter.message.edit(embed=self._build_embed(), view=self)
+WARNING discord.ui.view: View interaction referencing unknown view for item <Button ... 'Enter Opponents  (16/16 filled)'>. Discarding
+```
+
+**The bot could not see the ladder channel on the Reborn server.** Interaction
+responses (replying to a slash command or a click) need *no* channel
+permissions, which is why `/ladder` and every button reply worked. But the
+paste modal's handler updated the message with `inter.message.edit()`, which
+goes through the channel REST endpoint and needs View Channel → 403. Worse,
+`_rebuild()` had already replaced the view's buttons (new custom ids) before
+that edit failed, so Discord kept showing the *old* buttons, the next click
+(Done) carried an id the bot no longer knew, and discord.py discarded it with
+only a WARNING. Hence "This interaction failed" with no handler ever running.
+It was never the Madden Admin role — the admin check is by role *name* only.
+The earlier hypotheses in the two sections above (slow commits, FK breakage)
+were wrong; their changes are harmless and stay.
+
+Fixes in `ladder_flow.py`:
+- Both step-2 modal submits update the message via
+  `inter.response.edit_message(...)` instead of `defer()` + `message.edit()`.
+  `LadderMatchupInfoModal.apply_to_state()` was split out so the closure can
+  parse without the base `on_submit`'s `defer()` consuming the response.
+- The final ladder is posted with `interaction.followup.send(embed=...)`
+  instead of `channel.send` (needs Send Messages/Embed Links).
+
+**Rule: in any interaction flow, update and post through the interaction
+(`response.*`, `followup.send`), never through the channel.** Still
+channel-dependent elsewhere: `siege.py`'s finalize post and the GIF sender
+(`optimized_bot.py`'s `gif_sender`). The real fix for those is giving the bot
+View Channel / Send Messages / Embed Links / Attach Files / Read Message
+History in the channels it's used in.
+
+`test_step2_modal_submits_need_no_channel_permissions` reproduces it with a
+message whose `edit()` raises the same 403 — fails on the old code with
+exactly the production error, passes now.
+
+Test-suite note: commit `0e1dc34` added `logger_config.configure_logging`,
+which `optimized_bot` imports, but `tests.py` stubs `logger_config` without
+it — so ~150 tests errored on import (written on a machine with no Python,
+never run). The stub now has a no-op `configure_logging`; the logging tests
+load the real module from file via `importlib`, and
+`TestLadderUIErrorReporting` patches `ladder_flow.logger` with the real
+`global_logger` so `assertLogs` can see it.
