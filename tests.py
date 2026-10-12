@@ -9305,6 +9305,47 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         self.assertIn("401", str(ctx.exception))
 
 
+class TestStartupGuildLog(unittest.TestCase):
+    """on_ready logs which servers the bot is in, not just how many."""
+
+    def setUp(self):
+        import optimized_bot
+        self.ob = optimized_bot
+
+    def _guild(self, name, gid):
+        return types.SimpleNamespace(name=name, id=gid)
+
+    def test_each_server_is_named_with_its_id(self):
+        """The id is what disambiguates two servers with the same name, and
+        survives a rename."""
+        out = self.ob._format_guilds([self._guild("Neuroverse", 123),
+                                      self._guild("Test Server", 456)])
+        self.assertEqual(out, "Neuroverse (123), Test Server (456)")
+
+    def test_no_servers_reads_as_none_not_an_empty_line(self):
+        """A bot in no guilds is a real state worth seeing — a bare
+        'Registered to 0 server(s): ' trailing off looks like a broken log
+        line rather than the answer."""
+        self.assertEqual(self.ob._format_guilds([]), "none")
+
+    def test_on_ready_actually_logs_it(self):
+        """on_ready is @bot.event-decorated, so under this suite's stub it is
+        a MagicMock and cannot be called — check the source instead, the same
+        way /ladder's team_id scoping is pinned."""
+        import ast
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            tree_ = ast.parse(f.read())
+        on_ready = next(
+            (n for n in ast.walk(tree_)
+             if isinstance(n, ast.AsyncFunctionDef) and n.name == "on_ready"), None)
+        self.assertIsNotNone(on_ready, "on_ready is gone")
+        calls = {n.func.id for n in ast.walk(on_ready)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn("_format_guilds", calls,
+                      "on_ready no longer reports which servers it is in")
+
+
 class TestLoggingConfiguration(unittest.TestCase):
     """
     discord.py only calls its own setup_logging() inside Client.run(). This

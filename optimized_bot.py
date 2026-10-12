@@ -2965,9 +2965,29 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
 # BOT EVENTS
 # ============================================================================
 
+def _format_guilds(guilds) -> str:
+    """
+    "Name (id), Name (id)" for the startup log — which servers, not just how
+    many.
+
+    on_ready already logged a count, and a count can't answer the question
+    that actually comes up: someone reports a command missing and the cause
+    is the bot sitting in a different guild than they assume, or in two
+    guilds where one was expected. The id is there because server names are
+    not unique and get renamed.
+
+    Takes the list rather than reading `bot.guilds` so it can be tested
+    directly — `on_ready` is `@bot.event`-decorated and, under this
+    codebase's stub, isn't callable at all (same reason
+    `_handle_app_command_error` was split out of `on_app_command_error`).
+    """
+    return ", ".join(f"{g.name} ({g.id})" for g in guilds) or "none"
+
+
 @bot.event
 async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
+    logger.info("Registered to %d server(s): %s", len(bot.guilds), _format_guilds(bot.guilds))
     try:
         await db.init()
         logger.info("Database ready")
