@@ -456,6 +456,138 @@ checking before assuming it's fully dead the way the two `.sql` files were.
   from League vs League screenshots. **Not yet tested against a real
   screenshot** — this sandbox has no network access to call the live API.
   Worth a real `/ladder` run after any prompt change to confirm accuracy.
+- `agent.py` talks to the API over **raw HTTP via `aiohttp`**, not the
+  `anthropic` SDK. That's deliberate inertia, not a recommendation: the
+  module predates any SDK dependency and the host installs from
+  `requirements.txt` with no shell to fix a bad install with. If it's ever
+  worth switching, that's its own change — don't half-migrate it.
+
+### Structured outputs: the model cannot emit invalid JSON any more
+
+Both extractors send `output_config.format` with a `json_schema`
+(`LADDER_OUTPUT_SCHEMA`, `SEASON_MATCH_OUTPUT_SCHEMA`), which constrains
+decoding to the schema rather than asking the prompt nicely for JSON.
+
+**Why it was added**, because the failure is worth recognising again: a
+live `/ladder` run logged `Expecting value: line 8 column 14 (char 243)`
+against a response reading `{"name": JosoPrime", ...}` — Haiku dropped a
+single opening quote mark, mid-way through 32 near-identical rows, and that
+one character killed the whole command (`optimized_bot.py` catches the
+`ValueError`, posts an error and returns — no retry, no fall-through to the
+manual builder). Everything else in the response was well-formed.
+
+Schema rules, all enforced server-side as a 400 rather than a warning:
+every object needs `additionalProperties: False` **and** a `required` list
+naming *all* its properties; "optional" is therefore expressed as a nullable
+type (`_NULLABLE_STR` / `_NULLABLE_INT`), never by omitting a key from
+`required` — which suits both prompts exactly, since each already asks for
+`null` on anything not legible. Numeric and length constraints (`minimum`,
+`maxLength`, …) are not supported. `_schema_object()` builds a conforming
+object so a new field can't quietly miss one of these. A test walks both
+schemas and fails on any object that breaks a rule.
+
+`event_type`'s schema is an **enum of the five codes the db actually
+stores** (`E1`/`E2`/`E3`/`HOF`/`Gold-`) — the same conversion table the
+system prompt spells out, now enforced. It's written to `matchup_day`
+directly, so `"Elite I"` arriving instead would be a silently wrong
+division.
+
+### One retry, and the two things it deliberately doesn't do
+
+`_post_and_parse()` re-sends the *identical* request once if the reply
+doesn't parse. It covers what a schema can't reach — a response with no text
+block in it, or something transient API-side.
+
+- **It never repairs the broken text.** Guessing where a missing quote
+  belongs is exactly the class of silent-wrong-answer this codebase avoids
+  everywhere else (same reasoning as refusing fuzzy name matching in the
+  ladder flow).
+- **It never retries a `max_tokens` stop.** An identical request is cut off
+  in the identical place; a second call only costs time and money. The
+  caller gets a message saying the token limit was hit, which needs the
+  opposite response from a malformed reply. Both are tested, including that
+  retrying a `max_tokens` stop fails the test.
+
+An HTTP error (401, or a 400 on the schema) isn't retried either — it's a
+request problem, and re-sending can't fix it.
+
+### Extraction logging — what the log must contain
+
+The original handler logged `raw[:500]`, and in the incident above the dump
+stopped **exactly** at 500 characters, mid-row. That looked identical to the
+model running out of tokens. It wasn't — but nothing in the log could tell
+them apart, and the two have opposite fixes. So:
+
+- `_log_api_response()` logs `id`, `model`, **`stop_reason`**, token usage
+  and the attempt number, **before** anything tries to parse the body — so a
+  response with an unexpected shape still leaves a trace.
+- `_log_parse_failure()` logs the whole raw body (capped at `_RAW_LOG_LIMIT`
+  = 20000 purely so a pathological reply can't flood the rotating file, and
+  it says so in the log when the cap bites), plus `_error_context()`, which
+  puts a caret under the exact offset `json` objected to. That window is
+  flattened onto one line — a real newline inside it pushes the caret away
+  from the character it points at, which is the one thing it exists to get
+  right.
+- `logger.debug` carries the full raw body on success too, so a good
+  extraction can be diffed against a bad one. `LOG_LEVEL=DEBUG` on the panel
+  turns it on without a redeploy.
+
+`_response_text()` joins every text block instead of reaching into
+`data["content"][0]["text"]`, which raised an **IndexError** on an empty
+content list — not a `ValueError`, so the caller's `except ValueError` had
+no chance of catching it and the command crashed outright.
+
+**One hypothesis left unproven:** the league was "Brasil MVPs Elite A",
+every other name in that batch was plain ASCII and parsed clean, and
+`JosoPrime` is plausibly `JoãoPrime` — while the prompt demands names
+"exactly as shown, including special characters". That would make the
+non-ASCII row the one where the model wavered. Consistent with this
+project's record of special characters causing extraction trouble, but it's
+a correlation in a single sample, and structured outputs make it moot for
+*syntax* either way (a misread name is still a misread name — that's what
+the manual-match flow is for).
+
+## Logging: discord.py's own loggers had no handler at all
+
+Ported from `reborn_main`. `logger_config.py` configures the app logger
+**and** `discord`, `discord.http`, `discord.gateway`, to stdout plus a
+bounded rotating file (`logs/bot.log`, 5 × 2MB).
+
+The reason this file does more than it looks like it should: **discord.py
+calls its own `setup_logging()` inside `Client.run()`, not `Client.start()`**
+(verified against the v2.7.1 source). This bot uses `await bot.start(TOKEN)`,
+because `safe_start` needs its own retry loop around the 429/Cloudflare case
+and can't use the blocking `run()`. So nothing had ever configured the
+`discord.*` loggers, and every record the library emitted went to a logger
+with no handler — including `discord.ui.view`'s "Ignoring exception in view
+%r for item %r", which carries the traceback behind Discord's bare
+"This interaction failed".
+
+Levels come from the environment so verbosity can be raised on the panel
+without a redeploy: `LOG_LEVEL`, `DISCORD_LOG_LEVEL`, `HTTP_LOG_LEVEL`,
+`GATEWAY_LOG_LEVEL`, plus `LOG_TO_FILE` / `LOG_FILE`. `discord.http` and
+`discord.gateway` default quieter than the rest — at DEBUG they log every
+REST call and every heartbeat respectively, which drowns everything else.
+A nonsense value falls back to the default rather than raising; a typo in a
+panel env var must not stop the bot from starting.
+
+`optimized_bot.py` calls `configure_logging(force=True)` again after
+`load_dotenv()`, since the import-time pass runs before the `.env` is read.
+It's idempotent — it *replaces* handlers rather than appending, or every
+line would print twice.
+
+`ladder_flow.report_ui_error()` plus an `on_error` on all six ladder
+views/modals gets a raising callback's traceback into the log with the step
+name attached, and tells the clicker something true. Reporting is
+best-effort: an already-dead interaction is one of the ways to get there, so
+the followup raising must not mask the original error.
+
+**Test-stub note:** `tests.py` stubs `logger_config` in `sys.modules`
+suite-wide, so `agent.logger` / `ladder_flow.logger` are `MagicMock`s and
+`assertLogs` would never see anything. The tests that assert on log output
+`patch.object(module, "logger", logging.getLogger("global_logger"))` first,
+and `TestLoggingConfiguration` loads the *real* `logger_config` from its
+file via `importlib.util.spec_from_file_location` to get past the stub.
 
 ## Multi-season archive system (/legacy) and /stats
 
@@ -1467,6 +1599,34 @@ argument, so on Windows it decoded as cp1252 and died on the emoji in the
 bot's user-facing strings (`UnicodeDecodeError: 0x8f`) — a pre-existing
 failure invisible on the Linux host. Now passes `encoding="utf-8"`. If a
 future test opens a source file, pass the encoding explicitly.
+
+## The dev machine runs the suite — don't reason about it from the source
+
+Python 3.13 is installed (via `winget`, user scope) with a project venv at
+`.venv/`. **Run the suite with `./.venv/Scripts/python.exe tests.py`**, not
+a bare `python` — see the PATH note below. `.venv/` and `venv/` are
+`.gitignore`d, as are `logs/` and `*.log` (the logging tests write a real
+`logs/bot.log` on the way past; it's a dev artifact, not something to chase).
+
+Two things that are easy to trip over here:
+
+- **`python` on PATH is still the Microsoft Store alias stub**, which prints
+  "Python was not found; run without arguments to install from the Microsoft
+  Store" and exits non-zero. The real interpreter is ahead of
+  `WindowsApps` in the *user* PATH, so a freshly-opened terminal resolves it
+  correctly — but any shell inherited from a process that started before the
+  install still has the stale PATH. Use the venv's interpreter by path and
+  the question doesn't arise.
+- **`tzdata` is required on Windows and is not in `requirements.txt`.**
+  Windows ships no system tz database, so `ZoneInfo("America/New_York")` in
+  `status.py`/`newday.py` raises `ZoneInfoNotFoundError` and takes ~150 tests
+  down with it. The Linux host provides it natively, which is why the
+  requirements file never needed it. It's installed in the venv;
+  `requirements.txt` was deliberately left alone so the deploy doesn't change.
+
+This matters more than it looks: a previous session had no interpreter here
+and had to hand-verify every edit by reading it. The suite is 620+ tests and
+runs in ~45 seconds — there is no reason to guess.
 
 ## Workflow conventions for future sessions
 

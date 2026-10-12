@@ -33,13 +33,26 @@ from sheet_image import send_rank_image, send_stats_image, clear_cache as clear_
 from newday import newday
 from tournament import TournamentManager
 tournaments = TournamentManager()
-from logger_config import global_logger as logger
+from logger_config import global_logger as logger, configure_logging
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
 load_dotenv()
+
+# logger_config configures itself at import, which happens on the line above
+# this block — i.e. before load_dotenv() has run. Re-apply now so a LOG_LEVEL
+# or DISCORD_LOG_LEVEL set in a .env file (rather than as a real environment
+# variable, which is how the host panel supplies them) actually takes effect.
+#
+# This also has to happen because the bot starts with bot.start(), not
+# bot.run(): discord.py only calls its own setup_logging() inside run(), so
+# without this nothing configures discord.* and the library's tracebacks —
+# including the view-callback ones behind "This interaction failed" — go to a
+# logger with no handler. See logger_config's docstring.
+configure_logging(force=True)
+
 TOKEN = os.getenv('DISCORD_TOKEN')
 DEV   = os.getenv('DEV')
 

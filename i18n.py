@@ -1583,6 +1583,13 @@ TRANSLATIONS['ladder.step2.done_btn'] = {
     'en': "Done — Sort & Arrange", 'es': "Listo — Ordenar y Organizar", 'fr': "Terminé — Trier et Organiser",
     'pt': "Concluído — Ordenar e Organizar", 'de': "Fertig — Sortieren & Anordnen",
 }
+TRANSLATIONS['ladder.ui_error'] = {
+    'en': "⚠️ That step failed (`{where}`: `{error}`). Nothing was lost — re-run `/ladder` to pick up where you left off. The full traceback is in the bot log.",
+    'es': "⚠️ Ese paso falló (`{where}`: `{error}`). No se perdió nada — vuelve a ejecutar `/ladder` para continuar donde lo dejaste. El error completo está en el registro del bot.",
+    'fr': "⚠️ Cette étape a échoué (`{where}` : `{error}`). Rien n'est perdu — relance `/ladder` pour reprendre où tu en étais. La trace complète est dans le journal du bot.",
+    'pt': "⚠️ Essa etapa falhou (`{where}`: `{error}`). Nada foi perdido — execute `/ladder` novamente para continuar de onde parou. O erro completo está no log do bot.",
+    'de': "⚠️ Dieser Schritt ist fehlgeschlagen (`{where}`: `{error}`). Es ging nichts verloren — führe `/ladder` erneut aus, um dort weiterzumachen, wo du aufgehört hast. Der vollständige Traceback steht im Bot-Log.",
+}
 TRANSLATIONS['ladder.step2.title'] = {
     'en': "Step 2 — Enter Opponents  ({filled}/{total} filled)", 'es': "Paso 2 — Ingresar Oponentes  ({filled}/{total} completados)",
     'fr': "Étape 2 — Saisir les Adversaires  ({filled}/{total} remplis)", 'pt': "Passo 2 — Inserir Oponentes  ({filled}/{total} preenchidos)",

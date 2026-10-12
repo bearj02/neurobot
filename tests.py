@@ -12,6 +12,7 @@ Run with:
 
 import asyncio
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import types
 logger_stub = types.ModuleType("logger_config")
 logger_stub.global_logger = MagicMock()
+logger_stub.configure_logging = lambda force=False: logger_stub.global_logger
 sys.modules.setdefault("logger_config", logger_stub)
 
 # Stub discord so tests can import optimized_bot and ladder_flow
@@ -8948,6 +8950,508 @@ class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
         prompt = self.agent.SEASON_MATCH_SYSTEM_PROMPT
         self.assertIn("left", prompt.lower())
         self.assertIn("Do not reorder", prompt)
+
+
+
+class TestHaikuExtractionDiagnostics(unittest.TestCase):
+    """
+    What the log has to contain when a Haiku extraction fails to parse.
+
+    The failure this was written for: a /ladder run logged
+
+        Haiku JSON parse error: Expecting value: line 8 column 14 (char 243)
+        Raw: {...}{"name": JosoPrime", ...}...{"name": "Davison
+
+    The dump stopped mid-row at exactly 500 characters, which was `raw[:500]`
+    and not the model stopping. So there was no way to tell, from the log
+    alone, whether Haiku had written one bad character or had run out of
+    max_tokens — two problems with opposite fixes.
+    """
+
+    def setUp(self):
+        import logging
+        import agent
+        self.agent = agent
+        # logger_config is stubbed suite-wide, so agent.logger is a MagicMock
+        # and assertLogs would never see anything. Swap in the real named
+        # logger these tests listen on — same reason as
+        # TestLadderUIErrorReporting.
+        patcher = patch.object(agent, "logger", logging.getLogger("global_logger"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # The real response, up to where the old 500-char cap cut it off.
+    BAD_RAW = (
+        '{\n'
+        '  "opponent_league_name": "Brasil MVPs Elite A",\n'
+        '  "event_type": "E1",\n'
+        '  "our_rank": null,\n'
+        '  "opponents": [\n'
+        '    {"name": "Rxngel", "total_ovr": 4776, "def_ovr": 156},\n'
+        '    {"name": "Vininius", "total_ovr": 4389, "def_ovr": 146},\n'
+        '    {"name": JosoPrime", "total_ovr": 4431, "def_ovr": 148}\n'
+        '  ],\n'
+        '  "our_players": []\n'
+        '}'
+    )
+
+    def _decode_error(self, raw):
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError as e:
+            return e
+        self.fail("expected the fixture to be invalid JSON")
+
+    def test_the_whole_response_is_logged_not_the_first_500_chars(self):
+        """The old cap truncated exactly at the point the information was."""
+        err = self._decode_error(self.BAD_RAW)
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            self.agent._log_parse_failure("ladder", self.BAD_RAW, err, "end_turn")
+        logged = "\n".join(captured.output)
+        self.assertIn('"our_players"', logged,
+                      "the tail of the response was cut off again")
+        self.assertIn(f"raw_len={len(self.BAD_RAW)}", logged)
+
+    def test_the_log_names_the_stop_reason(self):
+        """max_tokens and a malformed response both surface as a
+        JSONDecodeError; stop_reason is the only thing separating them."""
+        err = self._decode_error(self.BAD_RAW)
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            self.agent._log_parse_failure("ladder", self.BAD_RAW, err, "max_tokens")
+        self.assertIn("stop_reason=max_tokens", "\n".join(captured.output))
+
+    def test_the_offending_character_is_pointed_at(self):
+        """json says "char 243" about a blob nobody can index by eye.
+
+        The unpack below is load-bearing: the window spans several lines of
+        the response, so unless the newlines are flattened there are more
+        than two lines here and the caret drifts away from the text it is
+        supposed to be under."""
+        err = self._decode_error(self.BAD_RAW)
+        context = self.agent._error_context(self.BAD_RAW, err.pos)
+        text_line, caret_line = context.split("\n")
+        self.assertIn(f"^ (char {err.pos})", caret_line)
+        # The caret must land on the character json actually objected to —
+        # here the J of JosoPrime, where the opening quote should have been.
+        self.assertEqual(self.BAD_RAW[err.pos], "J")
+        self.assertEqual(text_line[caret_line.index("^")], "J")
+
+    def test_a_truncated_response_says_so_rather_than_being_cut_silently(self):
+        err = self._decode_error(self.BAD_RAW)
+        huge = "x" * (self.agent._RAW_LOG_LIMIT + 50) + self.BAD_RAW
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            self.agent._log_parse_failure("ladder", huge, err, "end_turn")
+        self.assertIn("truncated by the logger", "\n".join(captured.output))
+
+    def test_max_tokens_gets_its_own_user_facing_message(self):
+        """'cut off by the token limit' and 'malformed' need opposite
+        responses from whoever reads it in Discord."""
+        err = self._decode_error(self.BAD_RAW)
+        cut = self.agent._parse_error_message("ladder", err, "max_tokens")
+        bad = self.agent._parse_error_message("ladder", err, "end_turn")
+        self.assertIn("token limit", cut)
+        self.assertNotIn("token limit", bad)
+        self.assertNotEqual(cut, bad)
+
+    def test_response_metadata_is_logged_before_anything_parses_it(self):
+        """A response with no usable content at all used to raise an
+        IndexError with nothing logged; stop_reason and usage now land first,
+        whatever the body turns out to be."""
+        with self.assertLogs("global_logger", level="INFO") as captured:
+            stop_reason = self.agent._log_api_response("ladder", {
+                "id": "msg_01abc", "model": "claude-haiku-4-5-20251001",
+                "stop_reason": "max_tokens",
+                "usage": {"input_tokens": 2100, "output_tokens": 1500},
+            })
+        logged = "\n".join(captured.output)
+        self.assertEqual(stop_reason, "max_tokens")
+        self.assertIn("msg_01abc", logged)
+        self.assertIn("stop_reason=max_tokens", logged)
+        self.assertIn("output_tokens=1500", logged)
+
+    def test_missing_metadata_does_not_raise(self):
+        """A shape this code didn't expect must not turn a parse failure into
+        a KeyError on the way to reporting it."""
+        with self.assertLogs("global_logger", level="INFO"):
+            self.assertIsNone(self.agent._log_api_response("ladder", {}))
+
+    def test_an_empty_content_list_is_not_an_IndexError(self):
+        """`data["content"][0]["text"]` raised IndexError, which /ladder's
+        `except ValueError` could never catch — so an odd response shape
+        crashed the command instead of reporting a failed extraction."""
+        self.assertEqual(self.agent._response_text({"content": []}), "")
+        self.assertEqual(self.agent._response_text({}), "")
+
+    def test_a_thinking_block_before_the_text_does_not_shift_the_answer(self):
+        """Joining the text blocks, rather than taking content[0], means a
+        non-text block in front of the JSON is skipped instead of parsed."""
+        self.assertEqual(
+            self.agent._response_text({"content": [
+                {"type": "thinking", "thinking": "hmm"},
+                {"type": "text", "text": '{"ok": true}'},
+            ]}),
+            '{"ok": true}')
+
+
+def _body(text, stop_reason="end_turn", status=200):
+    """One scripted reply from the Messages API."""
+    return {"text": text, "stop_reason": stop_reason, "status": status}
+
+
+def _ok_body(fn):
+    """A well-formed reply for whichever extractor is under test."""
+    if fn.__name__ == "extract_ladder_from_screenshots":
+        return _body('{"opponent_league_name": null, "event_type": null, '
+                     '"our_rank": null, "opponents": [], "our_players": []}')
+    return _body('{"left": {}, "right": {}}')
+
+
+class _FakeAPIResponse:
+    """
+    One reply, hand-written rather than mocked.
+
+    A MagicMock would invent `.status`, `.json()` and anything else asked of
+    it, which is exactly how an earlier /ladder bug survived its own test
+    suite — the stub answered a call the real object would have raised on.
+    This defines only what aiohttp's response actually exposes here.
+    """
+
+    def __init__(self, spec):
+        self.status = spec["status"]
+        self._spec = spec
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def json(self):
+        return {
+            "id":          "msg_test",
+            "model":       "claude-haiku-4-5-20251001",
+            "stop_reason": self._spec["stop_reason"],
+            "usage":       {"input_tokens": 10, "output_tokens": 20},
+            "content":     [{"type": "text", "text": self._spec["text"]}],
+        }
+
+    async def text(self):
+        return self._spec["text"]
+
+
+class _FakeAnthropicSession:
+    """Serves a scripted list of replies in order and records what was sent,
+    so a test can assert on the payload and on how many calls were made."""
+
+    def __init__(self, test, replies):
+        self._test = test
+        self._replies = list(replies)
+        self.payloads = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, headers=None, json=None):
+        self.payloads.append(json)
+        self._test.assertTrue(self._replies, "more requests were sent than replies scripted")
+        return _FakeAPIResponse(self._replies.pop(0))
+
+
+def _fake_aiohttp(session):
+    """Stands in for the aiohttp module. agent.py only ever calls
+    ClientSession(), so that is all this defines."""
+    class _Mod:
+        ClientSession = staticmethod(lambda *a, **k: session)
+    return _Mod()
+
+
+async def _fake_fetch(session, url):
+    """_fetch_image_b64 without the download."""
+    return ("ZmFrZQ==", "image/png")
+
+
+class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
+    """
+    The fix for the dropped-quote failure, and the retry behind it.
+
+    `output_config.format` constrains decoding to the schema, so the model
+    cannot emit `{"name": JosoPrime"` at all. The retry covers what a schema
+    can't reach — a reply with no text block in it.
+    """
+
+    def setUp(self):
+        import logging
+        import agent
+        self.agent = agent
+        patcher = patch.object(agent, "logger", logging.getLogger("global_logger"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    # -- the schemas themselves -------------------------------------------
+
+    def test_every_object_in_both_schemas_is_closed_and_fully_required(self):
+        """Structured outputs reject a schema whose objects allow extra
+        properties or leave a property out of `required` — a 400 on every
+        call, not a warning on one."""
+        def walk(node, path="root"):
+            if isinstance(node, dict):
+                if node.get("type") == "object":
+                    self.assertIs(node.get("additionalProperties"), False,
+                                  f"{path} does not set additionalProperties: False")
+                    self.assertEqual(sorted(node["required"]),
+                                     sorted(node["properties"]),
+                                     f"{path}'s required list omits a property")
+                for k, v in node.items():
+                    walk(v, f"{path}.{k}")
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    walk(v, f"{path}[{i}]")
+
+        walk(self.agent.LADDER_OUTPUT_SCHEMA, "ladder")
+        walk(self.agent.SEASON_MATCH_OUTPUT_SCHEMA, "season-match")
+
+    def test_unreadable_values_stay_expressible_as_null(self):
+        """The prompts ask for null on anything illegible. A schema that
+        forced a string or an int would turn 'couldn't read it' into a
+        fabricated value — the thing both prompts explicitly forbid."""
+        props = self.agent.LADDER_OUTPUT_SCHEMA["properties"]
+        for key in ("opponent_league_name", "event_type", "our_rank"):
+            with self.subTest(field=key):
+                self.assertIn({"type": "null"}, props[key]["anyOf"])
+        side = self.agent.SEASON_MATCH_OUTPUT_SCHEMA["properties"]["left"]
+        for key, spec in side["properties"].items():
+            with self.subTest(stat=key):
+                self.assertIn({"type": "null"}, spec["anyOf"])
+
+    def test_event_type_is_pinned_to_the_codes_the_db_stores(self):
+        """event_type is written to matchup_day directly, so 'Elite I'
+        reaching the db would be a silently wrong division."""
+        enum = self.agent.LADDER_OUTPUT_SCHEMA["properties"]["event_type"]["anyOf"][0]["enum"]
+        self.assertEqual(sorted(enum), sorted(["E1", "E2", "E3", "HOF", "Gold-"]))
+
+    # -- the request ------------------------------------------------------
+
+    async def test_both_extractors_send_the_schema(self):
+        """Without output_config on the payload the model is back to being
+        asked nicely for JSON, which is how the original failure happened."""
+        for fn, urls, schema_name in (
+            (self.agent.extract_ladder_from_screenshots, ["u"], "LADDER_OUTPUT_SCHEMA"),
+            (self.agent.extract_season_match_from_screenshot, ["u"], "SEASON_MATCH_OUTPUT_SCHEMA"),
+        ):
+            with self.subTest(fn=fn.__name__):
+                session = _FakeAnthropicSession(self, [_ok_body(fn)])
+                with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+                     patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+                     patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+                    await fn(urls)
+                payload = session.payloads[0]
+                self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
+                self.assertIs(payload["output_config"]["format"]["schema"],
+                              getattr(self.agent, schema_name))
+
+    # -- the retry --------------------------------------------------------
+
+    async def test_a_malformed_reply_is_retried_once_and_succeeds(self):
+        session = _FakeAnthropicSession(self, [
+            _body('{"opponents": [], "our_pla'),           # truncated mid-key
+            _ok_body(self.agent.extract_ladder_from_screenshots),
+        ])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch), \
+             self.assertLogs("global_logger", level="WARNING"):
+            result = await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertEqual(len(session.payloads), 2, "the request was not re-sent")
+        self.assertEqual(result["opponents"], [])
+
+    async def test_a_second_failure_gives_up_rather_than_looping(self):
+        session = _FakeAnthropicSession(self, [_body("not json"), _body("still not json")])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch), \
+             self.assertLogs("global_logger", level="ERROR"):
+            with self.assertRaises(ValueError):
+                await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertEqual(len(session.payloads), 2)
+
+    async def test_max_tokens_is_never_retried(self):
+        """An identical request is cut off in the identical place, so a
+        second call only costs time and money."""
+        session = _FakeAnthropicSession(
+            self, [_body('{"opponents": [{"name": "a"', stop_reason="max_tokens"),
+                   _ok_body(self.agent.extract_ladder_from_screenshots)])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch), \
+             self.assertLogs("global_logger", level="ERROR"):
+            with self.assertRaises(ValueError) as ctx:
+                await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertEqual(len(session.payloads), 1, "a max_tokens stop was retried")
+        self.assertIn("token limit", str(ctx.exception))
+
+    async def test_an_http_error_is_not_retried_either(self):
+        """A 401 or a 400 on the schema is a request problem; re-sending the
+        same request cannot fix it."""
+        session = _FakeAnthropicSession(self, [_body("bad key", status=401)])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            with self.assertRaises(ValueError) as ctx:
+                await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertEqual(len(session.payloads), 1)
+        self.assertIn("401", str(ctx.exception))
+
+
+class TestLoggingConfiguration(unittest.TestCase):
+    """
+    discord.py only calls its own setup_logging() inside Client.run(). This
+    bot uses `await bot.start(TOKEN)` (safe_start needs its own retry loop
+    around the 429 case), and start() takes no logging arguments and
+    configures nothing — verified against the v2.7.1 source.
+
+    The consequence was that `discord.ui.view`'s "Ignoring exception in view
+    %r for item %r" record — the one carrying the traceback behind Discord's
+    "This interaction failed" — went to a logger with no handler on it. These
+    tests pin that logger_config, not Client.run(), is what wires it up.
+    """
+
+    def setUp(self):
+        import logging
+        import importlib.util
+        # The suite stubs logger_config in sys.modules for every other test;
+        # these tests are about the real one, so load it from its file.
+        spec = importlib.util.spec_from_file_location(
+            "_real_logger_config", os.path.join(os.path.dirname(__file__), "logger_config.py"))
+        logger_config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(logger_config)
+        self.logging = logging
+        self.logger_config = logger_config
+        # Keep the suite from dropping a logs/bot.log into the project dir.
+        patcher = patch.dict(os.environ, {"LOG_TO_FILE": "0"}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(logger_config.configure_logging, True)
+
+    def test_discord_loggers_actually_have_a_handler(self):
+        self.logger_config.configure_logging(force=True)
+        for name in ("discord", "discord.http", "discord.gateway"):
+            with self.subTest(logger=name):
+                self.assertTrue(
+                    self.logging.getLogger(name).handlers,
+                    f"{name} has no handler — discord.py's own logs go nowhere")
+
+    def test_the_app_logger_is_configured_too(self):
+        self.logger_config.configure_logging(force=True)
+        self.assertTrue(self.logging.getLogger("global_logger").handlers)
+
+    def test_reconfiguring_does_not_stack_handlers(self):
+        """configure_logging runs at import and again after load_dotenv().
+        If it appended rather than replaced, every line would print twice
+        (and then three times, and so on)."""
+        self.logger_config.configure_logging(force=True)
+        before = len(self.logging.getLogger("discord").handlers)
+        self.logger_config.configure_logging(force=True)
+        self.logger_config.configure_logging(force=True)
+        self.assertEqual(len(self.logging.getLogger("discord").handlers), before)
+
+    def test_levels_come_from_the_environment(self):
+        """The point of the env vars is turning verbosity up on the panel
+        without a redeploy."""
+        with patch.dict(os.environ, {"DISCORD_LOG_LEVEL": "DEBUG",
+                                     "HTTP_LOG_LEVEL": "ERROR"}, clear=False):
+            self.logger_config.configure_logging(force=True)
+            self.assertEqual(self.logging.getLogger("discord").level, self.logging.DEBUG)
+            self.assertEqual(self.logging.getLogger("discord.http").level, self.logging.ERROR)
+        self.logger_config.configure_logging(force=True)
+
+    def test_a_nonsense_level_falls_back_instead_of_raising(self):
+        """A typo in a panel environment variable must not stop the bot from
+        starting."""
+        with patch.dict(os.environ, {"DISCORD_LOG_LEVEL": "LOUD"}, clear=False):
+            self.logger_config.configure_logging(force=True)
+            self.assertEqual(self.logging.getLogger("discord").level, self.logging.INFO)
+        self.logger_config.configure_logging(force=True)
+
+    def test_http_and_gateway_default_quieter_than_the_rest(self):
+        """At DEBUG these two log every REST call and every heartbeat. They
+        are useful on demand and drown everything else by default."""
+        with patch.dict(os.environ, {}, clear=False):
+            for var in ("DISCORD_LOG_LEVEL", "HTTP_LOG_LEVEL", "GATEWAY_LOG_LEVEL"):
+                os.environ.pop(var, None)
+            self.logger_config.configure_logging(force=True)
+            self.assertLess(self.logging.getLogger("discord").level,
+                            self.logging.getLogger("discord.http").level)
+            self.assertLess(self.logging.getLogger("discord").level,
+                            self.logging.getLogger("discord.gateway").level)
+
+
+class TestLadderUIErrorReporting(unittest.IsolatedAsyncioTestCase):
+    """A raising view callback must leave a traceback in the log and say
+    something true to the person who clicked, rather than letting Discord
+    show its bare "This interaction failed"."""
+
+    def setUp(self):
+        import logging
+        import ladder_flow
+        self.lf = ladder_flow
+        # logger_config is stubbed suite-wide, so ladder_flow.logger is a
+        # MagicMock and assertLogs would never see anything. Swap in the real
+        # named logger these tests listen on.
+        patcher = patch.object(ladder_flow, "logger", logging.getLogger("global_logger"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def test_report_ui_error_logs_and_tells_the_user(self):
+        sent = []
+
+        class _Response:
+            def is_done(self_inner):
+                return False
+
+            async def send_message(self_inner, msg, ephemeral=False):
+                sent.append(msg)
+
+        inter = MagicMock()
+        inter.response = _Response()
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            await self.lf.report_ui_error(inter, ValueError("boom"), "step 1", "en")
+        self.assertTrue(any("step 1" in line for line in captured.output))
+        self.assertTrue(any("ValueError" in line for line in captured.output))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("step 1", sent[0])
+
+    async def test_a_dead_interaction_does_not_mask_the_original_error(self):
+        """Reporting is best-effort: an expired interaction is one of the
+        ways to get here, so the followup raising must not replace the
+        traceback that actually matters."""
+        class _Response:
+            def is_done(self_inner):
+                return True
+
+        inter = MagicMock()
+        inter.response = _Response()
+
+        async def dead(*a, **k):
+            raise RuntimeError("404 Not Found (error code: 10062): Unknown interaction")
+
+        inter.followup.send = dead
+        with self.assertLogs("global_logger", level="ERROR") as captured:
+            await self.lf.report_ui_error(inter, ValueError("boom"), "step 2", "en")
+        self.assertTrue(any("ValueError" in line for line in captured.output),
+                        "the original error was lost behind the reporting failure")
+
+    def test_every_ladder_view_and_modal_defines_on_error(self):
+        """Without on_error, discord.py's default logs to the `discord.ui`
+        logger and the clicker is told nothing at all."""
+        for cls_name in ("PlayerToggleView", "OpponentEntryView", "SortPickerView",
+                         "ReorderView", "OpponentCSVModal", "LadderMatchupInfoModal"):
+            with self.subTest(cls=cls_name):
+                cls = getattr(self.lf, cls_name)
+                self.assertIn("on_error", vars(cls),
+                              f"{cls_name} has no on_error of its own")
 
 
 # ---------------------------------------------------------------------------
