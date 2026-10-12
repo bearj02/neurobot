@@ -2220,9 +2220,15 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
     # --- _validate_league ---
 
     def test_validate_league_valid(self):
+        """Canonical id, and the same id lowercased — the point of the second
+        assertion is case-insensitivity, so the input has to be this fork's
+        own league. It read `_validate_league("np")` until this was fixed:
+        the Neuro->Reborn rename updated the expected value but not the
+        input, so it asserted that a league this fork has never had resolves
+        to RX. The real function correctly rejects it."""
         from optimized_bot import _validate_league
         self.assertEqual(_validate_league("RX"), "RX")
-        self.assertEqual(_validate_league("np"), "RX")
+        self.assertEqual(_validate_league("rx"), "RX")
 
     def test_validate_league_invalid(self):
         from optimized_bot import _validate_league
@@ -7143,6 +7149,11 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ZZ", values)  # exists now, didn't exist in 2026
 
     async def test_archive_league_autocomplete_filters_on_current_input(self):
+        """The search term has to match the fixture's own display name. It
+        searched for "inverse" until this was fixed — the Neuro->Reborn
+        rename changed the fixture's name from "NeuroInverse" to "Deleted
+        League" and left the term behind, so it matched nothing and the test
+        proved only that an unmatched search returns []."""
         from optimized_bot import archive_league_autocomplete
         inter = self._make_interaction(year=2026)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7153,7 +7164,7 @@ class TestLeagueNamesFromTeamsTable(unittest.IsolatedAsyncioTestCase):
                     os.path.join(tmpdir, "reborn_2026.db"),
                     [("NI", "Deleted League"), ("RX", "CHRISTiansReborn")],
                 )
-                choices = await archive_league_autocomplete(inter, "inverse")
+                choices = await archive_league_autocomplete(inter, "deleted")
             finally:
                 await db.close_archive_connections()
                 db.DB_PATH = original_path
