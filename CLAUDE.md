@@ -2036,3 +2036,41 @@ how the root-cause fix was briefly untested. The `ORDER BY` is likewise
 pinned by source inspection: SQLite returns the lowest rowid first for a
 small table, so a behavioural test stays green with the clause removed —
 verified by removing it.
+
+## leave_guild.py — getting the bot out of a server
+
+`on_ready`'s startup line (see `_format_guilds`) turned up a server nobody
+recognised the day it was added, which is what this script is for. There is
+no in-Discord route that doesn't depend on already being in the server with
+the right permissions; `Guild.leave()` is the only API for it.
+
+    python leave_guild.py                     # list every server, change nothing
+    python leave_guild.py <guild id>          # leave that one
+
+**"The command line" here is the panel's Startup tab, not a terminal** —
+this host has no shell, and the panel's own "terminal" just echoes input
+back. The sequence is: point Startup at `leave_guild.py <id>`, restart, read
+the console, then **point it back at `optimized_bot.py` and restart again**.
+Miss that last step and the bot never comes back up.
+
+Three properties worth not undoing:
+
+- **It imports nothing from this project.** Importing `optimized_bot` would
+  run db migrations, take a backup and re-sync the whole command tree as a
+  side effect of wanting to leave one server, and `load_league_names_sync()`
+  runs at import in three more modules besides. A test pins this by ast-
+  scanning the imports, because the cost of the regression is a surprise
+  write to the live database.
+- **No guild id means list only.** The destructive path has to be asked for
+  by id, and it never resolves a server by name — names aren't unique and
+  get renamed.
+- **The client is closed in a `finally`.** Without it, a bad token leaves
+  aiohttp printing "Unclosed connector" and a repr of its connection deque
+  into the console at exactly the moment someone is reading an error out of
+  it. Confirmed against a real bad token, not assumed.
+
+**If an unknown server turns up again, the script is the symptom, not the
+fix.** A bot with "Public Bot" enabled in the Discord Developer Portal can
+be added to any server by anyone with the invite link. Turning that toggle
+off (Developer Portal -> your application -> Bot -> Public Bot) restricts
+adding it to the application owner, which is what stops it recurring.

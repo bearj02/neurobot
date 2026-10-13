@@ -9346,6 +9346,119 @@ class TestStartupGuildLog(unittest.TestCase):
                       "on_ready no longer reports which servers it is in")
 
 
+class TestLeaveGuildScript(unittest.TestCase):
+    """
+    leave_guild.py — the command-line way out of a server.
+
+    The connecting half can't run here, so what's pinned is everything
+    around it: argument handling, the lookup, and the standalone-ness that
+    keeps running it from having side effects on the database.
+    """
+
+    def setUp(self):
+        import leave_guild
+        self.lg = leave_guild
+
+    def _guild(self, name, gid, members=None, owner=None):
+        g = types.SimpleNamespace(name=name, id=gid)
+        if members is not None:
+            g.member_count = members
+        if owner is not None:
+            g.owner = owner
+        return g
+
+    # --- arguments -------------------------------------------------------
+
+    def test_no_argument_means_list_only(self):
+        """Safe by default: the destructive path has to be asked for by id."""
+        self.assertIsNone(self.lg.parse_args(["leave_guild.py"]))
+
+    def test_a_guild_id_comes_back_as_an_int(self):
+        self.assertEqual(
+            self.lg.parse_args(["leave_guild.py", "1414050080515690559"]),
+            1414050080515690559)
+
+    def test_surrounding_whitespace_is_tolerated(self):
+        """A id pasted out of Discord often arrives with a space on it."""
+        self.assertEqual(self.lg.parse_args(["leave_guild.py", " 123 "]), 123)
+
+    def test_a_non_numeric_argument_is_refused(self):
+        """Guild names are not unique and get renamed — resolving one by name
+        is exactly the wrong behaviour for a script that leaves servers."""
+        with self.assertRaises(ValueError) as ctx:
+            self.lg.parse_args(["leave_guild.py", "Anonymous Airshow"])
+        self.assertIn("not a guild id", str(ctx.exception))
+
+    def test_more_than_one_id_is_refused(self):
+        """Batching this would make one slip take out several servers at
+        once, and there is no undo on any of them."""
+        with self.assertRaises(ValueError) as ctx:
+            self.lg.parse_args(["leave_guild.py", "123", "456"])
+        self.assertIn("Expected one guild id", str(ctx.exception))
+
+    # --- lookup ----------------------------------------------------------
+
+    def test_find_guild_matches_on_id(self):
+        guilds = [self._guild("A", 1), self._guild("B", 2)]
+        self.assertIs(self.lg.find_guild(guilds, 2), guilds[1])
+
+    def test_find_guild_returns_none_when_absent(self):
+        """Leaving a server the bot isn't in has to be a clean no-op, not an
+        exception off the back of a None."""
+        self.assertIsNone(self.lg.find_guild([self._guild("A", 1)], 999))
+
+    def test_the_listing_shows_what_is_needed_to_recognise_a_server(self):
+        line = self.lg.format_guild(
+            self._guild("Anonymous Airshow", 1414050080515690559,
+                        members=42, owner="someone#0001"))
+        self.assertIn("Anonymous Airshow", line)
+        self.assertIn("1414050080515690559", line)
+        self.assertIn("42", line)
+        self.assertIn("someone#0001", line)
+
+    def test_a_guild_missing_the_optional_fields_still_lists(self):
+        """member_count and owner are both None until the right data arrives;
+        the listing is the one thing that must never fail."""
+        line = self.lg.format_guild(self._guild("Bare", 7))
+        self.assertIn("Bare", line)
+        self.assertIn("7", line)
+
+    # --- entry point -----------------------------------------------------
+
+    def test_a_missing_token_fails_before_connecting(self):
+        env = {k: v for k, v in os.environ.items() if k != "DISCORD_TOKEN"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(self.lg.main(["leave_guild.py", "123"]), 1)
+
+    def test_a_bad_argument_fails_before_connecting(self):
+        with patch.dict(os.environ, {"DISCORD_TOKEN": "t"}, clear=False):
+            self.assertEqual(self.lg.main(["leave_guild.py", "not-an-id"]), 1)
+
+    # --- the standalone invariant ----------------------------------------
+
+    def test_it_imports_nothing_from_this_project(self):
+        """Importing optimized_bot would run db migrations, take a backup and
+        re-sync the whole command tree as a side effect of wanting to leave
+        one server — and db.load_league_names_sync() runs at import in three
+        more modules besides. Running this script must not touch the
+        database at all."""
+        import ast
+        path = os.path.join(os.path.dirname(__file__), "leave_guild.py")
+        with open(path, encoding="utf-8") as f:
+            tree_ = ast.parse(f.read())
+        imported = set()
+        for node in ast.walk(tree_):
+            if isinstance(node, ast.Import):
+                imported.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        project = {"db", "optimized_bot", "ladder_flow", "i18n", "sheet_image",
+                   "siege", "neuroseason", "rebornseason", "status", "newday",
+                   "tournament", "agent", "utils", "logger_config"}
+        self.assertEqual(imported & project, set(),
+                         f"leave_guild.py pulls in {imported & project}")
+
+
 class TestLoggingConfiguration(unittest.TestCase):
     """
     discord.py only calls its own setup_logging() inside Client.run(). This
