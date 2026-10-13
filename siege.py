@@ -289,60 +289,11 @@ MAX_SIEGE_NODES = 16
 _OPEN_NODES_MAX_CHUNKS = 3
 
 
-def _chunk_lines_to_fit(lines: list[str], max_chars: int = 1024, max_chunks: int = 5) -> list[str]:
-    """
-    Splits a list of lines into chunks, each chunk's newline-joined string
-    at most max_chars long. Discord enforces a hard 1024-character limit
-    per embed field value — a field built by joining one line per item
-    (e.g. one per open siege node) can silently exceed that once there are
-    enough items, and Discord rejects the ENTIRE message with an
-    HTTPException (not a partial/truncated send) if any field value goes
-    over, so this has to be handled before ever calling embed.add_field,
-    not caught after the fact.
-
-    Caps at max_chunks (default 5) so this can't separately blow past
-    Discord's 25-fields-per-embed limit on an extreme siege with dozens of
-    open nodes — the last chunk gets a "...and N more" note (counting
-    actual dropped lines, not dropped chunks) instead of producing a 6th,
-    7th, etc. field.
-    """
-    if not lines:
-        return []
-
-    # Pass 1: chunk purely by character budget, no count cap yet. Track how
-    # many source lines land in each chunk so a later cap can report an
-    # accurate dropped-line count, not a less useful dropped-chunk count.
-    chunks: list[str] = []
-    chunk_line_counts: list[int] = []
-    current: list[str] = []
-    current_len = 0
-    for line in lines:
-        added_len = len(line) + (1 if current else 0)  # +1 for the joining newline
-        if current and current_len + added_len > max_chars:
-            chunks.append("\n".join(current))
-            chunk_line_counts.append(len(current))
-            current = [line]
-            current_len = len(line)
-        else:
-            current.append(line)
-            current_len += added_len
-    if current:
-        chunks.append("\n".join(current))
-        chunk_line_counts.append(len(current))
-
-    # Pass 2: cap the chunk COUNT if it exceeds max_chunks.
-    if len(chunks) > max_chunks:
-        kept = chunks[:max_chunks]
-        dropped_lines = sum(chunk_line_counts[max_chunks:])
-        note = f"...and {dropped_lines} more"
-        last = kept[-1]
-        if len(last) + 1 + len(note) <= max_chars:
-            kept[-1] = last + "\n" + note
-        else:
-            kept[-1] = note  # extreme edge case: the last chunk was already at the character limit
-        chunks = kept
-
-    return chunks
+# The chunker lives in utils so ladder_flow can use the same implementation
+# — its final-ladder embed hit this exact 1024-character rejection. Kept
+# under the old private name here so nothing that referenced siege's copy
+# has to change.
+from utils import chunk_lines_to_fit as _chunk_lines_to_fit
 
 
 def build_status_embed(team_id: str, match: dict, summary: dict, player_totals: list[dict], lang: str = 'en') -> discord.Embed:

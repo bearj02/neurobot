@@ -351,7 +351,17 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str]) -> dict:
 
         payload = {
             "model":      MODEL,
-            "max_tokens": 1500,
+            # 3000, not the original 1500. A real full 16-v-16 ladder was
+            # measured at output_tokens=1166 against that 1500 — about 22%
+            # headroom, on a response whose length scales with how long the
+            # 32 player names happen to be. A max_tokens stop is also the
+            # one parse failure _post_and_parse deliberately won't retry,
+            # because an identical request is cut off in the identical
+            # place, so it fails the command outright.
+            #
+            # max_tokens is a ceiling, not a charge — raising it costs
+            # nothing unless the tokens are actually generated.
+            "max_tokens": 3000,
             "system":     SYSTEM_PROMPT,
             "output_config": {
                 "format": {"type": "json_schema", "schema": LADDER_OUTPUT_SCHEMA},

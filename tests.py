@@ -289,6 +289,7 @@ class _FakeDBConn:
     async def executemany(self, sql, args_list):
         return _FakeCursor(self._c.executemany(sql, args_list))
     async def commit(self): self._c.commit()
+    async def rollback(self): self._c.rollback()
     async def close(self): self._c.close()
 
 # Stub aiosqlite minimally so db.py imports
@@ -3827,6 +3828,134 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
             "SELECT * FROM matchup_day WHERE team_id='NP' AND game_date=?", (TODAY,)
         )
         self.assertIsNone(row)
+
+    # --- "Done — Sort & Arrange" / "Confirm": acknowledge before saving ---
+
+    def _full_ladder_state(self):
+        from ladder_flow import LadderState, MATCHUP_SIZE
+        state = LadderState("NP", TODAY, None)
+        state.players   = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected  = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        state.opponents = [{"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200 + i}
+                           for i in range(MATCHUP_SIZE)]
+        return state
+
+    async def test_done_button_answers_discord_before_saving(self):
+        """The click used to fail on the Reborn server: 16 committed upserts
+        ran before the interaction was answered, outlasting Discord's
+        3-second window. The response must come first."""
+        import ladder_flow
+        from ladder_flow import OpponentEntryView
+        state = self._full_ladder_state()
+        view = OpponentEntryView(state)
+        inter = _FakeInteraction()
+        answered_at_save = []
+        real_save = ladder_flow.save_ladder_to_db
+
+        async def spy(*a, **kw):
+            answered_at_save.append(inter.response.is_done())
+            return await real_save(*a, **kw)
+
+        with patch.object(ladder_flow, "save_ladder_to_db", spy):
+            await view._advance(inter)
+        self.assertEqual(answered_at_save, [True])
+        self.assertEqual(len(inter.response.edits), 1)
+        rows = await db.fetchall("SELECT * FROM matchup_ladder WHERE team_id='NP' AND game_date=?", (TODAY,))
+        self.assertEqual(len(rows), 16)
+
+    async def test_confirm_button_answers_discord_before_saving(self):
+        import ladder_flow
+        from ladder_flow import ReorderView
+        state = self._full_ladder_state()
+        view = ReorderView(state)
+        inter = _FakeInteraction()
+        inter.channel.send = AsyncMock()
+        answered_at_save = []
+
+        async def spy(*a, **kw):
+            answered_at_save.append(inter.response.is_done())
+
+        with patch.object(ladder_flow, "save_ladder_to_db", spy):
+            await view._confirm(inter)
+        self.assertEqual(answered_at_save, [True])
+        # Posted via the interaction webhook, never channel.send (which needs
+        # channel permissions the Reborn bot didn't have).
+        inter.channel.send.assert_not_awaited()
+        self.assertEqual(len(inter.followup.messages), 1)
+        self.assertIsNotNone(inter.followup.messages[0]["embed"])
+
+    async def test_save_failure_is_reported_not_swallowed(self):
+        """A save that raises after the click is answered must reach the user
+        as a followup — not escape into discord.py's handler unseen — and the
+        final ladder must not be posted as if it had been recorded."""
+        import ladder_flow
+        from ladder_flow import ReorderView
+        state = self._full_ladder_state()
+        view = ReorderView(state)
+        inter = _FakeInteraction()
+        inter.channel.send = AsyncMock()
+
+        async def boom(*a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+
+        with patch.object(ladder_flow, "save_ladder_to_db", boom):
+            await view._confirm(inter)
+        self.assertEqual(len(inter.followup.messages), 1)
+        self.assertIn("database is locked", inter.followup.messages[0]["content"])
+        self.assertIsNone(inter.followup.messages[0]["embed"])   # no ladder posted
+        inter.channel.send.assert_not_awaited()
+
+    async def test_step2_modal_submits_need_no_channel_permissions(self):
+        """The real Reborn failure: the bot couldn't see the ladder channel, so
+        the post-paste inter.message.edit() raised 403 Missing Access (50001)
+        after the view had already rebuilt its buttons with new ids — and the
+        next click (Done) was discarded as an unknown view. Both step-2 modal
+        submits must update the message as the interaction response, which
+        needs no channel permissions."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+
+        class _NoAccessMessage:
+            async def edit(self, **kw):
+                raise RuntimeError("403 Forbidden (error code: 50001): Missing Access")
+
+        state = LadderState("NP", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        view = OpponentEntryView(state)
+
+        # paste opponents
+        opener = _FakeInteraction()
+        await view._enter(opener)
+        modal = opener.response.modals[0]
+        modal.opponents.value = "\n".join(f"T{i}, 7000, {200+i}" for i in range(MATCHUP_SIZE))
+        sub = _FakeInteraction()
+        sub.message = _NoAccessMessage()
+        await modal.on_submit(sub)
+        self.assertEqual(len(sub.response.edits), 1, "paste must update via the interaction response")
+        self.assertIs(sub.response.edits[0]["view"], view)
+        self.assertEqual(sum(o["name"] != "-" for o in state.opponents), MATCHUP_SIZE)
+
+        # matchup info
+        opener = _FakeInteraction()
+        await view._edit_matchup_info(opener)
+        modal = opener.response.modals[0]
+        modal.opp_name.value, modal.division.value, modal.rank.value = "Gridiron", "e1", "219"
+        sub = _FakeInteraction()
+        sub.message = _NoAccessMessage()
+        await modal.on_submit(sub)
+        self.assertEqual(len(sub.response.edits), 1)
+        self.assertEqual((state.opponent_league_name, state.event_type, state.our_rank),
+                         ("Gridiron", "E1", 219))
+
+    async def test_upsert_ladder_slots_is_all_or_nothing(self):
+        """One bad slot (opp_ign is NOT NULL) must not leave the good ones
+        half-written — they'd get committed by whatever write came next."""
+        slots = [{"slot": 1, "opp_ign": "Good"}, {"slot": 2, "opp_ign": None}]
+        with self.assertRaises(sqlite3.IntegrityError):
+            await db.upsert_ladder_slots("NP", TODAY, slots)
+        await db.execute("UPDATE teams SET name=name WHERE id='NP'")  # any later commit
+        rows = await db.fetchall("SELECT * FROM matchup_ladder WHERE team_id='NP' AND game_date=?", (TODAY,))
+        self.assertEqual(rows, [])
 
     async def test_start_ladder_flow_threads_extracted_context_into_state(self):
         from ladder_flow import start_ladder_flow
@@ -7843,6 +7972,7 @@ class _FakeResponse:
         self.modals.append(modal)
 
     async def edit_message(self, *, content=None, embed=None, view=None):
+        self._done = True   # a real edit_message answers the interaction too
         self.edits.append({'content': content, 'embed': embed, 'view': view})
 
 
@@ -8953,6 +9083,243 @@ class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
 
 
 
+class TestLadderEmbedFieldLimits(unittest.IsolatedAsyncioTestCase):
+    """
+    Reproduces the reported production crash, from a real traceback:
+
+        Ladder UI error in step 4 (reorder): HTTPException: 400 Bad Request
+        (error code: 50035): Invalid Form Body
+        In embeds.0.fields.1.value: Must be 1024 or fewer in length.
+
+    build_final_embed chunked its table at 1985 characters — a *description*
+    budget, not a field one — and then wrapped each chunk in a code fence,
+    which costs 8 more. An embed field's value is capped at 1024 and Discord
+    rejects the entire message if any field exceeds it.
+
+    A full 16-slot ladder is 18 lines of 60-62 characters: ~1099 plus the
+    fence. It was never under the limit, so /ladder's final step failed every
+    single time it was run to completion, regardless of how long the names
+    were.
+    """
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import ladder_flow
+        self.lf = ladder_flow
+        for i in range(15):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, def_ovr, total_ovr) "
+                "VALUES ('NP',?,?,'A',200,200,6000)", (f"Pool{i}", f"Pool{i}"))
+
+    async def asyncTearDown(self):
+        await _patched_close()
+
+    async def _state(self, opp_name_len=12):
+        players = await db.get_team_stats("NP")
+        state = self.lf.LadderState("NP", "2026-10-07", MagicMock(), lang='en')
+        state.players = [dict(p) for p in players]
+        state.selected = [p['ign'] for p in state.players[:self.lf.MATCHUP_SIZE]]
+        state.opponents = [
+            {'name': ('Opp%d' % i).ljust(opp_name_len, 'x'),
+             'total_ovr': 6400 + i, 'def_ovr': 210 + i}
+            for i in range(self.lf.MATCHUP_SIZE)
+        ]
+        return state
+
+    @staticmethod
+    def _field_values(embed):
+        """The stub's Embed keeps no real .fields list — add_field is a plain
+        mock, so embed.fields is always [] no matter what was passed. Inspect
+        the recorded calls instead (the same approach the siege field-limit
+        tests use)."""
+        return [(c.kwargs.get("name", ""), c.kwargs.get("value", ""))
+                for c in embed.add_field.call_args_list]
+
+    async def test_final_embed_fields_stay_within_the_1024_limit(self):
+        state = await self._state()
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        fields = self._field_values(embed)
+        self.assertTrue(fields, "no fields were added at all")
+        for name, value in fields:
+            self.assertLessEqual(len(value), 1024,
+                                 f"field {name!r} is {len(value)} chars — Discord rejects the message")
+        self.assertLessEqual(len(fields), 25)
+
+    async def test_the_full_table_really_would_have_overflowed(self):
+        """Guards the test above against passing for the wrong reason. If a
+        16-slot table ever got short enough to fit in one field, the test
+        would still pass with the bug reintroduced — so assert the premise:
+        the whole table, joined and fenced the old way, is over the limit."""
+        state = await self._state()
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        table_fields = [v for n, v in self._field_values(embed) if v.startswith("```")]
+        # Strip each chunk's fence and rejoin to recover the whole table.
+        whole = sum(len(v) - 8 for v in table_fields)
+        self.assertGreater(whole, 1024,
+                           "fixture no longer exercises the overflow this test exists for")
+        self.assertGreater(len(table_fields), 1, "the table should have been split across fields")
+
+    async def test_a_pathologically_long_opponent_name_cannot_overflow_a_field(self):
+        """Opponent names come from a free-text modal with max_length=1600 for
+        the whole CSV, so one name alone can exceed the field limit. Chunking
+        cannot help there — a chunker only splits between lines — so the
+        column has to be truncated."""
+        state = await self._state()
+        state.opponents[3]['name'] = "W" * 900
+        state.selected[5] = "P" * 900
+        order = list(range(self.lf.MATCHUP_SIZE))
+        embed = self.lf.build_final_embed(state, order, order)
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed on a long name")
+
+    async def test_reorder_step_embed_also_stays_within_the_limit(self):
+        """Step 4's own embed joins one line per slot into a single field the
+        same way, and it is redrawn on every cursor and move click — so if it
+        overflows, every button in the step fails, not just Confirm."""
+        state = await self._state()
+        state.opponents[0]['name'] = "Z" * 600
+        view = self.lf.ReorderView(state)
+        embed = view._build_embed()
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+            self.assertGreaterEqual(len(value), 1, f"field {name!r} is empty — Discord rejects that too")
+
+    async def test_opponent_entry_embed_stays_within_the_limit(self):
+        state = await self._state()
+        state.opponents[9]['name'] = "Q" * 700
+        view = self.lf.OpponentEntryView(state)
+        embed = view._build_embed()
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+            self.assertGreaterEqual(len(value), 1)
+
+    async def test_player_toggle_embed_stays_within_the_limit(self):
+        state = await self._state()
+        view = self.lf.PlayerToggleView(state)
+        # Set this *after* construction on purpose: PlayerToggleView.__init__
+        # runs sanitize_selection, which drops any ign not in the pool — so
+        # assigning long names before it would leave `selected` empty, no
+        # field would be added, and the assertion below would pass without
+        # checking anything.
+        view.state.selected = ["N" * 300 for _ in range(self.lf.MATCHUP_SIZE)]
+        embed = view._build_embed()
+        values = [v for _, v in self._field_values(embed)]
+        self.assertTrue(values, "fixture did not produce the selected-players field")
+        for name, value in self._field_values(embed):
+            self.assertLessEqual(len(value), 1024, f"field {name!r} overflowed")
+
+    def test_truncate_cell_marks_the_cut_and_respects_the_width(self):
+        from utils import truncate_cell
+        self.assertEqual(truncate_cell("short", 18), "short")
+        self.assertEqual(len(truncate_cell("x" * 50, 18)), 18)
+        self.assertTrue(truncate_cell("x" * 50, 18).endswith(".."))
+        self.assertEqual(truncate_cell(None, 18), "-")
+        self.assertEqual(truncate_cell("", 18), "-")
+
+    def test_siege_still_exposes_the_chunker_under_its_old_name(self):
+        """The implementation moved to utils so ladder_flow could share it
+        rather than grow a second copy that drifts. siege keeps the old
+        private alias so nothing referencing it had to change."""
+        import siege
+        import utils
+        self.assertIs(siege._chunk_lines_to_fit, utils.chunk_lines_to_fit)
+
+    def test_the_code_fence_overhead_is_subtracted_from_the_budget(self):
+        """The specific arithmetic error behind the crash: budgeting the full
+        field limit and then wrapping the chunk anyway."""
+        import utils
+        self.assertEqual(self.lf._TABLE_BUDGET, 1024 - 8)
+        self.assertEqual(utils.CODE_FENCE_OVERHEAD, len("```\n") + len("\n```"))
+        self.assertEqual(utils.FENCED_FIELD_LIMIT, utils.EMBED_FIELD_LIMIT - utils.CODE_FENCE_OVERHEAD)
+
+    def test_the_two_fenced_field_sites_budget_against_the_fenced_limit(self):
+        """Both places that wrap a field value in ``` must size the body
+        against FENCED_FIELD_LIMIT, not the raw 1024. Getting this wrong is
+        what broke /ladder's final embed and /test, so it's pinned in source
+        — neither function can be called directly (one needs a live
+        interaction, the other is @tree.command-decorated)."""
+        for mod, marker in (("ladder_flow.py", "_TABLE_BUDGET = FENCED_FIELD_LIMIT"),
+                            ("optimized_bot.py", "max_chars=FENCED_FIELD_LIMIT")):
+            with open(os.path.join(os.path.dirname(__file__), mod), encoding="utf-8") as f:
+                src = f.read()
+            with self.subTest(module=mod):
+                self.assertIn(marker, src)
+                self.assertNotIn("> 1020", src, f"{mod} still clamps to the pre-fence 1020")
+
+        # Counted, not just "appears somewhere". optimized_bot has three
+        # fenced field sites — /dscores, /history and /test — and an
+        # existence check passes while any one of them is wrong, which a
+        # mutation test caught it doing for /test specifically. If a fourth
+        # fenced field is added, raise this number rather than deleting the
+        # assertion.
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            ob_src = f.read()
+        self.assertEqual(ob_src.count("max_chars=FENCED_FIELD_LIMIT"), 3,
+                         "a fenced embed field in optimized_bot.py is budgeting "
+                         "against the wrong limit (or a new one was added)")
+
+
+class TestTestCommandOutput(unittest.TestCase):
+    """
+    /test failed with the same 1024 error it exists to help diagnose:
+
+        Slash command error in /test: HTTPException: 400 Bad Request
+        In embeds.0.fields.1.value: Must be 1024 or fewer in length.
+
+    It clamped the failure text to 1020 characters and then wrapped it in a
+    code fence (+8), sending 1028. So /test reported nothing at all exactly
+    when it had the most to report.
+    """
+
+    def test_failure_detail_is_chunked_within_the_fenced_budget(self):
+        import utils
+        # A realistic multi-failure run: unittest -v emits several lines per
+        # failure, easily past a single field.
+        fail_lines = []
+        for i in range(40):
+            fail_lines += [
+                f"FAIL: test_some_reasonably_long_test_name_number_{i} (tests.TestSomething)",
+                "-" * 70,
+                "Traceback (most recent call last):",
+                f'  File "tests.py", line {1000 + i}, in test_some_reasonably_long_test_name_number_{i}',
+                "    self.assertEqual(expected, actual)",
+                "AssertionError: 1024 != 1028",
+            ]
+        chunks = utils.chunk_lines_to_fit(
+            fail_lines, max_chars=utils.FENCED_FIELD_LIMIT, max_chunks=4)
+        self.assertTrue(chunks)
+        for chunk in chunks:
+            fenced = f"```\n{chunk}\n```"
+            self.assertLessEqual(len(fenced), 1024,
+                                 f"fenced field is {len(fenced)} chars — Discord rejects the message")
+        self.assertLessEqual(len(chunks), 4)
+
+    def test_the_old_clamp_really_did_overflow(self):
+        """Proves the fix is not cosmetic: 1020 + a fence is 1028."""
+        detail = "x" * 1020
+        self.assertGreater(len(f"```\n{detail}\n```"), 1024)
+
+    def test_test_command_attaches_the_full_output(self):
+        """Chunking caps at four fields, so a long run still loses detail in
+        the embed. The whole stdout+stderr goes out as a file so nothing is
+        lost, and that send is wrapped so a missing Attach Files permission
+        degrades to the embed alone rather than failing the command."""
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"), encoding="utf-8") as f:
+            src = f.read()
+        start = src.index("async def test_slash")
+        body = src[start:start + 4000]
+        self.assertIn("discord.File", body)
+        self.assertIn("tests.txt", body)
+        self.assertIn("except discord.HTTPException", body)
+
+
+
+
 class TestHaikuExtractionDiagnostics(unittest.TestCase):
     """
     What the log has to contain when a Haiku extraction fails to parse.
@@ -9251,6 +9618,25 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
                 self.assertIs(payload["output_config"]["format"]["schema"],
                               getattr(self.agent, schema_name))
+
+    async def test_the_ladder_budget_clears_a_measured_real_extraction(self):
+        """A real full 16-v-16 came back at output_tokens=1166 against the
+        original max_tokens of 1500 — 22% headroom on a response whose
+        length scales with how long the 32 names are. A max_tokens stop is
+        the one parse failure the retry deliberately won't cover, so this
+        pins real room above the measurement rather than just above zero.
+        max_tokens is a ceiling, not a charge: raising it costs nothing
+        unless the tokens are generated."""
+        observed = 1166
+        session = _FakeAnthropicSession(
+            self, [_ok_body(self.agent.extract_ladder_from_screenshots)])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertGreaterEqual(
+            session.payloads[0]["max_tokens"], observed * 2,
+            "too little headroom over a measured real extraction")
 
     # -- the retry --------------------------------------------------------
 

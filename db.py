@@ -1025,6 +1025,44 @@ async def upsert_ladder_slot(team_id: str, game_date, slot: int,
     )
 
 
+async def upsert_ladder_slots(team_id: str, game_date, slots: list[dict]):
+    """
+    Batch form of upsert_ladder_slot: every slot in one transaction with one
+    commit. Each dict carries slot/opp_ign and optionally opp_def_ovr,
+    our_total_ovr, our_ign, tier.
+
+    Exists because the ladder builder writes all 16 slots before it can
+    answer the button click, and 16 separately-committed upserts (one fsync
+    each) were slow enough to blow Discord's 3-second window on a slower
+    host disk. All-or-nothing also means a failure can't leave half a ladder.
+    """
+    _check()
+    rows = [
+        (team_id, str(game_date), s['slot'], s['opp_ign'],
+         s.get('opp_def_ovr'), s.get('our_total_ovr'), s.get('our_ign'), s.get('tier'))
+        for s in slots
+    ]
+    try:
+        await _db.executemany(
+            """
+            INSERT INTO matchup_ladder
+                (team_id, game_date, slot, opp_ign, opp_def_ovr, our_total_ovr, our_ign, tier)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(team_id, game_date, slot) DO UPDATE SET
+                opp_ign=excluded.opp_ign,
+                opp_def_ovr=excluded.opp_def_ovr,
+                our_total_ovr=excluded.our_total_ovr,
+                our_ign=excluded.our_ign,
+                tier=excluded.tier
+            """,
+            rows
+        )
+        await _db.commit()
+    except Exception:
+        await _db.rollback()
+        raise
+
+
 async def get_ladder_snapshot(team_id: str, game_date, conn=None) -> list[dict]:
     """Return the ladder snapshot for a team on a given date."""
     return await fetchall(

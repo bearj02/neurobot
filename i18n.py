@@ -1583,6 +1583,13 @@ TRANSLATIONS['ladder.step2.done_btn'] = {
     'en': "Done — Sort & Arrange", 'es': "Listo — Ordenar y Organizar", 'fr': "Terminé — Trier et Organiser",
     'pt': "Concluído — Ordenar e Organizar", 'de': "Fertig — Sortieren & Anordnen",
 }
+TRANSLATIONS['ladder.save_failed'] = {
+    'en': "⚠️ Could not save the ladder to the database (`{error}`). Nothing was recorded — try again, or tell an admin.",
+    'es': "⚠️ No se pudo guardar el ranking en la base de datos (`{error}`). No se registró nada — inténtalo de nuevo o avisa a un admin.",
+    'fr': "⚠️ Impossible d'enregistrer le classement dans la base de données (`{error}`). Rien n'a été enregistré — réessaie ou préviens un admin.",
+    'pt': "⚠️ Não foi possível salvar o ranking no banco de dados (`{error}`). Nada foi registrado — tente novamente ou avise um admin.",
+    'de': "⚠️ Die Rangliste konnte nicht in der Datenbank gespeichert werden (`{error}`). Es wurde nichts gespeichert — versuche es erneut oder sag einem Admin Bescheid.",
+}
 TRANSLATIONS['ladder.ui_error'] = {
     'en': "⚠️ That step failed (`{where}`: `{error}`). Nothing was lost — re-run `/ladder` to pick up where you left off. The full traceback is in the bot log.",
     'es': "⚠️ Ese paso falló (`{where}`: `{error}`). No se perdió nada — vuelve a ejecutar `/ladder` para continuar donde lo dejaste. El error completo está en el registro del bot.",

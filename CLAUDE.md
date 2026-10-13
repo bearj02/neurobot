@@ -2074,3 +2074,74 @@ fix.** A bot with "Public Bot" enabled in the Discord Developer Portal can
 be added to any server by anyone with the invite link. Turning that toggle
 off (Developer Portal -> your application -> Bot -> Public Bot) restricts
 adding it to the application owner, which is what stops it recurring.
+
+## Discord's 1024-char embed field limit, and the fence that costs 8 more
+
+The single most repeated bug in this codebase. Discord caps **one embed
+field's `value` at 1024 characters** and rejects the **entire message** with
+a 400 (`Invalid Form Body ... Must be 1024 or fewer in length`) if any field
+exceeds it — not a partial send, not a truncation. It must be handled before
+`add_field` is ever called, never caught afterwards.
+
+`utils.py` holds the shared vocabulary: `EMBED_FIELD_LIMIT` (1024),
+`CODE_FENCE_OVERHEAD` (8), `FENCED_FIELD_LIMIT` (1016),
+`chunk_lines_to_fit()` and `truncate_cell()`. The chunker used to live in
+`siege.py`; it moved so `ladder_flow` could share one implementation rather
+than grow a second that drifts, and siege keeps the old private alias.
+
+**The arithmetic error to recognise: budgeting the full 1024 for a body and
+then wrapping it in a code fence.** `"```\n" + body + "\n```"` adds 8
+characters that count toward the same limit. Anything fencing a field value
+budgets `FENCED_FIELD_LIMIT`, never `EMBED_FIELD_LIMIT`.
+
+**`/ladder`'s final step could never have succeeded, for any league, with
+any names.** `build_final_embed` chunked at 1985 — a *description* budget,
+not a field one — then fenced each chunk. A full 16-slot ladder is 18 lines
+of 60-62 characters: 1099 before the fence, 1107 after. Unconditional, not
+an edge case. It surfaced only once discord.py's logging was configured and
+`ReorderView.on_error` put the traceback somewhere visible; before that it
+was a silent "This interaction failed".
+
+**Chunking alone is not sufficient — a chunker can only split *between*
+lines.** One long name can overrun a field on its own, so names are also
+clamped with `truncate_cell()` to `_NAME_COL` (18). Opponent names come from
+a free-text modal with `max_length=1600` for the whole CSV, so that is
+reachable, and the `:<18` format specs pad but never truncate.
+
+Sites that currently budget correctly, all pinned by tests: `ladder_flow`'s
+four embeds (step 1, step 2, step 4, final) and `optimized_bot`'s three
+fenced fields (`/dscores`, `/history`, `/test`). The `optimized_bot` count
+is asserted as **exactly 3** rather than "appears somewhere" — an existence
+check passes while any one site is wrong, which a mutation test caught it
+doing for `/test` specifically. Add a fourth fenced field and raise the
+number; don't delete the assertion.
+
+**A `[:15]` or `[:1017]` fallback is not a bound.** Both appeared as
+"safety checks" and neither was one: fifteen long rows still overflow, and
+1017 plus a fence is 1028. Chunk instead.
+
+## Ladder buttons: answer Discord first, and never touch the channel
+
+Two rules in `ladder_flow`, both from real failures:
+
+- **Acknowledge the interaction before doing database work.** Discord fails
+  a click not answered within 3 seconds. `save_ladder_to_db` writes 16 slots;
+  as 16 separately-committed upserts (one fsync each) that was enough to
+  blow the window on a slow host disk. Hence `db.upsert_ladder_slots`, which
+  does all 16 in one transaction, and `_save_or_report`, which runs *after*
+  the response and reports a failure through followup rather than letting it
+  escape into discord.py's handler where nobody would see it.
+- **Update through the interaction, never `message.edit` or
+  `channel.send`.** `message.edit` goes through the channel REST endpoint
+  and needs View Channel; `channel.send` needs Send Messages and Embed
+  Links. An interaction response or followup needs no channel permissions at
+  all. A bot that couldn't see the ladder channel got 403 Missing Access
+  (50001) *after* the view had rebuilt its buttons with new custom ids —
+  Discord kept showing the old buttons, the next click carried an id the bot
+  no longer knew, and discord.py discarded it as an unknown view: "This
+  interaction failed", with no handler ever running.
+
+`LadderMatchupInfoModal.apply_to_state()` exists so a modal's `on_submit`
+override can apply the values and then answer with
+`inter.response.edit_message`, instead of calling the base `on_submit`
+(which defers) and being forced into `inter.message.edit` afterwards.

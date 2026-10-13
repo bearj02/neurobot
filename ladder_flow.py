@@ -19,9 +19,22 @@ import asyncio
 from logger_config import global_logger as logger
 import db
 import i18n
+from utils import (EMBED_FIELD_LIMIT, FENCED_FIELD_LIMIT,
+                   chunk_lines_to_fit, truncate_cell)
 
 MATCHUP_SIZE     = 16  # how many of a league's active/rostered players actually play a given ladder — see this file's header docstring for the playing-vs-active distinction
 PLAYERS_PER_PAGE = 20
+
+# Width of the two name columns in the final monospace table. Names longer
+# than this are cut with '..' — the format specs pad but never truncate, so
+# without this one long IGN both wrecks the column alignment and makes its
+# row long enough to breach the field limit on its own, which no amount of
+# chunking can fix.
+_NAME_COL = 18
+
+# The table is wrapped in a code fence, so it gets the fenced budget — see
+# utils.CODE_FENCE_OVERHEAD for why that is not just EMBED_FIELD_LIMIT.
+_TABLE_BUDGET = FENCED_FIELD_LIMIT
 SORT_OPTION_KEYS = [
     ("ladder.sort.pwr_rank",    "pwr_rank"),
     ("ladder.sort.yearly_avg",  "avg_yearly"),
@@ -229,14 +242,30 @@ class PlayerToggleView(View):
         await interaction.response.edit_message(embed=self._build_embed(), view=self)
 
     async def _advance(self, interaction: discord.Interaction):
+        """
+        Step 1 -> step 2. Answers Discord and nothing else.
+
+        This used to loop over every player in the pool running
+        `UPDATE players SET status='A' WHERE ign=? AND team_id=?`, one
+        db.execute (and therefore one commit, and therefore one fsync) per
+        player, *before* responding to the click.
+
+        That write was a guaranteed no-op: state.players comes from
+        db.get_team_stats(), whose query is `team_id=? AND status='A'`, so
+        every row it touched was already 'A'. Selection for a ladder is not
+        stored on players.status at all — it lives in LadderState.selected
+        and then in matchup_ladder (see this file's header on the
+        active/rostered vs playing distinction).
+
+        So it bought nothing and cost one fsync per rostered player on the
+        critical path to Discord's 3-second acknowledgement deadline. Blow
+        that deadline and the clicker gets "This interaction failed" with no
+        further explanation, which is exactly the symptom this caused. The
+        same failure mode is documented on db.upsert_ladder_slots, which was
+        batched into a single transaction for this reason — this path just
+        never got the same treatment.
+        """
         self.stop()
-        all_igns = [p['ign'] for p in self.state.players]
-        for ign in all_igns:
-            new_status = 'A'  # all roster players stay Active; ladder stores selection separately
-            await db.execute(
-                "UPDATE players SET status=? WHERE ign=? AND team_id=?",
-                (new_status, ign, self.state.team_id)
-            )
         view = OpponentEntryView(self.state)
         await interaction.response.edit_message(embed=view._build_embed(), view=view)
 
@@ -252,9 +281,14 @@ class PlayerToggleView(View):
             color=discord.Color.blurple()
         )
         if self.state.selected:
+            # One comma-joined line rather than one line per player, so this
+            # is clamped directly instead of chunked. Same 1024 limit.
+            value = ", ".join(f"`{truncate_cell(p, _NAME_COL)}`" for p in self.state.selected)
+            if len(value) > EMBED_FIELD_LIMIT:
+                value = value[:EMBED_FIELD_LIMIT - 3] + "..."
             embed.add_field(
                 name=i18n.t('ladder.step1.selected_label', lang),
-                value=", ".join(f"`{p}`" for p in self.state.selected),
+                value=value,
                 inline=False
             )
         return embed
@@ -329,11 +363,14 @@ class LadderMatchupInfoModal(Modal, title="Matchup Info"):
         if state.our_rank:
             self.rank.default = str(state.our_rank)
 
-    async def on_submit(self, interaction: discord.Interaction):
+    def apply_to_state(self):
         self.state.opponent_league_name = self.opp_name.value.strip() or None
         self.state.event_type = self.division.value.strip().upper() or None
         rank_val = self.rank.value.strip()
         self.state.our_rank = int(rank_val) if rank_val.isdigit() else None
+
+    async def on_submit(self, interaction: discord.Interaction):
+        self.apply_to_state()
         await interaction.response.defer()
 
 
@@ -385,9 +422,11 @@ class OpponentEntryView(View):
         modal = LadderMatchupInfoModal(self.state)
 
         async def on_submit(inter):
-            await LadderMatchupInfoModal.on_submit(modal, inter)
+            modal.apply_to_state()
             self._rebuild()
-            await inter.message.edit(embed=self._build_embed(), view=self)
+            # Update the ladder message AS the response to this submit — see
+            # _enter's on_submit for why this must not be inter.message.edit.
+            await inter.response.edit_message(embed=self._build_embed(), view=self)
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
@@ -416,31 +455,43 @@ class OpponentEntryView(View):
             modal.opponents.default = existing
 
         async def on_submit(inter):
-            await OpponentCSVModal.on_submit(modal, inter)
             parsed = _parse_csv_opponents(modal.opponents.value)
             for i, opp in enumerate(parsed[:MATCHUP_SIZE]):
                 self.state.opponents[i] = opp
             self._rebuild()
-            await inter.message.edit(embed=self._build_embed(), view=self)
+            # Must be the interaction response, NOT defer() + inter.message.edit().
+            # message.edit goes through the channel REST endpoint, which needs the
+            # bot to have View Channel there; an interaction response needs no
+            # channel permissions at all. On Reborn the bot couldn't see the
+            # ladder channel, so the edit raised 403 Missing Access (50001) —
+            # after _rebuild() had already swapped in buttons with new custom
+            # ids. Discord kept showing the old buttons, so the next click
+            # (Done) carried an id the bot no longer knew and discord.py
+            # discarded it: "This interaction failed", no handler ever ran.
+            await inter.response.edit_message(embed=self._build_embed(), view=self)
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
 
     async def _advance(self, interaction: discord.Interaction):
         self.stop()
-        # Save now, the same way the final "Confirm Matchups" step does — this
-        # is the point the opponent list is confirmed. If the flow gets aborted
-        # after this, re-running /ladder will pick it back up via _enter above.
-        # Finishing the ladder later just overwrites these same rows.
-        identity = list(range(MATCHUP_SIZE))
-        await save_ladder_to_db(self.state, identity, identity)
         picker = SortPickerView(self.state)
         embed  = discord.Embed(
             title=i18n.t('ladder.step3.title', self.state.lang),
             description=i18n.t('ladder.step3.desc', self.state.lang),
             color=discord.Color.purple()
         )
+        # Answer Discord BEFORE touching the db. Discord fails the click if it
+        # isn't acknowledged within 3 seconds, and the save used to come first
+        # — on a slow disk (or if it raised) the button just "failed" with
+        # nothing in the channel to say why.
         await interaction.response.edit_message(embed=embed, view=picker)
+        # Save now, the same way the final "Confirm Matchups" step does — this
+        # is the point the opponent list is confirmed. If the flow gets aborted
+        # after this, re-running /ladder will pick it back up via _enter above.
+        # Finishing the ladder later just overwrites these same rows.
+        identity = list(range(MATCHUP_SIZE))
+        await _save_or_report(interaction, self.state, identity, identity)
 
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang
@@ -465,13 +516,22 @@ class OpponentEntryView(View):
         for i, o in enumerate(self.state.opponents):
             icon  = "✅" if o['name'] != '-' else "⬜"
             ovr   = f"  DEF:{o['def_ovr']}" if o['def_ovr'] else ""
-            entry = f"{icon} `#{i+1}` {o['name']}{ovr}"
+            # Opponent names arrive from a free-text modal (1600 chars for
+            # the whole CSV), so one of them can overrun the 1024-character
+            # field limit unaided and take the whole message down with it.
+            entry = f"{icon} `#{i+1}` {truncate_cell(o['name'], _NAME_COL)}{ovr}"
             if i < 8:
                 lines_1.append(entry)
             else:
                 lines_2.append(entry)
-        embed.add_field(name=i18n.t('ladder.step2.slots1_8', lang),  value="\n".join(lines_1), inline=True)
-        embed.add_field(name=i18n.t('ladder.step2.slots9_16', lang), value="\n".join(lines_2), inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(lines_1, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step2.slots1_8', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(lines_2, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step2.slots9_16', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
         return embed
 
 
@@ -656,12 +716,16 @@ class ReorderView(View):
     async def _confirm(self, interaction: discord.Interaction):
         self.stop()
         embed = build_final_embed(self.state, self.our_order, self.opp_order)
-        await save_ladder_to_db(self.state, self.our_order, self.opp_order)
+        # Acknowledge first, save second — see OpponentEntryView._advance.
         await interaction.response.edit_message(
             content=i18n.t('ladder.step4.finalized_content', self.state.lang), embed=None, view=None
         )
-        channel = interaction.channel or self.state.channel
-        await channel.send(embed=embed)
+        if not await _save_or_report(interaction, self.state, self.our_order, self.opp_order):
+            return
+        # Posted through the interaction's followup webhook, not channel.send:
+        # the latter needs Send Messages/Embed Links in the channel, the former
+        # needs nothing (same reasoning as the modal submits in step 2).
+        await interaction.followup.send(embed=embed)
 
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang
@@ -673,23 +737,35 @@ class ReorderView(View):
             color=discord.Color.purple()
         )
 
+        # Same 1024-per-field limit that broke build_final_embed below, and
+        # the same cause if it ever fires here: these join one line per slot
+        # with no budget. Names are clamped so a single long one can't
+        # overrun the field on its own, and the join is chunked so sixteen
+        # ordinary ones can't either.
         our_lines = []
         for rank, idx in enumerate(self.our_order):
             ign    = self.state.selected[idx]
             p      = next((x for x in self.state.players if x['ign'] == ign), {})
             pwr    = f"{p['pwr_rank']:.1f}" if p.get('pwr_rank') else '-'
             marker = "**>**" if self.panel == 'ours' and rank == self.our_cursor else "   "
-            our_lines.append(f"{marker} `{rank+1:02d}` {ign} *({pwr})*")
+            our_lines.append(f"{marker} `{rank+1:02d}` {truncate_cell(ign, _NAME_COL)} *({pwr})*")
 
         opp_lines = []
         for rank, idx in enumerate(self.opp_order):
             opp    = self.state.opponents[idx]
             def_s  = str(opp['def_ovr']) if opp['def_ovr'] else '-'
             marker = "**>**" if self.panel == 'opps' and rank == self.opp_cursor else "   "
-            opp_lines.append(f"{marker} `{rank+1:02d}` {opp['name']} *(DEF {def_s})*")
+            opp_lines.append(
+                f"{marker} `{rank+1:02d}` {truncate_cell(opp['name'], _NAME_COL)} *(DEF {def_s})*")
 
-        embed.add_field(name=i18n.t('ladder.step4.field_our', lang), value="\n".join(our_lines), inline=True)
-        embed.add_field(name=i18n.t('ladder.step4.field_opp', lang), value="\n".join(opp_lines), inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(our_lines, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step4.field_our', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
+        for i, chunk in enumerate(chunk_lines_to_fit(opp_lines, max_chunks=2)):
+            embed.add_field(
+                name=i18n.t('ladder.step4.field_opp', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
+                value=chunk, inline=True)
         return embed
 
 
@@ -723,32 +799,31 @@ def build_final_embed(state: LadderState,
     col_player   = i18n.t('ladder.final.col_player', lang)
     col_opponent = i18n.t('ladder.final.col_opponent', lang)
     rows = [
-        f"{'#':>2}  {col_player:<18}  vs  {col_opponent:<18}  {'TOT':>5}  {'DEF':>5}",
+        f"{'#':>2}  {truncate_cell(col_player, _NAME_COL):<{_NAME_COL}}  vs  "
+        f"{truncate_cell(col_opponent, _NAME_COL):<{_NAME_COL}}  {'TOT':>5}  {'DEF':>5}",
         "-" * 62
     ]
     for slot in range(MATCHUP_SIZE):
         our_idx = our_order[slot]
         opp_idx = opp_order[slot]
-        player  = state.selected[our_idx]
+        player  = truncate_cell(state.selected[our_idx], _NAME_COL)
         opp     = state.opponents[opp_idx]
+        name    = truncate_cell(opp['name'], _NAME_COL)
         tot_str = str(opp['total_ovr']) if opp['total_ovr'] else '-'
         def_str = str(opp['def_ovr'])   if opp['def_ovr']   else '-'
         rows.append(
-            f"{slot+1:>2}  {player:<18}  vs  {opp['name']:<18}  {tot_str:>5}  {def_str:>5}"
+            f"{slot+1:>2}  {player:<{_NAME_COL}}  vs  {name:<{_NAME_COL}}  {tot_str:>5}  {def_str:>5}"
         )
 
-    chunks, current, cur_len = [], [], 0
-    for row in rows:
-        if cur_len + len(row) + 1 > 1985:
-            chunks.append("\n".join(current))
-            current, cur_len = [row], len(row)
-        else:
-            current.append(row)
-            cur_len += len(row) + 1
-    if current:
-        chunks.append("\n".join(current))
-
-    for i, chunk in enumerate(chunks):
+    # This used to chunk at 1985 characters, which is a *description* budget,
+    # not a field one — and then wrap each chunk in a code fence on top. An
+    # embed field's value is capped at 1024, and Discord rejects the whole
+    # message with a 400 if any field exceeds it. A full 16-slot ladder is
+    # 18 lines of 60-62 characters, i.e. ~1100 before the fence, so this
+    # never fit: /ladder's final step failed every single time it was run to
+    # completion. Caught from a real traceback once discord.py's logging was
+    # actually configured (see logger_config).
+    for i, chunk in enumerate(chunk_lines_to_fit(rows, max_chars=_TABLE_BUDGET, max_chunks=4)):
         embed.add_field(
             name=i18n.t('ladder.final.field_matchups', lang) if i == 0 else i18n.t('ladder.final.field_matchups_cont', lang),
             value=f"```\n{chunk}\n```",
@@ -760,16 +835,17 @@ def build_final_embed(state: LadderState,
 async def save_ladder_to_db(state: LadderState,
                              our_order: list[int],
                              opp_order: list[int]):
+    slots = []
     for slot in range(MATCHUP_SIZE):
-        our_ign = state.selected[our_order[slot]]
-        opp     = state.opponents[opp_order[slot]]
-        await db.upsert_ladder_slot(
-            state.team_id, state.game_date, slot + 1,
-            opp_ign=opp['name'],
-            opp_def_ovr=opp['def_ovr'],
-            our_total_ovr=opp['total_ovr'],
-            our_ign=our_ign,
-        )
+        opp = state.opponents[opp_order[slot]]
+        slots.append({
+            'slot':          slot + 1,
+            'opp_ign':       opp['name'],
+            'opp_def_ovr':   opp.get('def_ovr'),
+            'our_total_ovr': opp.get('total_ovr'),
+            'our_ign':       state.selected[our_order[slot]],
+        })
+    await db.upsert_ladder_slots(state.team_id, state.game_date, slots)
 
     # Matchup-level context from screenshot extraction, if any of it was
     # actually visible/readable — set_matchup_info preserves whatever's
@@ -785,6 +861,29 @@ async def save_ladder_to_db(state: LadderState,
             event_type=state.event_type,
             our_rank=state.our_rank,
         )
+
+
+async def _save_or_report(interaction: discord.Interaction, state: LadderState,
+                          our_order: list[int], opp_order: list[int]) -> bool:
+    """
+    save_ladder_to_db for a button handler that has already answered the
+    interaction. A failure is logged with its traceback and reported to the
+    clicker via followup, rather than escaping into discord.py's handler where
+    nobody in the channel would ever see it. Returns whether the save worked.
+    """
+    try:
+        await save_ladder_to_db(state, our_order, opp_order)
+        return True
+    except Exception as e:
+        logger.exception(f"Ladder save failed for {state.team_id} on {state.game_date}: {e}")
+        try:
+            await interaction.followup.send(
+                i18n.t('ladder.save_failed', state.lang, error=f"{type(e).__name__}: {e}"),
+                ephemeral=True
+            )
+        except Exception:
+            logger.exception("Could not report ladder save failure to the user")
+        return False
 
 
 # ---------------------------------------------------------------------------
