@@ -2203,6 +2203,13 @@ TRANSLATIONS['ladder_cmd.match.placeholder'] = {
     'fr': "Faire correspondre « {name} » à...", 'pt': "Combinar '{name}' com...",
     'de': "'{name}' zuordnen zu...",
 }
+TRANSLATIONS['ladder_cmd.match.unreadable_slot'] = {
+    'en': "row {slot} (unreadable)",
+    'es': "fila {slot} (ilegible)",
+    'fr': "ligne {slot} (illisible)",
+    'pt': "linha {slot} (ilegível)",
+    'de': "Zeile {slot} (unlesbar)",
+}
 TRANSLATIONS['ladder_cmd.match.skip_option'] = {
     'en': "Skip — not actually in this league", 'es': "Omitir — no está realmente en esta liga",
     'fr': "Ignorer — pas réellement dans cette ligue", 'pt': "Pular — não está realmente nesta liga",
