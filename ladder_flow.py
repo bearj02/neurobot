@@ -121,6 +121,41 @@ def _empty_opponents() -> list[dict]:
 _OPPONENT_FIELDS = ('name', 'total_ovr', 'def_ovr')
 
 
+def validate_opponents(opponents: list[dict]) -> list[str]:
+    """
+    Check every field of every slot. Returns a list of human-readable
+    problems; empty means the ladder is safe to save.
+
+    A ladder is MATCHUP_SIZE rows of three fields — 48 values — and all 48
+    have to be there and be the right shape before anything is written. This
+    is the gate on saving, and it replaced guessing at how much of the
+    ladder the admin had "filled in": whether a name is present and an OVR
+    is a number is an objective fact about the data, where "has this slot
+    been touched" was an inference about intent that nothing could actually
+    answer.
+
+    Deliberately says nothing about the `Opponent N` defaults. A row the
+    admin chose to leave named that, with real OVRs beside it, is a row they
+    looked at and accepted — treating it as invalid would be this function
+    second-guessing them, and would put a special name back into the logic.
+    """
+    problems: list[str] = []
+    if len(opponents) != MATCHUP_SIZE:
+        problems.append(f"expected {MATCHUP_SIZE} rows, found {len(opponents)}")
+        return problems
+
+    for i, opp in enumerate(opponents, start=1):
+        name = opp.get('name')
+        if not isinstance(name, str) or not name.strip():
+            problems.append(f"#{i}: no name")
+        for field, label in (('total_ovr', 'Total OVR'), ('def_ovr', 'DEF OVR')):
+            value = opp.get(field)
+            # bool is an int subclass and would sail through otherwise.
+            if isinstance(value, bool) or not isinstance(value, int):
+                problems.append(f"#{i}: {label} missing or not a number")
+    return problems
+
+
 def fill_opponents(target: list[dict], source: list[dict] | None) -> int:
     """
     Overwrite `target`'s slots from `source`, in order, and return how many
@@ -523,33 +558,20 @@ class OpponentEntryView(View):
     async def _enter(self, interaction: discord.Interaction):
         lang = self.state.lang
         modal = OpponentCSVModal(lang=lang)
-        entered = self.state.opponents
 
-        # Nothing has been written into this ladder yet if it is still
-        # literally the set of defaults — a structural comparison, rather
-        # than asking each row whether it looks empty. There is no such
-        # thing as an empty row any more.
-        if self.state.opponents == _empty_opponents():
-            # Nothing entered yet this session — pull whatever was last saved
-            # to this team's ladder for this date (e.g. from an AI extraction
-            # in an earlier /ladder run that got aborted), so it can be
-            # reviewed and edited instead of starting from scratch.
-            saved = await db.get_ladder_snapshot(self.state.team_id, self.state.game_date)
-            restored = _empty_opponents()
-            fill_opponents(restored, [
-                {'name': r['opp_ign'], 'total_ovr': r.get('our_total_ovr'),
-                 'def_ovr': r['opp_def_ovr']}
-                for r in saved
-            ])
-            entered = restored
-
-        # All MATCHUP_SIZE rows, always. This is the thing the admin edits,
-        # so it is the whole ladder with the `Opponent N` defaults showing
-        # through wherever nothing better is known — not a partial list they
-        # have to work out the gaps in.
+        # Straight from the state — all MATCHUP_SIZE rows, always. This is
+        # the thing the admin edits, so it is the whole ladder with the
+        # `Opponent N` defaults showing through wherever nothing better is
+        # known, not a partial list they have to work out the gaps in.
+        #
+        # It used to decide whether to go and look for a saved ladder by
+        # comparing the state against a fresh set of defaults, i.e. by
+        # inferring whether anything had been written yet. That lookup now
+        # happens once in start_ladder_flow, which simply knows whether it
+        # was given an extraction — so nothing here has to guess.
         modal.opponents.default = '\n'.join(
             f"{o['name']}, {o['total_ovr'] or ''}, {o['def_ovr'] or ''}"
-            for o in entered
+            for o in self.state.opponents
         )
 
         async def on_submit(inter):
@@ -573,6 +595,21 @@ class OpponentEntryView(View):
         await interaction.response.send_modal(modal)
 
     async def _advance(self, interaction: discord.Interaction):
+        # Everything the ladder needs, checked before anything is written.
+        # Nothing is partially saved and nothing is guessed at: either all
+        # MATCHUP_SIZE rows carry a name and two numeric OVRs, or the admin
+        # is told exactly which rows don't and sent back to the editor with
+        # their work still on screen.
+        problems = validate_opponents(self.state.opponents)
+        if problems:
+            shown = problems[:10]
+            more = len(problems) - len(shown)
+            detail = ", ".join(shown) + (f", +{more} more" if more else "")
+            await interaction.response.send_message(
+                i18n.t('ladder.step2.incomplete', self.state.lang, problems=detail),
+                ephemeral=True)
+            return
+
         self.stop()
         picker = SortPickerView(self.state)
         embed  = discord.Embed(
@@ -1039,7 +1076,20 @@ async def start_ladder_flow(interaction: discord.Interaction,
 
     # Filled into the fixed-length slot list, never assigned over it — see
     # LadderState.opponents for the IndexError that caused.
-    fill_opponents(state.opponents, preopponents)
+    if preopponents:
+        fill_opponents(state.opponents, preopponents)
+    else:
+        # No extraction this run, so pick up whatever was last saved for
+        # this team and date — an earlier /ladder that was aborted partway,
+        # typically — and let it be reviewed rather than retyped. Decided
+        # here, where whether an extraction happened is simply known, rather
+        # than inferred later from what the slots look like.
+        saved = await db.get_ladder_snapshot(team_id, game_date)
+        fill_opponents(state.opponents, [
+            {'name': r['opp_ign'], 'total_ovr': r.get('our_total_ovr'),
+             'def_ovr': r['opp_def_ovr']}
+            for r in saved
+        ])
 
     view = PlayerToggleView(state)
     if interaction.response.is_done():
