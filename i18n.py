@@ -1597,6 +1597,13 @@ TRANSLATIONS['ladder.ui_error'] = {
     'pt': "⚠️ Essa etapa falhou (`{where}`: `{error}`). Nada foi perdido — execute `/ladder` novamente para continuar de onde parou. O erro completo está no log do bot.",
     'de': "⚠️ Dieser Schritt ist fehlgeschlagen (`{where}`: `{error}`). Es ging nichts verloren — führe `/ladder` erneut aus, um dort weiterzumachen, wo du aufgehört hast. Der vollständige Traceback steht im Bot-Log.",
 }
+TRANSLATIONS['ladder.step2.incomplete'] = {
+    'en': "⚠️ The ladder isn't complete yet. Every one of the 16 rows needs a name, a Total OVR and a DEF OVR.\nStill to fix — {problems}",
+    'es': "⚠️ El ranking aún no está completo. Cada una de las 16 filas necesita un nombre, un OVR Total y un DEF OVR.\nFalta corregir — {problems}",
+    'fr': "⚠️ Le classement n'est pas encore complet. Chacune des 16 lignes doit avoir un nom, un OVR Total et un DEF OVR.\nÀ corriger — {problems}",
+    'pt': "⚠️ O ranking ainda não está completo. Cada uma das 16 linhas precisa de um nome, um OVR Total e um DEF OVR.\nFalta corrigir — {problems}",
+    'de': "⚠️ Die Rangliste ist noch nicht vollständig. Jede der 16 Zeilen braucht einen Namen, einen Gesamt-OVR und einen DEF-OVR.\nNoch zu korrigieren — {problems}",
+}
 TRANSLATIONS['ladder.step2.title'] = {
     'en': "Step 2 — Enter Opponents ({total} slots)", 'es': "Paso 2 — Ingresar Oponentes ({total} posiciones)",
     'fr': "Étape 2 — Saisir les Adversaires ({total} positions)", 'pt': "Passo 2 — Inserir Oponentes ({total} posições)",

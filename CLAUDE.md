@@ -2239,6 +2239,22 @@ gated on a fill count either — it needed the same notion to gate on.
 return None for a field they had no value for, and `fill_opponents` skips
 those. It is never stored.
 
+**Saving is gated on validation, not on a fill count.** `validate_opponents`
+checks all 48 fields — 16 rows x name, Total OVR, DEF OVR — and step 2's
+Done button refuses to advance until every one is present and the right
+shape, naming the rows that aren't. Whether a name is there and an OVR is a
+number is an objective fact about the data; "has this slot been touched"
+was an inference about intent that nothing could actually answer. It says
+nothing about the `Opponent N` defaults on purpose: a row left named that
+with real OVRs beside it is a row the admin looked at and accepted, and
+rejecting it would put a special name back into the logic.
+
+**Resuming an aborted run is decided in `start_ladder_flow`**, by whether
+`preopponents` was passed — a fact the function already has — not by
+comparing the slots against a fresh set of defaults further down. An
+extraction therefore never gets overwritten by a stale saved ladder, which
+a later inference could get wrong.
+
 **`LadderState.opponents` is MATCHUP_SIZE from construction**, and
 `fill_opponents` overwrites it **per field**, never per row. It used to be
 assigned over with whatever the extraction returned, at whatever length:

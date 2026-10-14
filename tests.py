@@ -4009,11 +4009,17 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(opp_str, "")
 
 
-    async def test_opponent_entry_modal_loads_saved_snapshot(self):
-        """If nothing's been entered yet this session, the opponent-entry modal
-        should default to whatever's already saved to this team's ladder for
-        this date — e.g. from an earlier /ladder run that got aborted."""
-        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+    async def test_a_run_without_an_extraction_resumes_the_saved_ladder(self):
+        """An earlier /ladder that was aborted partway should come back to be
+        reviewed rather than retyped.
+
+        This lives in start_ladder_flow now, not in the entry modal. The
+        modal used to decide whether to go looking by comparing the slots
+        against a fresh set of defaults — inferring whether anything had been
+        written yet. Here, whether an extraction happened is simply known:
+        it is the preopponents argument."""
+        import ladder_flow
+        from ladder_flow import MATCHUP_SIZE
 
         for i in range(MATCHUP_SIZE):
             await db.upsert_ladder_slot(
@@ -4021,26 +4027,60 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
                 opp_ign=f"SavedOpp{i}", opp_def_ovr=200 + i,
                 our_total_ovr=7000 + i, our_ign=f"P{i}",
             )
+        for i in range(MATCHUP_SIZE):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, "
+                "def_ovr, total_ovr) VALUES ('NP',?,?,'A',200,200,6000)",
+                (f"Pl{i}", f"Pl{i}"))
 
-        state = LadderState.__new__(LadderState)
-        state.team_id   = "NP"
-        state.game_date = TODAY
-        state.lang      = "en"
+        captured = {}
+
+        class _View:
+            def __init__(self, state):
+                captured['state'] = state
+
+            def _build_embed(self):
+                return MagicMock()
+
+        inter = _FakeInteraction()
+        with patch.object(ladder_flow, "PlayerToggleView", _View):
+            await ladder_flow.start_ladder_flow(inter, "NP", TODAY)
+
+        names = [o['name'] for o in captured['state'].opponents]
+        self.assertEqual(names[0], "SavedOpp0")
+        self.assertEqual(names[15], "SavedOpp15")
+
+    async def test_an_extraction_is_not_overwritten_by_the_saved_ladder(self):
+        """The other half of that decision: given an extraction, the saved
+        rows must not be read at all, or yesterday's aborted run would
+        overwrite what was just read off the screenshot."""
         import ladder_flow
-        state.opponents = ladder_flow._empty_opponents()  # untouched this session
+        from ladder_flow import MATCHUP_SIZE
 
-        view = OpponentEntryView.__new__(OpponentEntryView)
-        view.state = state
+        await db.upsert_ladder_slot("NP", TODAY, 1, opp_ign="Stale",
+                                    opp_def_ovr=1, our_total_ovr=2, our_ign="x")
+        for i in range(MATCHUP_SIZE):
+            await db.execute(
+                "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, "
+                "def_ovr, total_ovr) VALUES ('NP',?,?,'A',200,200,6000)",
+                (f"Pl{i}", f"Pl{i}"))
 
-        inter = MagicMock()
-        inter.response = MagicMock()
-        inter.response.send_modal = AsyncMock()
+        captured = {}
 
-        await view._enter(inter)
+        class _View:
+            def __init__(self, state):
+                captured['state'] = state
 
-        modal = inter.response.send_modal.call_args.args[0]
-        self.assertIn("SavedOpp0", modal.opponents.default)
-        self.assertIn("SavedOpp15", modal.opponents.default)
+            def _build_embed(self):
+                return MagicMock()
+
+        inter = _FakeInteraction()
+        with patch.object(ladder_flow, "PlayerToggleView", _View):
+            await ladder_flow.start_ladder_flow(
+                inter, "NP", TODAY,
+                preopponents=[{"name": "Fresh", "total_ovr": 7000, "def_ovr": 210}])
+
+        self.assertEqual(captured['state'].opponents[0]['name'], "Fresh")
 
     # --- manual ladder building must also be able to set the opponent
     # league name / division / our rank, the same context an AI screenshot
@@ -9454,6 +9494,86 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(lines), MATCHUP_SIZE)
         self.assertTrue(lines[0].startswith("OnlyOne,"))
         self.assertTrue(lines[15].startswith("Opponent 16,"))
+
+    def test_a_complete_ladder_validates(self):
+        rows = [{"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200}
+                for i in range(self.lf.MATCHUP_SIZE)]
+        self.assertEqual(self.lf.validate_opponents(rows), [])
+
+    def test_all_48_fields_are_checked(self):
+        """16 rows x 3 fields. Every one has to be there and be the right
+        shape before anything is written."""
+        rows = [{"name": None, "total_ovr": None, "def_ovr": None}
+                for _ in range(self.lf.MATCHUP_SIZE)]
+        self.assertEqual(len(self.lf.validate_opponents(rows)),
+                         self.lf.MATCHUP_SIZE * 3)
+
+    def test_each_problem_names_the_row_it_is_in(self):
+        """It is a correction list, so it has to say where to go."""
+        rows = [{"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200}
+                for i in range(self.lf.MATCHUP_SIZE)]
+        rows[4]["def_ovr"] = None
+        rows[9]["name"] = "   "
+        problems = self.lf.validate_opponents(rows)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any(p.startswith("#5:") for p in problems))
+        self.assertTrue(any(p.startswith("#10:") for p in problems))
+
+    def test_an_ovr_that_is_not_a_number_is_rejected(self):
+        rows = [{"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200}
+                for i in range(self.lf.MATCHUP_SIZE)]
+        rows[0]["total_ovr"] = "7000"
+        self.assertTrue(self.lf.validate_opponents(rows))
+        # bool is an int subclass and would otherwise sail through
+        rows[0]["total_ovr"] = True
+        self.assertTrue(self.lf.validate_opponents(rows))
+
+    def test_a_default_name_is_not_itself_a_validation_failure(self):
+        """A row the admin left named 'Opponent 3', with real OVRs beside
+        it, is a row they looked at and accepted. Rejecting it would be the
+        bot second-guessing them, and would put a special name back into the
+        logic — which is the thing this whole model removed."""
+        rows = [{"name": f"Opponent {i+1}", "total_ovr": 7000, "def_ovr": 200}
+                for i in range(self.lf.MATCHUP_SIZE)]
+        self.assertEqual(self.lf.validate_opponents(rows), [])
+
+    def test_the_wrong_number_of_rows_is_rejected(self):
+        self.assertTrue(self.lf.validate_opponents(
+            [{"name": "T", "total_ovr": 1, "def_ovr": 2}]))
+
+    async def test_done_refuses_to_advance_an_incomplete_ladder(self):
+        """Nothing is written and nothing is guessed at — the admin is sent
+        back with their work still on screen and told which rows to fix."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+        state = LadderState("NP", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        view = OpponentEntryView(state)
+
+        inter = _FakeInteraction()
+        with patch.object(self.lf, "save_ladder_to_db",
+                          new=AsyncMock()) as saved:
+            await view._advance(inter)
+
+        saved.assert_not_awaited()
+        self.assertEqual(len(inter.response.edits), 0, "it advanced anyway")
+        self.assertEqual(len(inter.response.messages), 1)
+        self.assertIn("#1", inter.response.messages[0]["content"])
+
+    async def test_done_advances_once_every_field_is_there(self):
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+        state = LadderState("NP", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        self.lf.fill_opponents(state.opponents, [
+            {"name": f"T{i}", "total_ovr": 7000, "def_ovr": 200}
+            for i in range(MATCHUP_SIZE)])
+        view = OpponentEntryView(state)
+
+        inter = _FakeInteraction()
+        with patch.object(self.lf, "_save_or_report", new=AsyncMock(return_value=True)):
+            await view._advance(inter)
+        self.assertEqual(len(inter.response.edits), 1)
 
     def test_a_short_list_built_elsewhere_is_repaired_loudly(self):
         """Belt and braces for a state not built through LadderState — but
