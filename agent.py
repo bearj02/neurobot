@@ -32,20 +32,29 @@ The screen shows two teams side by side, each in its own header badge at the top
 The LEFT side is the opponent team.
 The RIGHT side is OUR team (NeuroPerverse or another Neuro league).
 
-Extract ALL of the following and return ONLY valid JSON with this exact structure:
+Each side has exactly 16 players, listed top to bottom. Report them by slot,
+where slot_1 is the topmost row and slot_16 the bottom one:
 {
   "opponent_league_name": "OpponentTeamName",
   "event_type": "E1",
   "our_rank": 45,
-  "opponents": [
-    {"name": "PlayerName", "total_ovr": 7200, "def_ovr": 245}
-  ],
-  "our_players": [
-    {"real_ign": "PlayerName", "total_ovr": 7143, "off_ovr": 250, "def_ovr": 232}
-  ]
+  "opponents": {
+    "slot_1":  {"name": "PlayerName", "total_ovr": 7200, "def_ovr": 245},
+    "slot_2":  {"name": null, "total_ovr": null, "def_ovr": null},
+    "...":     "through slot_16"
+  },
+  "our_players": {
+    "slot_1":  {"real_ign": "PlayerName", "total_ovr": 7143, "off_ovr": 250, "def_ovr": 232},
+    "...":     "through slot_16"
+  }
 }
 
 Rules:
+- Slot numbers are screen positions, not a ranking. Never sort or rearrange.
+- A slot you cannot read is that slot with null fields. Do NOT shift the rows
+  below it up to close the gap — that turns one unreadable row into every
+  later row being attributed to the wrong player.
+- Every slot from slot_1 to slot_16 must be present on both sides.
 - opponent_league_name: the opposing team's name, shown in its header badge
   (the same place a name like "seams suspicious" or "Dynasty 1" would appear).
   Use null if not visible.
@@ -270,30 +279,128 @@ def _schema_object(properties: dict) -> dict:
     }
 
 
-LADDER_OUTPUT_SCHEMA = _schema_object({
-    "opponent_league_name": _NULLABLE_STR,
-    # The enum is the same conversion table the system prompt spells out, now
-    # enforced rather than requested — db writes read event_type directly.
-    "event_type": {"anyOf": [
-        {"type": "string", "enum": ["E1", "E2", "E3", "HOF", "Gold-"]},
-        {"type": "null"},
-    ]},
-    "our_rank": _NULLABLE_INT,
-    "opponents": {"type": "array", "items": _schema_object({
-        "name":      _NULLABLE_STR,
-        "total_ovr": _NULLABLE_INT,
-        "def_ovr":   _NULLABLE_INT,
-    })},
-    "our_players": {"type": "array", "items": _schema_object({
-        "real_ign":  _NULLABLE_STR,
-        "total_ovr": _NULLABLE_INT,
-        "off_ovr":   _NULLABLE_INT,
-        "def_ovr":   _NULLABLE_INT,
-    })},
-})
+# A ladder is exactly this many slots per side, and the screen order is the
+# ladder order. Mirrors ladder_flow.MATCHUP_SIZE, which isn't imported here to
+# keep discord out of this module's import graph — a test pins the two equal.
+LADDER_SLOTS = 16
+_SLOT_KEYS = tuple(f"slot_{i}" for i in range(1, LADDER_SLOTS + 1))
+
+# Characters that survive the model fine but break the CSV the admin edits in
+# step 2: that format is one `name, total, def` per line, split on commas, so
+# a comma inside a name silently shifts the two numbers. Quotes and
+# apostrophes are stripped alongside it because a name is round-tripped
+# through a text modal and back, and a stray quote there is noise at best.
+_CSV_HOSTILE = str.maketrans({",": " ", '"': "", "'": "", "`": "", "\n": " ", "\r": " "})
 
 
-async def extract_ladder_from_screenshots(attachment_urls: list[str]) -> dict:
+def sanitize_name(value):
+    """
+    Make an extracted name safe to put in the step-2 CSV and read back.
+
+    Returns None unchanged — null is the model declining a row, and turning
+    that into "" would make an unread row look like a read one.
+    """
+    if value is None:
+        return None
+    cleaned = " ".join(str(value).translate(_CSV_HOSTILE).split())
+    return cleaned or None
+
+
+def _slot_object(item_props: dict) -> dict:
+    """One side of the ladder as slot_1..slot_16, not as an array.
+
+    Arrays can't be length-constrained — `minItems`/`maxItems` are among the
+    constraints structured outputs rejects — and leaving it open is how one
+    run returned 21 rows and another returned 14 opponents against 17 of our
+    players. A fixed set of required keys makes "exactly 16, in order" a
+    property of the schema rather than something to repair afterwards: the
+    model has to place every row it reads into a specific slot, and a row it
+    can't read is that slot with null fields rather than a missing entry that
+    shifts everything below it up by one.
+    """
+    return _schema_object({k: _schema_object(item_props) for k in _SLOT_KEYS})
+
+
+def _slots_to_list(side: dict) -> list[dict]:
+    """slot_1..slot_16 back to the ordered 16-list callers expect."""
+    return [dict(side.get(k) or {}, _slot=i)
+            for i, k in enumerate(_SLOT_KEYS, start=1)]
+
+
+def build_ladder_schema(roster: list[str] | None = None) -> dict:
+    """
+    The ladder output schema, with `our_players[].real_ign` bound to this
+    league's active roster when one is supplied.
+
+    **This is the mechanism that makes our-side names correct, and it
+    replaces reconciling them afterwards.** `enum` is enforced during
+    decoding, so a name that is not on the roster is not a thing the model
+    can emit — there is nothing to match, nothing to fuzzy-match, and
+    nothing to clean up. Extracting free text and then reconciling it
+    against the roster was the wrong shape: it made every downstream step
+    responsible for a guarantee the request should have carried.
+
+    `null` stays allowed. That is not a hole in the constraint — it is the
+    difference between "this row is someone not on the roster" (now
+    impossible) and "I could not read this row" (always possible, and the
+    honest answer). Forcing a non-null pick would make an unreadable row
+    into a confidently wrong one, which is strictly worse: a dropped row is
+    visible in the count, a wrong row is not.
+
+    **The enum narrows the candidates; it does not finish the job.**
+    `real_ign` is explicitly not unique, so two active players in one league
+    can share one, and the enum carries each distinct spelling once. Whether
+    a returned name identifies exactly one player is a question only the
+    caller can answer, and 0 or >1 both mean "ask the admin" — see
+    db.get_players_by_real_ign and /ladder's resolution loop.
+
+    With no roster the field falls back to free text, so the extractor still
+    works for a league with no active players. Callers that have a roster
+    should always pass it.
+    """
+    if roster:
+        # sorted+set: the request body must be byte-stable across calls for
+        # the server-side schema cache to hit. Collapsing a shared real_ign
+        # to one entry is correct here — a duplicate enum value would mean
+        # nothing to the model — and the ambiguity it hides is resolved by
+        # the caller, not swallowed.
+        names = sorted({n for n in roster if n})
+    else:
+        names = []
+    real_ign = ({"anyOf": [{"type": "string", "enum": names}, {"type": "null"}]}
+                if names else _NULLABLE_STR)
+
+    return _schema_object({
+        "opponent_league_name": _NULLABLE_STR,
+        # The enum is the same conversion table the system prompt spells out,
+        # now enforced rather than requested — db writes read event_type directly.
+        "event_type": {"anyOf": [
+            {"type": "string", "enum": ["E1", "E2", "E3", "HOF", "Gold-"]},
+            {"type": "null"},
+        ]},
+        "our_rank": _NULLABLE_INT,
+        # Opponent names are genuinely free text — they belong to the other
+        # league and this bot has no roster for them.
+        "opponents": _slot_object({
+            "name":      _NULLABLE_STR,
+            "total_ovr": _NULLABLE_INT,
+            "def_ovr":   _NULLABLE_INT,
+        }),
+        "our_players": _slot_object({
+            "real_ign":  real_ign,
+            "total_ovr": _NULLABLE_INT,
+            "off_ovr":   _NULLABLE_INT,
+            "def_ovr":   _NULLABLE_INT,
+        }),
+    })
+
+
+# The unbound form, for a caller with no roster to hand.
+LADDER_OUTPUT_SCHEMA = build_ladder_schema()
+
+
+async def extract_ladder_from_screenshots(attachment_urls: list[str],
+                                          roster: list[str] | None = None) -> dict:
     """
     Send up to 3 screenshot URLs to Haiku and extract ladder data.
 
@@ -340,14 +447,44 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str]) -> dict:
                 }
             })
 
-        content.append({
-            "type": "text",
-            "text": (
-                f"These are {len(images)} screenshot(s) of a Madden Mobile "
-                "League vs League matchup. Extract both the opponent players "
-                "(left side) and our players (right side) as JSON."
+        prompt = (
+            f"These are {len(images)} screenshot(s) of a Madden Mobile "
+            "League vs League matchup. Extract both the opponent players "
+            "(left side) and our players (right side) as JSON."
+        )
+        prompt += (
+            f"\n\nEach side has exactly {LADDER_SLOTS} players. Report them as "
+            f"slot_1 through slot_{LADDER_SLOTS}, in the order they appear on "
+            "screen from top to bottom. The order is the matchup order and "
+            "carries meaning: slot_3 on the left faces slot_3 on the right. "
+            "Do not sort, rank or rearrange them. If a row is not legible, "
+            "give nulls for that slot — never close the gap by shifting the "
+            "rows below it up, because that silently repairs one unreadable "
+            "row into every later row being wrong."
+        )
+        if roster:
+            # The schema already makes anything off this list undecodable.
+            # Naming it here as well is what lets the model *read* a smudged
+            # row as the roster entry it resembles, instead of abstaining —
+            # the constraint prevents wrong answers, the list enables right
+            # ones.
+            names = sorted({n for n in roster if n})
+            prompt += (
+                "\n\nEvery player on the RIGHT side is one of these "
+                f"{len(names)} league members, listed exactly as their name "
+                "is spelled:\n"
+                + "\n".join(f"- {n}" for n in names)
+                + "\n\nFor each right-side slot, give the entry from that list "
+                  "it matches. Use each name at most once. If a row is not "
+                  "legible enough to tell which member it is, use null for "
+                  "that slot's real_ign rather than guessing."
             )
-        })
+        if len(images) > 1:
+            prompt += ("\n\nThe screenshots may overlap and show some of the "
+                       "same rows. They are views of one list — put each "
+                       "player in the slot matching their position in it, not "
+                       "once per screenshot.")
+        content.append({"type": "text", "text": prompt})
 
         payload = {
             "model":      MODEL,
@@ -364,7 +501,8 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str]) -> dict:
             "max_tokens": 3000,
             "system":     SYSTEM_PROMPT,
             "output_config": {
-                "format": {"type": "json_schema", "schema": LADDER_OUTPUT_SCHEMA},
+                "format": {"type": "json_schema",
+                           "schema": build_ladder_schema(roster)},
             },
             "messages":   [{"role": "user", "content": content}],
         }
@@ -377,12 +515,23 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str]) -> dict:
     result.setdefault("opponent_league_name", None)
     result.setdefault("event_type", None)
     result.setdefault("our_rank", None)
+    result["opponent_league_name"] = sanitize_name(result["opponent_league_name"])
 
+    # slot_1..slot_16 back to ordered 16-lists, so the index a caller reads
+    # is the position on screen. Every slot is present whether or not the
+    # model could read it; a null row stays a null row in place.
+    result["opponents"]   = _slots_to_list(result["opponents"])
+    result["our_players"] = _slots_to_list(result["our_players"])
+    for o in result["opponents"]:
+        o["name"] = sanitize_name(o.get("name"))
+
+    read_opp = sum(1 for o in result["opponents"] if o.get("name"))
+    read_our = sum(1 for p in result["our_players"] if p.get("real_ign"))
     logger.info(
-        f"Haiku extracted {len(result['opponents'])} opponents "
-        f"and {len(result['our_players'])} our players "
+        f"Haiku read {read_opp}/{LADDER_SLOTS} opponent slots and "
+        f"{read_our}/{LADDER_SLOTS} of our slots "
         f"(league={result['opponent_league_name']!r}, event_type={result['event_type']!r}, "
-        f"our_rank={result['our_rank']!r})"
+        f"our_rank={result['our_rank']!r}, roster_bound={bool(roster)})"
     )
     return result
 

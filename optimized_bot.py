@@ -2614,6 +2614,80 @@ class OvrSanityCheckView(View):
         )
 
 
+
+
+async def _resolve_our_players(our_players: list[dict], league: str, lang: str) -> dict:
+    """
+    Step 3 of /ladder's screenshot flow: turn each extracted right-side slot
+    into either a known roster member or a question for the admin.
+
+    **A slot resolves automatically only when it identifies exactly ONE
+    roster member.** Both other outcomes go to the admin:
+
+      0 matches  — the model declined the row (null real_ign, meaning it
+                   couldn't read it), or the roster was too empty to bind an
+                   enum so it returned something not on the list.
+      >1 matches — `real_ign` is explicitly not unique, so one spelling can
+                   belong to two people on the same roster. Picking either
+                   would attribute this screenshot's OVR to possibly the
+                   wrong player's permanent record, which is silent and
+                   sticks. An ambiguous name is not a match.
+
+    `claimed` is what makes that *uniquely* rather than merely "exactly one
+    row in the table": a name the model put in two different slots can only
+    resolve the first, because by the second there is nobody left that it
+    identifies.
+
+    Extracted into a plain function because `ladder_slash` is
+    `@tree.command`-decorated and cannot be called under this codebase's
+    stub — the same reason `_handle_app_command_error` was split out of
+    `on_app_command_error`. This is the part worth testing directly.
+
+    Returns {'preselected', 'missing', 'notifications', 'suspicious'}.
+    """
+    notifications: list[str]  = []
+    missing:       list[dict] = []   # full extracted dicts — the OVR is applied once matched
+    preselected:   list[str]  = []
+    suspicious:    list[dict] = []
+    claimed:       set[str]   = set()
+
+    for p in our_players:
+        real_ign = p.get("real_ign")
+        slot     = p.get("_slot")
+
+        if not real_ign:
+            # Null is the schema's abstention: the row exists, it just
+            # wasn't legible. Hand it over labelled by its slot — the one
+            # thing still known about it, and enough for an admin looking at
+            # the same screenshot to say who it is.
+            missing.append({**p, "_label": i18n.t('ladder_cmd.match.unreadable_slot',
+                                                  lang, slot=slot if slot else '?')})
+            continue
+
+        candidates = [r for r in await db.get_players_by_real_ign(real_ign, team_id=league)
+                      if r["ign"] not in claimed]
+
+        if len(candidates) != 1:
+            logger.info(
+                "/ladder %s slot %s: %r identifies %d roster member(s) — asking the admin",
+                league, slot, real_ign, len(candidates))
+            missing.append(p)
+            continue
+
+        row = candidates[0]
+        claimed.add(row["ign"])
+
+        checked = _check_ovr_changes(row, p)
+        note = await _commit_ovr_updates(row, checked['normal'], lang)
+        if note:
+            notifications.append(note)
+        if checked['suspicious']:
+            suspicious.append({'row': row, 'suspicious': checked['suspicious']})
+        preselected.append(row["ign"])
+
+    return {'preselected': preselected, 'missing': missing,
+            'notifications': notifications, 'suspicious': suspicious}
+
 class LadderPlayerMatchView(View):
     """
     Shown when the screenshot extraction found one or more of "our" players
@@ -2660,7 +2734,11 @@ class LadderPlayerMatchView(View):
 
         used_igns = set(already_matched)
         for entry in self.missing_entries:
-            extracted_name = entry.get("real_ign") or "?"
+            # `_label` is set for a slot the model declined outright — there
+            # is no name to show, so it is identified by its position in the
+            # screenshot instead, which is what an admin looking at the same
+            # image needs to find the row.
+            extracted_name = entry.get("_label") or entry.get("real_ign") or "?"
             options = [discord.SelectOption(
                 label=i18n.t('ladder_cmd.match.skip_option', lang), value="__skip__"
             )]
@@ -2841,8 +2919,20 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
 
     from agent import extract_ladder_from_screenshots
 
+    # The active roster goes IN to the extraction, as an enum on real_ign, so
+    # a name that isn't on it is not something the model can return. This is
+    # the mechanism — not the exact-match lookup below, and not any later
+    # clean-up pass. Asking for free text and reconciling it afterwards made
+    # every downstream step responsible for a guarantee the request should
+    # have carried, and it leaked: a misread name became an unmatched player,
+    # an unmatched player became a manual-match prompt, and a selection that
+    # had to be sanitised before step 1 could even render its own count.
+    roster_rows = await db.get_active_roster(league)
+    roster_names = [r['real_ign'] for r in roster_rows if r['real_ign']]
+
     try:
-        extracted = await extract_ladder_from_screenshots([a.url for a in attachments])
+        extracted = await extract_ladder_from_screenshots(
+            [a.url for a in attachments], roster=roster_names)
     except ValueError as e:
         await interaction.followup.send(i18n.t('ladder_cmd.err.screenshot_extraction_failed', lang, error=e), ephemeral=True)
         return
@@ -2853,30 +2943,11 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
     ladder_event_type    = extracted.get("event_type")
     ladder_our_rank      = extracted.get("our_rank")
 
-    # Validate our players against the DB
-    notifications = []
-    missing       = []  # full extracted dicts, not just names — needed to apply OVR once matched
-    preselected   = []
-    suspicious_ovr_changes = []  # {'row': ..., 'suspicious': {col: (old, new)}} — held for admin review
-
-    for p in our_players:
-        real_ign = p.get("real_ign")
-        if not real_ign:
-            continue
-
-        row = await db.get_player_by_real_ign(real_ign, team_id=league)
-
-        if row is None:
-            missing.append(p)
-            continue
-
-        checked = _check_ovr_changes(row, p)
-        note = await _commit_ovr_updates(row, checked['normal'], lang)
-        if note:
-            notifications.append(note)
-        if checked['suspicious']:
-            suspicious_ovr_changes.append({'row': row, 'suspicious': checked['suspicious']})
-        preselected.append(row["ign"])
+    resolved = await _resolve_our_players(our_players, league, lang)
+    notifications          = resolved['notifications']
+    missing                = resolved['missing']
+    preselected            = resolved['preselected']
+    suspicious_ovr_changes = resolved['suspicious']
 
     # Format opponents for ladder flow
     preopponents = [
@@ -2889,14 +2960,11 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
     ]
 
     if missing:
-        # One or more "our" players couldn't be matched by exact real_ign —
-        # usually the AI vision misread a name slightly, not that they aren't
-        # actually in the league. Let the admin manually point each one at
-        # the correct roster member instead of silently dropping their OVR
-        # update and just warning about it.
-        roster = await db.fetchall(
-            "SELECT ign, real_ign FROM players WHERE team_id=? AND status='A' ORDER BY ign", (league,)
-        )
+        logger.info(
+            "/ladder: %d of %s's %d slots need the admin to pick "
+            "(roster had %d usable name(s))",
+            len(missing), league, len(our_players), len(roster_names))
+        roster = roster_rows
         view = LadderPlayerMatchView(
             missing_entries=missing, league=league, roster=roster,
             already_matched=preselected, game_date=game_date,

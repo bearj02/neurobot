@@ -450,6 +450,30 @@ async def get_player(ign: str, conn=None) -> dict | None:
     )
 
 
+async def get_players_by_real_ign(real_ign: str, team_id: str) -> list[dict]:
+    """
+    **Every** active player in this league whose real_ign (or ign, where
+    real_ign is NULL) matches — not just the first one.
+
+    `real_ign` is explicitly not unique, so one spelling can belong to two
+    people on the same roster. `get_player_by_real_ign` resolves that with
+    `ORDER BY id LIMIT 1`, which is deterministic but arbitrary: it picks a
+    player rather than reporting that it cannot tell which one is meant,
+    and the caller has no way to know the difference.
+
+    /ladder needs that difference. A name matching two roster members is as
+    unresolved as one matching none, and both mean the admin should choose —
+    guessing attributes a screenshot's OVR to the wrong player's record,
+    which is silent and sticks.
+    """
+    return await fetchall(
+        "SELECT * FROM players "
+        "WHERE team_id=? AND status='A' AND COALESCE(real_ign, ign)=? "
+        "ORDER BY id",
+        (team_id, real_ign)
+    )
+
+
 async def get_player_by_real_ign(real_ign: str, team_id: str | None = None) -> dict | None:
     """
     Look up a player by their real in-game name (used by the AI agent).
@@ -1899,6 +1923,23 @@ async def get_player_stats(pid: int, team_id: str, conn=None) -> dict:
         'pwr_rank': round(pwr_rank, 4),
         'ladder_rank': round(ladder_rank, 4),
     }
+
+
+
+async def get_active_roster(team_id: str) -> list[dict]:
+    """
+    The league's active roster as (ign, real_ign) rows.
+
+    Used to bind /ladder's screenshot extraction to the real roster — the
+    enum built from these names is what makes an off-roster name
+    undecodable rather than something to reconcile afterwards. Also backs
+    the manual-match fallback's select options, so both come from one query
+    and cannot disagree about who is on the roster.
+    """
+    return await fetchall(
+        "SELECT ign, real_ign FROM players WHERE team_id=? AND status='A' ORDER BY ign",
+        (team_id,)
+    )
 
 
 async def get_team_stats(team_id: str, conn=None) -> list[dict]:

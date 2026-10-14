@@ -2145,3 +2145,68 @@ Two rules in `ladder_flow`, both from real failures:
 override can apply the values and then answer with
 `inter.response.edit_message`, instead of calling the base `on_submit`
 (which defers) and being forced into `inter.message.edit` afterwards.
+
+## /ladder screenshot extraction: constrain the request, don't clean the reply
+
+The flow, in order. Each step's output is the next one's input, and no step
+repairs an earlier one's mistakes:
+
+1. **Get the active roster** (`db.get_active_roster`).
+2. **Extract**, told there are exactly 16 per side and that order is fixed.
+3. **Resolve** each right-side slot to a roster member — only a *unique*
+   match counts (`_resolve_our_players`).
+4. **Apply OVRs** to the matched players.
+5. **Review suspicious OVR jumps** (`OvrSanityCheckView`).
+6. **Fill opponents** into a pre-built 16-slot default, field by field.
+7. **Admin fixes the CSV** (step 2 of the builder).
+8. **Admin pairs the ladder** (steps 3-4).
+9. **Save** (`_save_or_report`).
+
+**The roster goes IN as an `enum` on `our_players[].real_ign`.** An
+off-roster name is not something the model can emit, so there is nothing
+downstream to match, fuzzy-match or sanitise. The earlier shape — extract
+free text, then reconcile — made every later step responsible for a
+guarantee the request should have carried, and it leaked all the way to
+step 1 needing `sanitize_selection` before it could render its own count.
+The roster is also named in the prompt: the enum prevents wrong answers,
+the list is what lets the model read a smudged row *as* a roster entry
+instead of abstaining.
+
+**The enum narrows candidates; it does not finish the job.** `real_ign` is
+explicitly not unique, so one spelling can belong to two active players in
+the same league. A name matching **two** members is exactly as unresolved as
+one matching **none** — both go to the admin. `get_player_by_real_ign`'s
+`ORDER BY id LIMIT 1` reports *a* player rather than the ambiguity, which is
+why step 3 uses **`db.get_players_by_real_ign`** (plural) instead. Guessing
+writes a screenshot's OVR onto the wrong player's permanent record, silently
+and durably. `claimed` makes it *uniquely*: a name the model put in two
+slots resolves only the first.
+
+**Each side is `slot_1`..`slot_16`, an object — not an array.** Arrays
+cannot be length-constrained (`minItems`/`maxItems` are among the
+constraints structured outputs rejects), which is how one run returned 21
+rows and another 14 opponents against 17 of ours. A required key per slot
+makes "exactly 16, in order" a property of the schema. **An unreadable row
+is that slot with null fields, never a dropped entry** — dropping it shifts
+every row below up by one and attributes them all to the wrong player.
+`agent.LADDER_SLOTS` mirrors `ladder_flow.MATCHUP_SIZE` (agent can't import
+ladder_flow without pulling discord into its import graph); a test pins them
+equal.
+
+**Names are sanitised at extraction** (`agent.sanitize_name`): step 2's
+editor is one `name, total, def` per line split on commas, so a comma inside
+a name silently shifts the two numbers into the wrong columns. `None` stays
+`None` — an empty name and an unread row are different facts.
+
+**`LadderState.opponents` is MATCHUP_SIZE from construction**, and
+`fill_opponents` overwrites it **per field**, never per row. It used to be
+assigned over with whatever the extraction returned, at whatever length:
+
+    IndexError: list assignment index out of range
+      File "ladder_flow.py", line 460, in on_submit
+        self.state.opponents[i] = opp
+
+A 14-row extraction left a 14-long list and pasting a full CSV walked off
+the end. Per-field matters too: the extraction returns all 16 slots now, so
+replacing a row wholesale would put `None` where the `-` placeholder was,
+and the flow reads `name != '-'` as "an opponent is entered here".

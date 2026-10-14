@@ -7602,18 +7602,153 @@ class TestRealIgnLookupScoping(unittest.IsolatedAsyncioTestCase):
 
         calls = []
         for node in ast.walk(tree_ast):
-            if not (isinstance(node, ast.AsyncFunctionDef) and node.name == "ladder_slash"):
+            if not (isinstance(node, ast.AsyncFunctionDef)
+                    and node.name in ("ladder_slash", "_resolve_our_players")):
                 continue
             for inner in ast.walk(node):
                 if (isinstance(inner, ast.Call)
                         and isinstance(inner.func, ast.Attribute)
-                        and inner.func.attr == "get_player_by_real_ign"):
+                        and inner.func.attr in ("get_player_by_real_ign",
+                                                "get_players_by_real_ign")):
                     calls.append(inner)
 
         self.assertEqual(len(calls), 1, "expected exactly one lookup in /ladder")
+        # The plural form: a name matching two roster members is as
+        # unresolved as one matching none, and the singular lookup's
+        # `ORDER BY id LIMIT 1` reports a player instead of the ambiguity.
+        self.assertEqual(calls[0].func.attr, "get_players_by_real_ign",
+                         "/ladder resolves a shared real_ign by picking one")
         kwargs = {k.arg for k in calls[0].keywords}
         self.assertIn("team_id", kwargs,
                       "/ladder's real_ign lookup isn't scoped to the league")
+
+    async def test_two_roster_members_sharing_a_real_ign_are_both_returned(self):
+        """real_ign is explicitly not unique, so one spelling can belong to
+        two people on the same roster. get_player_by_real_ign resolves that
+        with ORDER BY id LIMIT 1 — deterministic, but it reports *a* player
+        rather than the fact that it cannot tell which, and the caller can't
+        see the difference. Attributing a screenshot's OVR to the wrong
+        player's permanent record is silent and sticks."""
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('NP','Twin1','SharedName','A')")
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('NP','Twin2','SharedName','A')")
+
+        both = await db.get_players_by_real_ign("SharedName", team_id="NP")
+        self.assertEqual({r["ign"] for r in both}, {"Twin1", "Twin2"})
+
+        # The singular form still answers with one of them, which is exactly
+        # why /ladder can't use it to decide a match.
+        one = await db.get_player_by_real_ign("SharedName", team_id="NP")
+        self.assertIsNotNone(one)
+
+    async def test_an_inactive_or_other_league_twin_is_not_a_candidate(self):
+        """Scoped the same way the ladder pool is — otherwise a name would
+        look ambiguous because of somebody who can't be picked anyway."""
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('NP','Here','Solo','A')")
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('NP','Benched','Solo','I')")
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('ND','Elsewhere','Solo','A')")
+        rows = await db.get_players_by_real_ign("Solo", team_id="NP")
+        self.assertEqual([r["ign"] for r in rows], ["Here"])
+
+    async def test_a_null_real_ign_still_matches_on_ign(self):
+        """Same fallback the singular lookup has — a player whose real_ign
+        was never filled in is still on the roster."""
+        await db.execute(
+            "INSERT INTO players (team_id, ign, real_ign, status) "
+            "VALUES ('NP','NoReal',NULL,'A')")
+        rows = await db.get_players_by_real_ign("NoReal", team_id="NP")
+        self.assertEqual([r["ign"] for r in rows], ["NoReal"])
+
+    async def _resolve(self, rows):
+        from optimized_bot import _resolve_our_players
+        return await _resolve_our_players(rows, "NP", "en")
+
+    async def test_a_name_identifying_one_member_resolves(self):
+        await db.execute("INSERT INTO players (team_id, ign, real_ign, status) "
+                         "VALUES ('NP','Nick','RealName','A')")
+        out = await self._resolve([{"real_ign": "RealName", "_slot": 1}])
+        self.assertEqual(out['preselected'], ["Nick"])
+        self.assertEqual(out['missing'], [])
+
+    async def test_a_name_identifying_two_members_goes_to_the_admin(self):
+        """The bug in the first version of this: binding the roster as an
+        enum makes the *name* valid, but two people can share one. Picking
+        either writes this screenshot's OVR onto possibly the wrong player's
+        permanent record, with nothing to show for it afterwards."""
+        for ign in ("Twin1", "Twin2"):
+            await db.execute("INSERT INTO players (team_id, ign, real_ign, status) "
+                             "VALUES ('NP',?,'Shared','A')", (ign,))
+        out = await self._resolve([{"real_ign": "Shared", "_slot": 4}])
+        self.assertEqual(out['preselected'], [])
+        self.assertEqual(len(out['missing']), 1)
+        self.assertEqual(out['missing'][0]["real_ign"], "Shared")
+
+    async def test_a_declined_slot_goes_to_the_admin_labelled_by_position(self):
+        """There is no name to show, but the slot number is enough for
+        someone looking at the same screenshot."""
+        out = await self._resolve([{"real_ign": None, "_slot": 7}])
+        self.assertEqual(len(out['missing']), 1)
+        self.assertIn("7", out['missing'][0]["_label"])
+
+    async def test_a_name_reused_across_two_slots_resolves_only_once(self):
+        """'Uniquely', not merely 'exactly one row in the table'. The second
+        slot no longer identifies anybody left, so it is a question, not a
+        duplicate write onto the same player."""
+        await db.execute("INSERT INTO players (team_id, ign, real_ign, status) "
+                         "VALUES ('NP','Solo','OnlyOne','A')")
+        out = await self._resolve([{"real_ign": "OnlyOne", "_slot": 1},
+                                   {"real_ign": "OnlyOne", "_slot": 2}])
+        self.assertEqual(out['preselected'], ["Solo"])
+        self.assertEqual(len(out['missing']), 1)
+        self.assertEqual(out['missing'][0]["_slot"], 2)
+
+    async def test_every_slot_is_accounted_for_either_way(self):
+        """Nothing is dropped on the floor — a slot is resolved or it is a
+        question. A ladder that silently came back short is the failure mode
+        this whole step exists to avoid."""
+        await db.execute("INSERT INTO players (team_id, ign, real_ign, status) "
+                         "VALUES ('NP','Known','Known','A')")
+        rows = [{"real_ign": "Known", "_slot": 1},
+                {"real_ign": None, "_slot": 2},
+                {"real_ign": "NotOnRoster", "_slot": 3}]
+        out = await self._resolve(rows)
+        self.assertEqual(len(out['preselected']) + len(out['missing']), len(rows))
+
+    def test_ladder_sends_the_roster_into_the_extraction(self):
+        """The lookup above is now the belt, not the braces. The roster goes
+        IN to the extraction as an enum on real_ign, so an off-roster name
+        can't come back at all — reconciling free text against the roster
+        afterwards is what made every later step responsible for a guarantee
+        the request should have carried. Pinned in source because
+        ladder_slash is @tree.command-decorated and can't be called here."""
+        import ast
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            tree_ast = ast.parse(f.read())
+
+        calls = []
+        for node in ast.walk(tree_ast):
+            if not (isinstance(node, ast.AsyncFunctionDef) and node.name == "ladder_slash"):
+                continue
+            for inner in ast.walk(node):
+                if (isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Name)
+                        and inner.func.id == "extract_ladder_from_screenshots"):
+                    calls.append(inner)
+
+        self.assertEqual(len(calls), 1, "expected exactly one extraction call in /ladder")
+        self.assertIn("roster", {k.arg for k in calls[0].keywords},
+                      "/ladder extracts our players as free text instead of "
+                      "constraining them to the active roster")
 
     async def test_fallback_to_ign_still_works_when_real_ign_is_null(self):
         await db.execute(
@@ -9083,6 +9218,155 @@ class TestSeasonMatchExtraction(unittest.IsolatedAsyncioTestCase):
 
 
 
+class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
+    """
+    A ladder is MATCHUP_SIZE slots, always, whatever the screenshot showed.
+
+    The reported crash:
+
+        Ladder UI error in step 2 (opponent entry):
+        IndexError: list assignment index out of range
+          File "ladder_flow.py", line 460, in on_submit
+            self.state.opponents[i] = opp
+
+    start_ladder_flow did `state.opponents = preopponents`, taking the
+    extraction's length verbatim, and OpponentEntryView only padded a list
+    that was *empty*. So the run logged "14 opponents and 17 our players",
+    left a 14-long list, and pasting a full 16-row CSV over it walked off
+    the end at slot 15. The same extraction pass also returned 21 rows on
+    another run, which is longer than the ladder has slots.
+    """
+
+    def setUp(self):
+        import ladder_flow
+        self.lf = ladder_flow
+
+    def test_a_fresh_state_already_has_every_slot(self):
+        state = self.lf.LadderState("NP", TODAY, None)
+        self.assertEqual(len(state.opponents), self.lf.MATCHUP_SIZE)
+
+    def test_a_short_extraction_still_leaves_every_slot(self):
+        """The 14-row case, which is the one that crashed."""
+        state = self.lf.LadderState("NP", TODAY, None)
+        filled = self.lf.fill_opponents(
+            state.opponents,
+            [{"name": f"T{i}", "total_ovr": 1, "def_ovr": 2} for i in range(14)])
+        self.assertEqual(filled, 14)
+        self.assertEqual(len(state.opponents), self.lf.MATCHUP_SIZE)
+        self.assertEqual(state.opponents[15]["name"], "-")
+
+    def test_an_unread_slot_keeps_its_default_rather_than_going_null(self):
+        """The extraction now returns all 16 slots, including the ones it
+        couldn't read. Replacing the row wholesale would put None where the
+        '-' placeholder was, and the rest of the flow reads `name != '-'` as
+        'an opponent is entered here' — so a blank row would count as
+        filled and render as nothing."""
+        state = self.lf.LadderState("NP", TODAY, None)
+        filled = self.lf.fill_opponents(state.opponents, [
+            {"name": "Real", "total_ovr": 7000, "def_ovr": 210},
+            {"name": None, "total_ovr": None, "def_ovr": None},
+        ])
+        self.assertEqual(filled, 1)
+        self.assertEqual(state.opponents[1]["name"], "-")
+        self.assertEqual(
+            sum(1 for o in state.opponents if o["name"] != "-"), 1)
+
+    def test_a_partly_read_slot_keeps_the_fields_it_lost(self):
+        """Per field, not per row — a name the model read shouldn't be
+        thrown away because it couldn't make out the OVR next to it."""
+        state = self.lf.LadderState("NP", TODAY, None)
+        state.opponents[0]["def_ovr"] = 999
+        self.lf.fill_opponents(
+            state.opponents, [{"name": "Partial", "total_ovr": None, "def_ovr": None}])
+        self.assertEqual(state.opponents[0]["name"], "Partial")
+        self.assertEqual(state.opponents[0]["def_ovr"], 999)
+
+    def test_an_over_long_extraction_does_not_grow_the_ladder(self):
+        """The 21-row case. Extra rows have nowhere to go — steps 3 and 4
+        index by slot and build_final_embed loops range(MATCHUP_SIZE)."""
+        state = self.lf.LadderState("NP", TODAY, None)
+        filled = self.lf.fill_opponents(
+            state.opponents,
+            [{"name": f"T{i}", "total_ovr": 1, "def_ovr": 2} for i in range(21)])
+        self.assertEqual(filled, self.lf.MATCHUP_SIZE)
+        self.assertEqual(len(state.opponents), self.lf.MATCHUP_SIZE)
+
+    async def test_pasting_a_full_csv_over_a_short_extraction(self):
+        """The crash itself, end to end through the step-2 modal."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+        state = LadderState("NP", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        # Exactly what a 14-row extraction used to leave behind.
+        self.lf.fill_opponents(
+            state.opponents,
+            [{"name": f"Old{i}", "total_ovr": 1, "def_ovr": 2} for i in range(14)])
+        view = OpponentEntryView(state)
+
+        opener = _FakeInteraction()
+        await view._enter(opener)
+        modal = opener.response.modals[0]
+        modal.opponents.value = "\n".join(
+            f"New{i}, 7000, {200 + i}" for i in range(MATCHUP_SIZE))
+        sub = _FakeInteraction()
+        await modal.on_submit(sub)   # used to raise IndexError
+
+        self.assertEqual(len(state.opponents), MATCHUP_SIZE)
+        self.assertEqual(state.opponents[15]["name"], "New15")
+
+    async def test_start_ladder_flow_itself_leaves_every_slot(self):
+        """The invariant has to hold from the entry point, not only once
+        OpponentEntryView gets a chance to repair it. Step 1 is rendered
+        first, and anything indexing opponents between here and step 2 would
+        see the short list. This is the mutation the view-level repair hid:
+        going back to `state.opponents = preopponents` passes every other
+        test in this class."""
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        try:
+            for i in range(self.lf.MATCHUP_SIZE):
+                await db.execute(
+                    "INSERT INTO players (team_id, ign, real_ign, status, off_ovr, "
+                    "def_ovr, total_ovr) VALUES ('NP',?,?,'A',200,200,6000)",
+                    (f"Slot{i}", f"Slot{i}"))
+
+            captured = {}
+
+            class _View:
+                def __init__(self, state):
+                    captured['state'] = state
+
+                def _build_embed(self):
+                    return MagicMock()
+
+            inter = _FakeInteraction()
+            with patch.object(self.lf, "PlayerToggleView", _View):
+                await self.lf.start_ladder_flow(
+                    inter, "NP", TODAY,
+                    preopponents=[{"name": f"T{i}", "total_ovr": 1, "def_ovr": 2}
+                                  for i in range(14)])
+            self.assertEqual(len(captured['state'].opponents), self.lf.MATCHUP_SIZE)
+            self.assertEqual(captured['state'].opponents[13]["name"], "T13")
+            self.assertEqual(captured['state'].opponents[14]["name"], "-")
+        finally:
+            await db.close()
+            db._db = None
+
+    def test_a_short_list_built_elsewhere_is_repaired_loudly(self):
+        """Belt and braces for a state not built through LadderState — but
+        it logs an error, because reaching it means something upstream broke
+        an invariant rather than this being a normal shape to handle."""
+        import logging
+        state = self.lf.LadderState("NP", TODAY, None)
+        state.opponents = [{"name": "A", "total_ovr": None, "def_ovr": None}]
+        with patch.object(self.lf, "logger", logging.getLogger("global_logger")):
+            with self.assertLogs("global_logger", level="ERROR"):
+                self.lf.OpponentEntryView(state)
+        self.assertEqual(len(state.opponents), self.lf.MATCHUP_SIZE)
+        self.assertEqual(state.opponents[0]["name"], "A")
+
+
 class TestLadderEmbedFieldLimits(unittest.IsolatedAsyncioTestCase):
     """
     Reproduces the reported production crash, from a real traceback:
@@ -9465,11 +9749,28 @@ def _body(text, stop_reason="end_turn", status=200):
     return {"text": text, "stop_reason": stop_reason, "status": status}
 
 
-def _ok_body(fn):
+def _ladder_slots(rows=None, key="name"):
+    """slot_1..slot_16, as the ladder schema requires. `rows` fills from the
+    top; the rest are the nulls a model returns for a row it couldn't read."""
+    import agent
+    blank = {key: None, "total_ovr": None, "def_ovr": None}
+    if key == "real_ign":
+        blank = {key: None, "total_ovr": None, "off_ovr": None, "def_ovr": None}
+    rows = list(rows or [])
+    out = {}
+    for i in range(1, agent.LADDER_SLOTS + 1):
+        out[f"slot_{i}"] = rows[i - 1] if i <= len(rows) else dict(blank)
+    return out
+
+
+def _ok_body(fn, opponents=None, our_players=None, **top):
     """A well-formed reply for whichever extractor is under test."""
     if fn.__name__ == "extract_ladder_from_screenshots":
-        return _body('{"opponent_league_name": null, "event_type": null, '
-                     '"our_rank": null, "opponents": [], "our_players": []}')
+        payload = {"opponent_league_name": None, "event_type": None, "our_rank": None,
+                   "opponents":   _ladder_slots(opponents, "name"),
+                   "our_players": _ladder_slots(our_players, "real_ign")}
+        payload.update(top)
+        return _body(json.dumps(payload))
     return _body('{"left": {}, "right": {}}')
 
 
@@ -9616,8 +9917,10 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
                     await fn(urls)
                 payload = session.payloads[0]
                 self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
-                self.assertIs(payload["output_config"]["format"]["schema"],
-                              getattr(self.agent, schema_name))
+                # Equality, not identity: the ladder schema is built per call
+                # so it can carry that league's roster as an enum.
+                self.assertEqual(payload["output_config"]["format"]["schema"],
+                                 getattr(self.agent, schema_name))
 
     async def test_the_ladder_budget_clears_a_measured_real_extraction(self):
         """A real full 16-v-16 came back at output_tokens=1166 against the
@@ -9638,6 +9941,149 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
             session.payloads[0]["max_tokens"], observed * 2,
             "too little headroom over a measured real extraction")
 
+    # -- our players come FROM the roster, they are not matched to it ------
+
+    def test_the_roster_becomes_an_enum_on_real_ign(self):
+        """The whole point: an off-roster name is not something the model can
+        emit, so there is nothing downstream to match, fuzzy-match or clean
+        up. Free text plus reconciliation was the wrong shape."""
+        schema = self.agent.build_ladder_schema(["Grizzly", "Ruffis", "JX8"])
+        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
+        enum = next(b["enum"] for b in real_ign["anyOf"] if "enum" in b)
+        self.assertEqual(enum, ["Grizzly", "JX8", "Ruffis"])
+
+    def test_the_enum_is_stable_across_calls(self):
+        """The request body has to be byte-identical between runs or the
+        server-side schema cache can't hit. Roster order out of the db is not
+        guaranteed, and real_ign is explicitly not unique."""
+        a = self.agent.build_ladder_schema(["b", "a", "b", "c"])
+        b = self.agent.build_ladder_schema(["c", "b", "a"])
+        self.assertEqual(a, b)
+
+    def test_an_illegible_row_can_still_be_declined(self):
+        """null must stay reachable. It is the difference between 'someone
+        not on the roster' (now impossible) and 'I can't read this row'
+        (always possible). Forcing a pick turns an unreadable row into a
+        confidently wrong one, and a wrong row is invisible where a dropped
+        one shows up in the count."""
+        schema = self.agent.build_ladder_schema(["Grizzly"])
+        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
+        self.assertIn({"type": "null"}, real_ign["anyOf"])
+
+    def test_opponents_are_not_constrained_by_our_roster(self):
+        """They belong to the other league — binding them to our names would
+        be actively wrong, not merely unhelpful."""
+        schema = self.agent.build_ladder_schema(["Grizzly", "Ruffis"])
+        name = schema["properties"]["opponents"]["properties"]["slot_1"]["properties"]["name"]
+        self.assertNotIn("enum", json.dumps(name))
+
+    def test_no_roster_falls_back_to_free_text(self):
+        """A league with no active player still has to be extractable."""
+        schema = self.agent.build_ladder_schema([])
+        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
+        self.assertNotIn("enum", json.dumps(real_ign))
+
+    async def test_the_roster_reaches_both_the_schema_and_the_prompt(self):
+        """The enum stops wrong answers; naming the roster in the prompt is
+        what lets the model read a smudged row AS a roster entry instead of
+        abstaining. Both, not either."""
+        session = _FakeAnthropicSession(
+            self, [_ok_body(self.agent.extract_ladder_from_screenshots)])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            await self.agent.extract_ladder_from_screenshots(
+                ["u"], roster=["Grizzly", "Ruffis"])
+        payload = session.payloads[0]
+        schema = payload["output_config"]["format"]["schema"]
+        enum = next(
+            b["enum"] for b in
+            schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]["anyOf"]
+            if "enum" in b)
+        self.assertEqual(enum, ["Grizzly", "Ruffis"])
+        text = "".join(c["text"] for c in payload["messages"][0]["content"]
+                       if c["type"] == "text")
+        self.assertIn("Grizzly", text)
+        self.assertIn("Ruffis", text)
+
+    # -- exactly 16 per side, in screen order ------------------------------
+
+    def test_each_side_is_sixteen_fixed_slots_not_an_open_array(self):
+        """Arrays can't be length-constrained — minItems/maxItems are among
+        the constraints structured outputs rejects — which is how one run
+        returned 21 rows and another 14 opponents against 17 of ours. A
+        required key per slot makes 'exactly 16' a property of the schema."""
+        schema = self.agent.build_ladder_schema(["Grizzly"])
+        for side in ("opponents", "our_players"):
+            with self.subTest(side=side):
+                node = schema["properties"][side]
+                self.assertEqual(node["type"], "object",
+                                 "an array can't be pinned to 16")
+                self.assertEqual(len(node["properties"]), self.agent.LADDER_SLOTS)
+                self.assertEqual(sorted(node["required"]), sorted(node["properties"]))
+                self.assertIs(node["additionalProperties"], False)
+
+    def test_the_slot_count_tracks_the_ladder(self):
+        """agent can't import ladder_flow without pulling discord into its
+        import graph, so the constant is duplicated — pinned equal here."""
+        import ladder_flow
+        self.assertEqual(self.agent.LADDER_SLOTS, ladder_flow.MATCHUP_SIZE)
+
+    async def test_an_unread_row_stays_in_its_own_slot(self):
+        """The failure this shape exists to prevent: if an illegible row is
+        dropped rather than left null, every row below it shifts up one and
+        is attributed to the wrong player — silently, and in the db."""
+        session = _FakeAnthropicSession(self, [_ok_body(
+            self.agent.extract_ladder_from_screenshots,
+            opponents=[{"name": "First", "total_ovr": 1, "def_ovr": 2},
+                       {"name": None, "total_ovr": None, "def_ovr": None},
+                       {"name": "Third", "total_ovr": 5, "def_ovr": 6}])])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            result = await self.agent.extract_ladder_from_screenshots(["u"])
+        names = [o["name"] for o in result["opponents"]]
+        self.assertEqual(len(names), self.agent.LADDER_SLOTS)
+        self.assertEqual(names[:3], ["First", None, "Third"])
+        self.assertEqual(result["opponents"][2]["_slot"], 3)
+
+    async def test_both_sides_always_come_back_with_every_slot(self):
+        """Whatever the screenshot showed. 14 opponents against 17 of ours
+        is not a shape the ladder can consume."""
+        session = _FakeAnthropicSession(
+            self, [_ok_body(self.agent.extract_ladder_from_screenshots)])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            result = await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertEqual(len(result["opponents"]), self.agent.LADDER_SLOTS)
+        self.assertEqual(len(result["our_players"]), self.agent.LADDER_SLOTS)
+
+    # -- names are made safe for the CSV the admin edits -------------------
+
+    async def test_names_are_sanitised_for_the_step_two_csv(self):
+        """Step 2's editor is one `name, total, def` per line, split on
+        commas — a comma inside a name silently shifts the two numbers into
+        the wrong columns."""
+        session = _FakeAnthropicSession(self, [_ok_body(
+            self.agent.extract_ladder_from_screenshots,
+            opponents=[{"name": 'Smith, Jr "The Wall"', "total_ovr": 1, "def_ovr": 2}],
+            opponent_league_name="O'Hara, Inc")])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            result = await self.agent.extract_ladder_from_screenshots(["u"])
+        self.assertNotIn(",", result["opponents"][0]["name"])
+        self.assertNotIn('"', result["opponents"][0]["name"])
+        self.assertNotIn(",", result["opponent_league_name"])
+
+    def test_sanitising_keeps_null_as_null(self):
+        """'' and None mean different things here: one is a name that is
+        empty, the other is a row nobody could read."""
+        self.assertIsNone(self.agent.sanitize_name(None))
+        self.assertIsNone(self.agent.sanitize_name(",,,"))
+        self.assertEqual(self.agent.sanitize_name("  Big   Mike  "), "Big Mike")
+
     # -- the retry --------------------------------------------------------
 
     async def test_a_malformed_reply_is_retried_once_and_succeeds(self):
@@ -9651,7 +10097,7 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
              self.assertLogs("global_logger", level="WARNING"):
             result = await self.agent.extract_ladder_from_screenshots(["u"])
         self.assertEqual(len(session.payloads), 2, "the request was not re-sent")
-        self.assertEqual(result["opponents"], [])
+        self.assertEqual(len(result["opponents"]), self.agent.LADDER_SLOTS)
 
     async def test_a_second_failure_gives_up_rather_than_looping(self):
         session = _FakeAnthropicSession(self, [_body("not json"), _body("still not json")])

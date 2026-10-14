@@ -90,6 +90,50 @@ LEAGUE_NAMES = db.load_league_names_sync()
 # Shared state
 # ---------------------------------------------------------------------------
 
+def _empty_opponents() -> list[dict]:
+    """A full set of blank opponent slots — one per ladder position."""
+    return [{'name': '-', 'total_ovr': None, 'def_ovr': None}
+            for _ in range(MATCHUP_SIZE)]
+
+
+_OPPONENT_FIELDS = ('name', 'total_ovr', 'def_ovr')
+
+
+def fill_opponents(target: list[dict], source: list[dict] | None) -> int:
+    """
+    Overwrite `target`'s slots from `source`, in order, and return how many
+    slots had at least one field filled in.
+
+    **Per field, not per row.** The extraction returns every slot whether or
+    not it could read it, so a row that came back as all-nulls must leave
+    that slot at its default rather than replacing `-` with None — the rest
+    of the flow uses `name != '-'` to mean "an opponent is entered here",
+    and a None would count as entered while rendering as blank. Any single
+    field the model couldn't read behaves the same way: the default stands.
+
+    Anything past MATCHUP_SIZE is ignored rather than growing the list — a
+    screenshot can show more rows than a ladder has slots (one extraction
+    returned 21), and the extra ones have nowhere to go.
+    """
+    if not source:
+        return 0
+    usable = source[:MATCHUP_SIZE]
+    touched = 0
+    for i, opp in enumerate(usable):
+        got = False
+        for field in _OPPONENT_FIELDS:
+            value = (opp or {}).get(field)
+            if value is not None and value != '':
+                target[i][field] = value
+                got = True
+        touched += got
+    if len(source) > MATCHUP_SIZE:
+        logger.warning(
+            "Ladder opponents: ignored %d row(s) past the %d-slot ladder",
+            len(source) - MATCHUP_SIZE, MATCHUP_SIZE)
+    return touched
+
+
 class LadderState:
     def __init__(self, team_id: str, game_date, channel, lang: str = 'en'):
         self.team_id   = team_id
@@ -98,7 +142,20 @@ class LadderState:
         self.lang       = lang
         self.players:   list[dict] = []  # the full active/rostered pool (up to 18) this ladder can choose from
         self.selected:  list[str]  = []  # exactly MATCHUP_SIZE (16) of the above, chosen to play — the rest of self.players are rested for this ladder, not inactive
-        self.opponents: list[dict] = []
+        # Always exactly MATCHUP_SIZE, from construction onwards. Every slot
+        # exists whether or not an opponent has been entered into it, because
+        # the whole flow indexes it by slot: step 2's paste writes
+        # `opponents[i]` for i in 0..15, step 4 reorders by index, and
+        # build_final_embed reads `opponents[opp_order[slot]]`.
+        #
+        # It used to start empty and be *replaced* by whatever the screenshot
+        # extraction returned, at whatever length that happened to be — so an
+        # extraction that found 14 rows left a 14-long list, and pasting a
+        # full CSV over it raised `IndexError: list assignment index out of
+        # range` on slot 15. A ladder is 16 slots regardless of how many the
+        # vision pass managed to read; that is a property of the game, not of
+        # the screenshot.
+        self.opponents: list[dict] = _empty_opponents()
         # From screenshot extraction, when available — the opposing league's
         # own name/division/rank aren't per-slot data like opponents are, they
         # describe the matchup as a whole, so they live directly on the state.
@@ -381,11 +438,19 @@ class OpponentEntryView(View):
     def __init__(self, state: LadderState):
         super().__init__(timeout=300)
         self.state = state
-        if not self.state.opponents:
-            self.state.opponents = [
-                {'name': '-', 'total_ovr': None, 'def_ovr': None}
-                for _ in range(MATCHUP_SIZE)
-            ]
+        # LadderState guarantees MATCHUP_SIZE slots from construction. This
+        # repairs a state built some other way rather than trusting it: every
+        # index in this view, and in steps 3 and 4 after it, assumes the full
+        # set exists, and a short list surfaced as an IndexError from the CSV
+        # paste rather than anything legible.
+        if len(self.state.opponents) != MATCHUP_SIZE:
+            logger.error(
+                "Ladder opponents had %d slots, not %d — repairing. "
+                "Something built this state without going through LadderState.",
+                len(self.state.opponents), MATCHUP_SIZE)
+            fixed = _empty_opponents()
+            fill_opponents(fixed, self.state.opponents)
+            self.state.opponents = fixed
         self._rebuild()
 
     def _rebuild(self):
@@ -936,8 +1001,9 @@ async def start_ladder_flow(interaction: discord.Interaction,
     else:
         state.selected = [p['ign'] for p in state.players[:MATCHUP_SIZE]]
 
-    if preopponents:
-        state.opponents = preopponents
+    # Filled into the fixed-length slot list, never assigned over it — see
+    # LadderState.opponents for the IndexError that caused.
+    fill_opponents(state.opponents, preopponents)
 
     view = PlayerToggleView(state)
     if interaction.response.is_done():
