@@ -1600,6 +1600,26 @@ bot's user-facing strings (`UnicodeDecodeError: 0x8f`) — a pre-existing
 failure invisible on the Linux host. Now passes `encoding="utf-8"`. If a
 future test opens a source file, pass the encoding explicitly.
 
+## Shell gotcha: a doubled backslash does not survive the Bash tool
+
+`\\` is collapsed to `\` before bash sees the command, including
+inside a quoted heredoc (`<<'EOF'`), which is supposed to be byte-literal.
+Verified directly: `cat <<'EOF'` fed `a\\nb` prints `a\nb`.
+
+**This fails silently and plausibly.** Writing a Python file through a
+heredoc, `.replace("\n", "\\n")` arrives as
+`.replace("\n", "\n")` — a no-op that reads as correct. That
+shipped into agent.py's `_error_context` once and was caught only by reading
+the diff. It also breaks search-and-replace: a pattern meant to match the
+source text `"\n".join(...)` ends up containing a real newline and
+silently matches nothing.
+
+Two ways round it. In a script, build the character — `BS = chr(92)` — and
+concatenate, so no backslash literal passes through the shell. Or use the
+Edit/Write tools, which don't go through bash at all. When scripting an
+edit, `assert old in s` before writing: a pattern that silently matches
+nothing is the failure mode here, not a crash.
+
 ## The dev machine runs the suite — don't reason about it from the source
 
 Python 3.13 is installed (via `winget`, user scope) with a project venv at
@@ -2198,19 +2218,26 @@ editor is one `name, total, def` per line split on commas, so a comma inside
 a name silently shifts the two numbers into the wrong columns. `None` stays
 `None` — an empty name and an unread row are different facts.
 
-**An empty opponent slot is `None`, never a string.** It used to be `'-'`,
-which is a perfectly legal IGN — so an opponent genuinely called `-` was
-counted as missing, drawn with the empty-slot icon, and left out of the CSV
-the admin edits, which would have deleted them on the next paste.
-`ladder_flow.is_entered()` is the only test for an empty slot; a sentinel
-has to be a value the data cannot take, and no name is empty (`sanitize_name`
-returns None rather than `''` to keep that true). `'-'` is still used when
-*rendering* a missing value — that is a display choice and carries no
-meaning back. On save, `matchup_ladder.opp_ign` is NOT NULL, so
-`db.upsert_ladder_slots` **deletes** a slot with no opponent rather than
-writing a placeholder into it: absence is a missing row, not a row saying
-"absent". Deleting rather than skipping matters on a re-run, where a slot
-filled earlier and cleared later would otherwise keep its stale row.
+**Every opponent slot always has a name, and there is no "empty" state.**
+A ladder is 16 rows; the admin is shown all 16 in step 2's CSV and corrects
+them by hand; a row nobody filled in still says `Opponent 7`. Extraction and
+the CSV paste overwrite a name when they have one and leave it alone when
+they don't.
+
+This took two goes to get right, and the first two answers are instructive.
+The empty marker was originally the string `'-'` — a perfectly legal IGN, so
+an opponent actually called `-` was treated as missing and dropped from the
+CSV, which would have deleted them on the next paste. Swapping it for `None`
+fixed that one bug and kept the real problem: a sentinel means every reader
+has to agree on what it means, it forced `opp_ign` (NOT NULL) to be deleted
+rather than written, and the only thing it bought was a filled/total tally
+on a screen whose entire purpose is the admin fixing the rows themselves.
+**Removing the concept removed the bug class.** The Done button is no longer
+gated on a fill count either — it needed the same notion to gate on.
+
+`None` still appears, but only in *inputs*: the extractor and the CSV parser
+return None for a field they had no value for, and `fill_opponents` skips
+those. It is never stored.
 
 **`LadderState.opponents` is MATCHUP_SIZE from construction**, and
 `fill_opponents` overwrites it **per field**, never per row. It used to be

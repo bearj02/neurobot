@@ -90,29 +90,32 @@ LEAGUE_NAMES = db.load_league_names_sync()
 # Shared state
 # ---------------------------------------------------------------------------
 
+def _default_opponent_name(slot: int) -> str:
+    """The name a slot carries until something better overwrites it."""
+    return f"Opponent {slot}"
+
+
 def _empty_opponents() -> list[dict]:
-    """A full set of blank opponent slots — one per ladder position."""
-    return [{'name': None, 'total_ovr': None, 'def_ovr': None}
-            for _ in range(MATCHUP_SIZE)]
-
-
-def is_entered(opp: dict) -> bool:
     """
-    Whether a slot actually holds an opponent.
+    The 16 default opponent rows a ladder starts from.
 
-    `None` is the only marker for an empty slot, and this is the only test
-    for it. It used to be the string `'-'`, which is a perfectly legal IGN —
-    so an opponent genuinely called `-` was counted as missing, rendered
-    with the empty-slot icon, and dropped from the CSV the admin edits,
-    which would have quietly deleted them from the ladder. A sentinel has to
-    be a value the data cannot take, and no name is empty: `sanitize_name`
-    returns None rather than '' precisely so this stays true.
+    **Every slot always has a name.** There is no marker for "this one is
+    empty", because nothing needs to ask: a ladder is 16 slots, the admin
+    edits all 16 in step 2's CSV, and a slot nobody filled in simply still
+    says `Opponent 7`. Extraction and the CSV paste overwrite a name when
+    they have one and leave it alone when they don't.
 
-    `'-'` is still used when *rendering* a missing value (see truncate_cell
-    and the OVR fallbacks below). That is a display choice and carries no
-    meaning back into the data.
+    That is deliberately *less* than this used to do. The empty marker was
+    first the string `'-'` — a perfectly legal IGN, so an opponent actually
+    called `-` was treated as missing and dropped from the CSV, which would
+    have deleted them from the ladder on the next paste. Replacing it with
+    None fixed that one bug and kept the real problem: a sentinel means
+    every reader has to agree on what it means, and the only thing it bought
+    was a filled/total tally on a screen whose whole purpose is the admin
+    correcting the rows by hand. Removing the concept removes the bug class.
     """
-    return bool(opp.get('name'))
+    return [{'name': _default_opponent_name(i + 1), 'total_ovr': None, 'def_ovr': None}
+            for i in range(MATCHUP_SIZE)]
 
 
 _OPPONENT_FIELDS = ('name', 'total_ovr', 'def_ovr')
@@ -474,11 +477,9 @@ class OpponentEntryView(View):
     def _rebuild(self):
         self.clear_items()
         lang = self.state.lang
-        filled = sum(1 for o in self.state.opponents if is_entered(o))
-
         edit = Button(
-            label=i18n.t('ladder.step2.enter_btn', lang, filled=filled, total=MATCHUP_SIZE),
-            style=discord.ButtonStyle.success if filled == MATCHUP_SIZE else discord.ButtonStyle.primary,
+            label=i18n.t('ladder.step2.enter_btn', lang, total=MATCHUP_SIZE),
+            style=discord.ButtonStyle.primary,
             row=0
         )
         edit.callback = self._enter
@@ -492,10 +493,15 @@ class OpponentEntryView(View):
         info_btn.callback = self._edit_matchup_info
         self.add_item(info_btn)
 
+        # Always enabled. It used to be gated on all 16 slots being
+        # "filled", which needed a notion of an unfilled slot to gate on —
+        # and that notion is what produced the '-'-is-also-a-name bug. Every
+        # slot now carries a name, the admin has just been shown all 16 and
+        # had the chance to correct them, and blocking the button on the
+        # bot's opinion of their work was never the point of this screen.
         done = Button(
             label=i18n.t('ladder.step2.done_btn', lang),
-            style=discord.ButtonStyle.green if filled == MATCHUP_SIZE else discord.ButtonStyle.gray,
-            disabled=(filled < MATCHUP_SIZE),
+            style=discord.ButtonStyle.green,
             row=1
         )
         done.callback = self._advance
@@ -517,30 +523,40 @@ class OpponentEntryView(View):
     async def _enter(self, interaction: discord.Interaction):
         lang = self.state.lang
         modal = OpponentCSVModal(lang=lang)
-        entered = [o for o in self.state.opponents if is_entered(o)]
+        entered = self.state.opponents
 
-        if not entered:
+        # Nothing has been written into this ladder yet if it is still
+        # literally the set of defaults — a structural comparison, rather
+        # than asking each row whether it looks empty. There is no such
+        # thing as an empty row any more.
+        if self.state.opponents == _empty_opponents():
             # Nothing entered yet this session — pull whatever was last saved
             # to this team's ladder for this date (e.g. from an AI extraction
             # in an earlier /ladder run that got aborted), so it can be
             # reviewed and edited instead of starting from scratch.
             saved = await db.get_ladder_snapshot(self.state.team_id, self.state.game_date)
-            entered = [
-                {'name': r['opp_ign'], 'total_ovr': r.get('our_total_ovr'), 'def_ovr': r['opp_def_ovr']}
-                for r in saved if r.get('opp_ign')
-            ]
+            restored = _empty_opponents()
+            fill_opponents(restored, [
+                {'name': r['opp_ign'], 'total_ovr': r.get('our_total_ovr'),
+                 'def_ovr': r['opp_def_ovr']}
+                for r in saved
+            ])
+            entered = restored
 
-        existing = '\n'.join(
+        # All MATCHUP_SIZE rows, always. This is the thing the admin edits,
+        # so it is the whole ladder with the `Opponent N` defaults showing
+        # through wherever nothing better is known — not a partial list they
+        # have to work out the gaps in.
+        modal.opponents.default = '\n'.join(
             f"{o['name']}, {o['total_ovr'] or ''}, {o['def_ovr'] or ''}"
             for o in entered
         )
-        if existing:
-            modal.opponents.default = existing
 
         async def on_submit(inter):
-            parsed = _parse_csv_opponents(modal.opponents.value)
-            for i, opp in enumerate(parsed[:MATCHUP_SIZE]):
-                self.state.opponents[i] = opp
+            # Merged field by field, like every other write into these
+            # slots: a line the admin leaves blank keeps what was already
+            # there instead of blanking the row.
+            fill_opponents(self.state.opponents, _parse_csv_opponents(modal.opponents.value))
             self._rebuild()
             # Must be the interaction response, NOT defer() + inter.message.edit().
             # message.edit goes through the channel REST endpoint, which needs the
@@ -579,9 +595,8 @@ class OpponentEntryView(View):
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang
         league = LEAGUE_NAMES.get(self.state.team_id, self.state.team_id)
-        filled = sum(1 for o in self.state.opponents if is_entered(o))
         embed  = discord.Embed(
-            title=i18n.t('ladder.step2.title', lang, filled=filled, total=MATCHUP_SIZE),
+            title=i18n.t('ladder.step2.title', lang, total=MATCHUP_SIZE),
             description=i18n.t('ladder.step2.desc', lang, league=league),
             color=discord.Color.orange()
         )
@@ -597,12 +612,11 @@ class OpponentEntryView(View):
         lines_1 = []
         lines_2 = []
         for i, o in enumerate(self.state.opponents):
-            icon  = "✅" if is_entered(o) else "⬜"
             ovr   = f"  DEF:{o['def_ovr']}" if o['def_ovr'] else ""
             # Opponent names arrive from a free-text modal (1600 chars for
             # the whole CSV), so one of them can overrun the 1024-character
             # field limit unaided and take the whole message down with it.
-            entry = f"{icon} `#{i+1}` {truncate_cell(o['name'], _NAME_COL)}{ovr}"
+            entry = f"`#{i+1}` {truncate_cell(o['name'], _NAME_COL)}{ovr}"
             if i < 8:
                 lines_1.append(entry)
             else:
@@ -918,22 +932,16 @@ def build_final_embed(state: LadderState,
 async def save_ladder_to_db(state: LadderState,
                              our_order: list[int],
                              opp_order: list[int]):
-    # Every slot goes down, entered or not. upsert_ladder_slots writes the
-    # ones with an opponent and *deletes* the ones without — matchup_ladder's
-    # opp_ign is NOT NULL, and an empty slot has no name to put there. It
-    # used to receive the '-' placeholder, which reads back indistinguishably
-    # from an opponent actually called '-'. Absence is a missing row, not a
-    # row saying "absent".
-    #
-    # Deleting rather than skipping matters on a re-run: a slot that had an
-    # opponent this morning and was cleared this afternoon would otherwise
-    # keep the morning's row and silently contradict the ladder on screen.
+    # All MATCHUP_SIZE slots, every time. Each carries a real name — what
+    # was read or entered, or the `Opponent N` default — so matchup_ladder's
+    # NOT NULL opp_ign is always satisfied and there is no placeholder-
+    # versus-real-name question to get wrong on the way back out.
     slots = []
     for slot in range(MATCHUP_SIZE):
         opp = state.opponents[opp_order[slot]]
         slots.append({
             'slot':          slot + 1,
-            'opp_ign':       opp['name'] if is_entered(opp) else None,
+            'opp_ign':       opp['name'],
             'opp_def_ovr':   opp.get('def_ovr'),
             'our_total_ovr': opp.get('total_ovr'),
             'our_ign':       state.selected[our_order[slot]],

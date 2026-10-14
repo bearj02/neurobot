@@ -1598,9 +1598,9 @@ TRANSLATIONS['ladder.ui_error'] = {
     'de': "⚠️ Dieser Schritt ist fehlgeschlagen (`{where}`: `{error}`). Es ging nichts verloren — führe `/ladder` erneut aus, um dort weiterzumachen, wo du aufgehört hast. Der vollständige Traceback steht im Bot-Log.",
 }
 TRANSLATIONS['ladder.step2.title'] = {
-    'en': "Step 2 — Enter Opponents  ({filled}/{total} filled)", 'es': "Paso 2 — Ingresar Oponentes  ({filled}/{total} completados)",
-    'fr': "Étape 2 — Saisir les Adversaires  ({filled}/{total} remplis)", 'pt': "Passo 2 — Inserir Oponentes  ({filled}/{total} preenchidos)",
-    'de': "Schritt 2 — Gegner Eingeben  ({filled}/{total} ausgefüllt)",
+    'en': "Step 2 — Enter Opponents ({total} slots)", 'es': "Paso 2 — Ingresar Oponentes ({total} posiciones)",
+    'fr': "Étape 2 — Saisir les Adversaires ({total} positions)", 'pt': "Passo 2 — Inserir Oponentes ({total} posições)",
+    'de': "Schritt 2 — Gegner Eingeben ({total} Plätze)",
 }
 TRANSLATIONS['ladder.step2.desc'] = {
     'en': "**{league}**\nEnter each opponent as: `Name, Total OVR, DEF OVR` (one per line).\nExample: `WolfpackMafia, 6481, 219`",

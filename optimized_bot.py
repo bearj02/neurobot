@@ -2950,10 +2950,11 @@ async def ladder_slash(interaction: discord.Interaction, league: str,
     suspicious_ovr_changes = resolved['suspicious']
 
     # Format opponents for ladder flow
-    # name stays None when the model couldn't read that slot — never a
-    # placeholder string. ladder_flow.is_entered() treats any non-empty name
-    # as a real opponent, and the em-dash this used to default to would have
-    # made every unread slot look filled.
+    # name stays None when the model couldn't read that slot. None here means
+    # "nothing extracted for this field", and fill_opponents skips it, so the
+    # slot keeps its `Opponent N` default. It must not be a placeholder
+    # string — the em-dash this used to default to would have overwritten
+    # that default with something that reads as a real opponent name.
     preopponents = [
         {
             "name":      o.get("name"),
