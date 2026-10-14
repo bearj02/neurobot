@@ -3987,30 +3987,6 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         rows = await db.fetchall("SELECT * FROM matchup_ladder WHERE team_id='RX' AND game_date=?", (TODAY,))
         self.assertEqual(rows, [])
 
-    async def test_an_empty_slot_is_deleted_not_written_as_a_placeholder(self):
-        """opp_ign is NOT NULL, so an empty slot has no name to put in it.
-        It used to be given '-', which reads back indistinguishably from an
-        opponent actually called '-' — a legal IGN. Absence is a missing
-        row, not a row that says "absent"."""
-        await db.upsert_ladder_slots("RX", TODAY, [
-            {"slot": 1, "opp_ign": "Real"},
-            {"slot": 2, "opp_ign": None},
-        ])
-        rows = await db.fetchall(
-            "SELECT slot, opp_ign FROM matchup_ladder "
-            "WHERE team_id='RX' AND game_date=? ORDER BY slot", (TODAY,))
-        self.assertEqual([(r["slot"], r["opp_ign"]) for r in rows], [(1, "Real")])
-
-    async def test_clearing_a_slot_removes_the_row_it_had_before(self):
-        """Deleting rather than skipping: a slot filled earlier in the day
-        and cleared later would otherwise keep its stale row and silently
-        contradict the ladder on screen."""
-        await db.upsert_ladder_slots("RX", TODAY, [{"slot": 1, "opp_ign": "Morning"}])
-        await db.upsert_ladder_slots("RX", TODAY, [{"slot": 1, "opp_ign": None}])
-        rows = await db.fetchall(
-            "SELECT * FROM matchup_ladder WHERE team_id='RX' AND game_date=?", (TODAY,))
-        self.assertEqual(rows, [])
-
     async def test_an_opponent_actually_called_dash_is_stored(self):
         """The name this whole sentinel change is about."""
         await db.upsert_ladder_slots("RX", TODAY, [{"slot": 1, "opp_ign": "-"}])
@@ -4079,7 +4055,8 @@ class TestLadderFlow(unittest.IsolatedAsyncioTestCase):
         state.team_id   = "RX"
         state.game_date = TODAY
         state.lang      = "en"
-        state.opponents = []  # nothing entered yet this session
+        import ladder_flow
+        state.opponents = ladder_flow._empty_opponents()  # untouched this session
 
         view = OpponentEntryView.__new__(OpponentEntryView)
         view.state = state
@@ -9484,7 +9461,7 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
             [{"name": f"T{i}", "total_ovr": 1, "def_ovr": 2} for i in range(14)])
         self.assertEqual(filled, 14)
         self.assertEqual(len(state.opponents), self.lf.MATCHUP_SIZE)
-        self.assertFalse(self.lf.is_entered(state.opponents[15]))
+        self.assertEqual(state.opponents[15]["name"], "Opponent 16")
 
     def test_an_unread_slot_keeps_its_default_rather_than_going_null(self):
         """The extraction now returns all 16 slots, including the ones it
@@ -9498,9 +9475,8 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
             {"name": None, "total_ovr": None, "def_ovr": None},
         ])
         self.assertEqual(filled, 1)
-        self.assertFalse(self.lf.is_entered(state.opponents[1]))
-        self.assertEqual(
-            sum(1 for o in state.opponents if self.lf.is_entered(o)), 1)
+        self.assertEqual(state.opponents[0]["name"], "Real")
+        self.assertEqual(state.opponents[1]["name"], "Opponent 2")
 
     def test_a_partly_read_slot_keeps_the_fields_it_lost(self):
         """Per field, not per row — a name the model read shouldn't be
@@ -9579,7 +9555,7 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
                                   for i in range(14)])
             self.assertEqual(len(captured['state'].opponents), self.lf.MATCHUP_SIZE)
             self.assertEqual(captured['state'].opponents[13]["name"], "T13")
-            self.assertFalse(self.lf.is_entered(captured['state'].opponents[14]))
+            self.assertEqual(captured['state'].opponents[14]["name"], "Opponent 15")
         finally:
             await db.close()
             db._db = None
@@ -9592,27 +9568,31 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
         state = self.lf.LadderState("RX", TODAY, None)
         self.lf.fill_opponents(state.opponents, [{"name": "-", "total_ovr": 7000,
                                                   "def_ovr": 210}])
-        self.assertTrue(self.lf.is_entered(state.opponents[0]))
-        self.assertFalse(self.lf.is_entered(state.opponents[1]))
-        self.assertEqual(
-            sum(1 for o in state.opponents if self.lf.is_entered(o)), 1)
+        self.assertEqual(state.opponents[0]["name"], "-")
+        self.assertEqual(state.opponents[0]["total_ovr"], 7000)
+        # ...and nothing else was disturbed.
+        self.assertEqual(state.opponents[1]["name"], "Opponent 2")
 
-    def test_an_empty_slot_is_none_not_a_string(self):
-        """The sentinel has to be a value a name cannot take. Every string
-        is a possible name; absence is not a string."""
-        for slot in self.lf._empty_opponents():
-            self.assertIsNone(slot["name"])
+    def test_every_slot_always_carries_a_name(self):
+        """There is no empty slot and so no marker for one. A ladder is 16
+        rows, the admin edits all 16, and a row nobody filled in still says
+        'Opponent 7'. No sentinel means no sentinel-versus-real-name bug —
+        which is what '-' was, and what None was a smaller version of."""
+        for i, slot in enumerate(self.lf._empty_opponents(), start=1):
+            self.assertEqual(slot["name"], f"Opponent {i}")
 
     def test_the_csv_parser_never_invents_a_name(self):
         """A line with no name used to parse as the literal '-', which then
         read back as an opponent called '-'."""
-        parsed = self.lf._parse_csv_opponents(", 7000, 210")
-        self.assertIsNone(parsed[0]["name"])
-        self.assertFalse(self.lf.is_entered(parsed[0]))
+        state = self.lf.LadderState("RX", TODAY, None)
+        self.lf.fill_opponents(state.opponents,
+                               self.lf._parse_csv_opponents(", 7000, 210"))
+        self.assertEqual(state.opponents[0]["name"], "Opponent 1")
+        self.assertEqual(state.opponents[0]["total_ovr"], 7000)
         # ...but a line that really says '-' means an opponent called '-'.
-        parsed = self.lf._parse_csv_opponents("-, 7000, 210")
-        self.assertEqual(parsed[0]["name"], "-")
-        self.assertTrue(self.lf.is_entered(parsed[0]))
+        self.lf.fill_opponents(state.opponents,
+                               self.lf._parse_csv_opponents("-, 7000, 210"))
+        self.assertEqual(state.opponents[0]["name"], "-")
 
     def test_a_dash_named_opponent_survives_the_csv_round_trip(self):
         """Step 2 prefills the editor from the entered slots and parses the
@@ -9621,11 +9601,58 @@ class TestLadderOpponentSlots(unittest.IsolatedAsyncioTestCase):
         state = self.lf.LadderState("RX", TODAY, None)
         self.lf.fill_opponents(state.opponents, [{"name": "-", "total_ovr": 7000,
                                                   "def_ovr": 210}])
-        entered = [o for o in state.opponents if self.lf.is_entered(o)]
         csv = "\n".join(f"{o['name']}, {o['total_ovr'] or ''}, {o['def_ovr'] or ''}"
-                        for o in entered)
+                        for o in state.opponents)
         back = self.lf._parse_csv_opponents(csv)
-        self.assertEqual([o["name"] for o in back], ["-"])
+        self.assertEqual(len(back), self.lf.MATCHUP_SIZE)
+        self.assertEqual(back[0]["name"], "-")
+
+    async def test_pasting_a_csv_with_a_blank_name_keeps_that_default(self):
+        """The paste merges field by field like every other write into these
+        slots. Replacing the row wholesale would put the parser's None into
+        the state, and then there would be a nameless row again — which is
+        the whole thing this model exists to not have."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+        state = LadderState("RX", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        view = OpponentEntryView(state)
+
+        opener = _FakeInteraction()
+        # A still-default ladder makes _enter look for a saved snapshot;
+        # there's no db in this class and that isn't what's under test.
+        with patch.object(self.lf.db, "get_ladder_snapshot",
+                          new=AsyncMock(return_value=[])):
+            await view._enter(opener)
+        modal = opener.response.modals[0]
+        # Row 1 named, row 2 left blank, row 3 named.
+        modal.opponents.value = "Alpha, 7000, 210\n, 6000, 190\nGamma, 6500, 200"
+        await modal.on_submit(_FakeInteraction())
+
+        self.assertEqual(state.opponents[0]["name"], "Alpha")
+        self.assertEqual(state.opponents[1]["name"], "Opponent 2")
+        self.assertEqual(state.opponents[1]["total_ovr"], 6000)  # the numbers still landed
+        self.assertEqual(state.opponents[2]["name"], "Gamma")
+        # Rows the paste never mentioned keep their defaults.
+        self.assertEqual(state.opponents[15]["name"], "Opponent 16")
+
+    async def test_the_editor_is_prefilled_with_every_slot(self):
+        """All 16 rows, so the admin corrects the ladder in place instead of
+        working out which positions are missing from a partial list."""
+        from ladder_flow import OpponentEntryView, LadderState, MATCHUP_SIZE
+        state = LadderState("RX", TODAY, None)
+        state.players  = [{"ign": f"P{i}"} for i in range(MATCHUP_SIZE)]
+        state.selected = [f"P{i}" for i in range(MATCHUP_SIZE)]
+        self.lf.fill_opponents(state.opponents,
+                               [{"name": "OnlyOne", "total_ovr": 7000, "def_ovr": 210}])
+        view = OpponentEntryView(state)
+
+        opener = _FakeInteraction()
+        await view._enter(opener)
+        lines = opener.response.modals[0].opponents.default.splitlines()
+        self.assertEqual(len(lines), MATCHUP_SIZE)
+        self.assertTrue(lines[0].startswith("OnlyOne,"))
+        self.assertTrue(lines[15].startswith("Opponent 16,"))
 
     def test_a_short_list_built_elsewhere_is_repaired_loudly(self):
         """Belt and braces for a state not built through LadderState — but

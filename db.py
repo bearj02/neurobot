@@ -1059,44 +1059,28 @@ async def upsert_ladder_slots(team_id: str, game_date, slots: list[dict]):
     answer the button click, and 16 separately-committed upserts (one fsync
     each) were slow enough to blow Discord's 3-second window on a slower
     host disk. All-or-nothing also means a failure can't leave half a ladder.
-
-    **A slot whose `opp_ign` is None is deleted, not written.** `opp_ign` is
-    NOT NULL and an empty slot has no name to put in it. It used to be given
-    the string '-', which reads back indistinguishably from an opponent
-    actually called '-' — a legal IGN. Absence is the absence of a row, not
-    a row that says "absent". Deleting rather than merely skipping matters
-    on a re-run: a slot filled earlier in the day and cleared later would
-    otherwise keep its stale row and contradict the ladder on screen.
     """
     _check()
     rows = [
         (team_id, str(game_date), s['slot'], s['opp_ign'],
          s.get('opp_def_ovr'), s.get('our_total_ovr'), s.get('our_ign'), s.get('tier'))
-        for s in slots if s.get('opp_ign')
+        for s in slots
     ]
-    empty = [(team_id, str(game_date), s['slot'])
-             for s in slots if not s.get('opp_ign')]
     try:
-        if rows:
-            await _db.executemany(
-                """
-                INSERT INTO matchup_ladder
-                    (team_id, game_date, slot, opp_ign, opp_def_ovr, our_total_ovr, our_ign, tier)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(team_id, game_date, slot) DO UPDATE SET
-                    opp_ign=excluded.opp_ign,
-                    opp_def_ovr=excluded.opp_def_ovr,
-                    our_total_ovr=excluded.our_total_ovr,
-                    our_ign=excluded.our_ign,
-                    tier=excluded.tier
-                """,
-                rows
-            )
-        if empty:
-            await _db.executemany(
-                "DELETE FROM matchup_ladder WHERE team_id=? AND game_date=? AND slot=?",
-                empty
-            )
+        await _db.executemany(
+            """
+            INSERT INTO matchup_ladder
+                (team_id, game_date, slot, opp_ign, opp_def_ovr, our_total_ovr, our_ign, tier)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(team_id, game_date, slot) DO UPDATE SET
+                opp_ign=excluded.opp_ign,
+                opp_def_ovr=excluded.opp_def_ovr,
+                our_total_ovr=excluded.our_total_ovr,
+                our_ign=excluded.our_ign,
+                tier=excluded.tier
+            """,
+            rows
+        )
         await _db.commit()
     except Exception:
         await _db.rollback()
