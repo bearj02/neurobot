@@ -92,8 +92,27 @@ LEAGUE_NAMES = db.load_league_names_sync()
 
 def _empty_opponents() -> list[dict]:
     """A full set of blank opponent slots — one per ladder position."""
-    return [{'name': '-', 'total_ovr': None, 'def_ovr': None}
+    return [{'name': None, 'total_ovr': None, 'def_ovr': None}
             for _ in range(MATCHUP_SIZE)]
+
+
+def is_entered(opp: dict) -> bool:
+    """
+    Whether a slot actually holds an opponent.
+
+    `None` is the only marker for an empty slot, and this is the only test
+    for it. It used to be the string `'-'`, which is a perfectly legal IGN —
+    so an opponent genuinely called `-` was counted as missing, rendered
+    with the empty-slot icon, and dropped from the CSV the admin edits,
+    which would have quietly deleted them from the ladder. A sentinel has to
+    be a value the data cannot take, and no name is empty: `sanitize_name`
+    returns None rather than '' precisely so this stays true.
+
+    `'-'` is still used when *rendering* a missing value (see truncate_cell
+    and the OVR fallbacks below). That is a display choice and carries no
+    meaning back into the data.
+    """
+    return bool(opp.get('name'))
 
 
 _OPPONENT_FIELDS = ('name', 'total_ovr', 'def_ovr')
@@ -106,10 +125,9 @@ def fill_opponents(target: list[dict], source: list[dict] | None) -> int:
 
     **Per field, not per row.** The extraction returns every slot whether or
     not it could read it, so a row that came back as all-nulls must leave
-    that slot at its default rather than replacing `-` with None — the rest
-    of the flow uses `name != '-'` to mean "an opponent is entered here",
-    and a None would count as entered while rendering as blank. Any single
-    field the model couldn't read behaves the same way: the default stands.
+    that slot untouched rather than writing its nulls over what is there.
+    Any single field the model couldn't read behaves the same way: whatever
+    the slot already held stands.
 
     Anything past MATCHUP_SIZE is ignored rather than growing the list — a
     screenshot can show more rows than a ladder has slots (one extraction
@@ -363,7 +381,7 @@ def _parse_csv_opponents(text: str) -> list[dict]:
         if not line:
             continue
         parts = [p.strip() for p in line.split(',')]
-        name      = parts[0] if len(parts) > 0 else '-'
+        name      = (parts[0] if parts else '') or None
         total_ovr = int(parts[1]) if len(parts) > 1 and parts[1].strip().isdigit() else None
         def_ovr   = int(parts[2]) if len(parts) > 2 and parts[2].strip().isdigit() else None
         results.append({'name': name, 'total_ovr': total_ovr, 'def_ovr': def_ovr})
@@ -456,7 +474,7 @@ class OpponentEntryView(View):
     def _rebuild(self):
         self.clear_items()
         lang = self.state.lang
-        filled = sum(1 for o in self.state.opponents if o['name'] != '-')
+        filled = sum(1 for o in self.state.opponents if is_entered(o))
 
         edit = Button(
             label=i18n.t('ladder.step2.enter_btn', lang, filled=filled, total=MATCHUP_SIZE),
@@ -499,7 +517,7 @@ class OpponentEntryView(View):
     async def _enter(self, interaction: discord.Interaction):
         lang = self.state.lang
         modal = OpponentCSVModal(lang=lang)
-        entered = [o for o in self.state.opponents if o['name'] != '-']
+        entered = [o for o in self.state.opponents if is_entered(o)]
 
         if not entered:
             # Nothing entered yet this session — pull whatever was last saved
@@ -561,7 +579,7 @@ class OpponentEntryView(View):
     def _build_embed(self) -> discord.Embed:
         lang   = self.state.lang
         league = LEAGUE_NAMES.get(self.state.team_id, self.state.team_id)
-        filled = sum(1 for o in self.state.opponents if o['name'] != '-')
+        filled = sum(1 for o in self.state.opponents if is_entered(o))
         embed  = discord.Embed(
             title=i18n.t('ladder.step2.title', lang, filled=filled, total=MATCHUP_SIZE),
             description=i18n.t('ladder.step2.desc', lang, league=league),
@@ -579,7 +597,7 @@ class OpponentEntryView(View):
         lines_1 = []
         lines_2 = []
         for i, o in enumerate(self.state.opponents):
-            icon  = "✅" if o['name'] != '-' else "⬜"
+            icon  = "✅" if is_entered(o) else "⬜"
             ovr   = f"  DEF:{o['def_ovr']}" if o['def_ovr'] else ""
             # Opponent names arrive from a free-text modal (1600 chars for
             # the whole CSV), so one of them can overrun the 1024-character
@@ -900,12 +918,22 @@ def build_final_embed(state: LadderState,
 async def save_ladder_to_db(state: LadderState,
                              our_order: list[int],
                              opp_order: list[int]):
+    # Every slot goes down, entered or not. upsert_ladder_slots writes the
+    # ones with an opponent and *deletes* the ones without — matchup_ladder's
+    # opp_ign is NOT NULL, and an empty slot has no name to put there. It
+    # used to receive the '-' placeholder, which reads back indistinguishably
+    # from an opponent actually called '-'. Absence is a missing row, not a
+    # row saying "absent".
+    #
+    # Deleting rather than skipping matters on a re-run: a slot that had an
+    # opponent this morning and was cleared this afternoon would otherwise
+    # keep the morning's row and silently contradict the ladder on screen.
     slots = []
     for slot in range(MATCHUP_SIZE):
         opp = state.opponents[opp_order[slot]]
         slots.append({
             'slot':          slot + 1,
-            'opp_ign':       opp['name'],
+            'opp_ign':       opp['name'] if is_entered(opp) else None,
             'opp_def_ovr':   opp.get('def_ovr'),
             'our_total_ovr': opp.get('total_ovr'),
             'our_ign':       state.selected[our_order[slot]],
