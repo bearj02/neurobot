@@ -2198,6 +2198,20 @@ editor is one `name, total, def` per line split on commas, so a comma inside
 a name silently shifts the two numbers into the wrong columns. `None` stays
 `None` — an empty name and an unread row are different facts.
 
+**An empty opponent slot is `None`, never a string.** It used to be `'-'`,
+which is a perfectly legal IGN — so an opponent genuinely called `-` was
+counted as missing, drawn with the empty-slot icon, and left out of the CSV
+the admin edits, which would have deleted them on the next paste.
+`ladder_flow.is_entered()` is the only test for an empty slot; a sentinel
+has to be a value the data cannot take, and no name is empty (`sanitize_name`
+returns None rather than `''` to keep that true). `'-'` is still used when
+*rendering* a missing value — that is a display choice and carries no
+meaning back. On save, `matchup_ladder.opp_ign` is NOT NULL, so
+`db.upsert_ladder_slots` **deletes** a slot with no opponent rather than
+writing a placeholder into it: absence is a missing row, not a row saying
+"absent". Deleting rather than skipping matters on a re-run, where a slot
+filled earlier and cleared later would otherwise keep its stale row.
+
 **`LadderState.opponents` is MATCHUP_SIZE from construction**, and
 `fill_opponents` overwrites it **per field**, never per row. It used to be
 assigned over with whatever the extraction returned, at whatever length:
