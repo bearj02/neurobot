@@ -9972,16 +9972,18 @@ def _body(text, stop_reason="end_turn", status=200):
 
 
 def _ladder_slots(rows=None, key="name"):
-    """slot_1..slot_16, as the ladder schema requires. `rows` fills from the
-    top; the rest are the nulls a model returns for a row it couldn't read."""
+    """16 rows with their slot numbers, as the ladder schema requires. `rows`
+    fills from the top (a row that already names its own slot keeps it); the
+    rest are the nulls a model returns for a row it couldn't read."""
     import agent
     blank = {key: None, "total_ovr": None, "def_ovr": None}
     if key == "real_ign":
         blank = {key: None, "total_ovr": None, "off_ovr": None, "def_ovr": None}
     rows = list(rows or [])
-    out = {}
+    out = []
     for i in range(1, agent.LADDER_SLOTS + 1):
-        out[f"slot_{i}"] = rows[i - 1] if i <= len(rows) else dict(blank)
+        row = rows[i - 1] if i <= len(rows) else dict(blank)
+        out.append(dict({"slot": i}, **row))
     return out
 
 
@@ -10123,22 +10125,59 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
             with self.subTest(schema=name):
                 self.assertLessEqual(count(schema), self.agent.MAX_UNION_PARAMS)
 
-    async def test_blank_slot_fields_come_back_as_none(self):
-        """Slot fields can't be nullable (the union cap), so the model sends
-        "" / 0 for an unread value. Those must be decoded at the boundary —
-        a 0 OVR reaching the db would be a fabricated stat, and a "" name
-        would look like a read row."""
-        session = _FakeAnthropicSession(self, [_ok_body(
-            self.agent.extract_ladder_from_screenshots,
-            opponents=[{"name": "", "total_ovr": 0, "def_ovr": 0},
-                       {"name": "Real", "total_ovr": 7100, "def_ovr": 0}])])
-        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"),              patch.object(self.agent, "aiohttp", _fake_aiohttp(session)),              patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
-            result = await self.agent.extract_ladder_from_screenshots(["u"])
-        first, second = result["opponents"][:2]
-        self.assertEqual((first["name"], first["total_ovr"], first["def_ovr"]),
-                         (None, None, None))
-        self.assertEqual((second["name"], second["total_ovr"], second["def_ovr"]),
-                         ("Real", 7100, None))
+    def test_the_row_schema_is_not_repeated_per_slot(self):
+        """The API also caps compiled grammar size, unpublished. Inline
+        slot_1..slot_16 objects were 32 copies of the row schema, each with
+        the roster enum, and /ladder died with "compiled grammar is too
+        large". An array's item schema compiles once — so each roster name
+        must appear exactly once in the whole schema."""
+        schema = json.dumps(self.agent.build_ladder_schema(["Grizzly", "Ruffis"]))
+        self.assertEqual(schema.count('"Grizzly"'), 1)
+        self.assertEqual(schema.count('"name": {'), 1)   # the property, not `required`
+
+    async def _extract(self, **rows):
+        session = _FakeAnthropicSession(self, [_body(json.dumps(dict(
+            {"opponent_league_name": None, "event_type": None, "our_rank": None,
+             "opponents": [], "our_players": []}, **rows)))])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
+             patch.object(self.agent, "aiohttp", _fake_aiohttp(session)), \
+             patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            return await self.agent.extract_ladder_from_screenshots(["u"])
+
+    async def test_rows_are_placed_by_their_own_slot_not_their_array_index(self):
+        """The array's order and length are not constrained, so position has
+        to come from the row. A skipped row must leave a gap in place, not
+        shift the rows below it onto the wrong player."""
+        result = await self._extract(opponents=[
+            {"slot": 3, "name": "Third", "total_ovr": 5, "def_ovr": 6},
+            {"slot": 1, "name": "First", "total_ovr": 1, "def_ovr": 2},
+        ])
+        names = [o["name"] for o in result["opponents"]]
+        self.assertEqual(len(names), self.agent.LADDER_SLOTS)
+        self.assertEqual(names[:3], ["First", None, "Third"])
+        self.assertEqual([o["_slot"] for o in result["opponents"]],
+                         list(range(1, self.agent.LADDER_SLOTS + 1)))
+
+    async def test_a_duplicate_slot_keeps_the_first_row(self):
+        """Two rows claiming one slot means the model placed one of them
+        wrong. Keeping the first is a choice; letting the second overwrite
+        it silently would be the same choice made invisibly."""
+        import logging
+        with self.assertLogs("global_logger", level="WARNING") as logs:
+            result = await self._extract(our_players=[
+                {"slot": 2, "real_ign": "A", "total_ovr": 1, "off_ovr": 1, "def_ovr": 1},
+                {"slot": 2, "real_ign": "B", "total_ovr": 1, "off_ovr": 1, "def_ovr": 1},
+            ])
+        self.assertEqual(result["our_players"][1]["real_ign"], "A")
+        self.assertTrue(any("duplicate" in m for m in logs.output))
+
+    async def test_extra_rows_cannot_grow_the_ladder(self):
+        """21 rows came back once. Whatever arrives, the result is 16."""
+        rows = [{"slot": (i % 16) + 1, "name": f"P{i}", "total_ovr": 1, "def_ovr": 1}
+                for i in range(21)]
+        with self.assertLogs("global_logger", level="WARNING"):
+            result = await self._extract(opponents=rows)
+        self.assertEqual(len(result["opponents"]), self.agent.LADDER_SLOTS)
 
     def test_unreadable_values_stay_expressible_as_null(self):
         """The prompts ask for null on anything illegible. A schema that
@@ -10207,8 +10246,9 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         emit, so there is nothing downstream to match, fuzzy-match or clean
         up. Free text plus reconciliation was the wrong shape."""
         schema = self.agent.build_ladder_schema(["Grizzly", "Ruffis", "JX8"])
-        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
-        self.assertEqual(real_ign["enum"], ["", "Grizzly", "JX8", "Ruffis"])
+        real_ign = schema["properties"]["our_players"]["items"]["properties"]["real_ign"]
+        enum = next(b["enum"] for b in real_ign["anyOf"] if "enum" in b)
+        self.assertEqual(enum, ["Grizzly", "JX8", "Ruffis"])
 
     def test_the_enum_is_stable_across_calls(self):
         """The request body has to be byte-identical between runs or the
@@ -10219,27 +10259,26 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(a, b)
 
     def test_an_illegible_row_can_still_be_declined(self):
-        """A decline must stay reachable — as "", since slot fields can't be
-        nullable under the union cap. It is the difference between 'someone
+        """null must stay reachable. It is the difference between 'someone
         not on the roster' (now impossible) and 'I can't read this row'
         (always possible). Forcing a pick turns an unreadable row into a
         confidently wrong one, and a wrong row is invisible where a dropped
         one shows up in the count."""
         schema = self.agent.build_ladder_schema(["Grizzly"])
-        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
-        self.assertIn("", real_ign["enum"])
+        real_ign = schema["properties"]["our_players"]["items"]["properties"]["real_ign"]
+        self.assertIn({"type": "null"}, real_ign["anyOf"])
 
     def test_opponents_are_not_constrained_by_our_roster(self):
         """They belong to the other league — binding them to our names would
         be actively wrong, not merely unhelpful."""
         schema = self.agent.build_ladder_schema(["Grizzly", "Ruffis"])
-        name = schema["properties"]["opponents"]["properties"]["slot_1"]["properties"]["name"]
+        name = schema["properties"]["opponents"]["items"]["properties"]["name"]
         self.assertNotIn("enum", json.dumps(name))
 
     def test_no_roster_falls_back_to_free_text(self):
         """A league with no active player still has to be extractable."""
         schema = self.agent.build_ladder_schema([])
-        real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
+        real_ign = schema["properties"]["our_players"]["items"]["properties"]["real_ign"]
         self.assertNotIn("enum", json.dumps(real_ign))
 
     async def test_the_roster_reaches_both_the_schema_and_the_prompt(self):
@@ -10255,8 +10294,11 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
                 ["u"], roster=["Grizzly", "Ruffis"])
         payload = session.payloads[0]
         schema = payload["output_config"]["format"]["schema"]
-        enum = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]["enum"]
-        self.assertEqual(enum, ["", "Grizzly", "Ruffis"])
+        enum = next(
+            b["enum"] for b in
+            schema["properties"]["our_players"]["items"]["properties"]["real_ign"]["anyOf"]
+            if "enum" in b)
+        self.assertEqual(enum, ["Grizzly", "Ruffis"])
         text = "".join(c["text"] for c in payload["messages"][0]["content"]
                        if c["type"] == "text")
         self.assertIn("Grizzly", text)
@@ -10264,20 +10306,17 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
 
     # -- exactly 16 per side, in screen order ------------------------------
 
-    def test_each_side_is_sixteen_fixed_slots_not_an_open_array(self):
-        """Arrays can't be length-constrained — minItems/maxItems are among
-        the constraints structured outputs rejects — which is how one run
-        returned 21 rows and another 14 opponents against 17 of ours. A
-        required key per slot makes 'exactly 16' a property of the schema."""
+    def test_every_row_must_name_its_slot_from_one_to_sixteen(self):
+        """Arrays can't be length-constrained, so position can't come from
+        the index. A required `slot` enum of 1..16 makes every row state
+        where it sits — which is what lets a dropped row stay a gap."""
         schema = self.agent.build_ladder_schema(["Grizzly"])
         for side in ("opponents", "our_players"):
             with self.subTest(side=side):
-                node = schema["properties"][side]
-                self.assertEqual(node["type"], "object",
-                                 "an array can't be pinned to 16")
-                self.assertEqual(len(node["properties"]), self.agent.LADDER_SLOTS)
-                self.assertEqual(sorted(node["required"]), sorted(node["properties"]))
-                self.assertIs(node["additionalProperties"], False)
+                item = schema["properties"][side]["items"]
+                self.assertIn("slot", item["required"])
+                self.assertEqual(item["properties"]["slot"]["enum"],
+                                 list(range(1, self.agent.LADDER_SLOTS + 1)))
 
     def test_the_slot_count_tracks_the_ladder(self):
         """agent can't import ladder_flow without pulling discord into its

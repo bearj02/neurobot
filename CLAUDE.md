@@ -486,16 +486,23 @@ type (`_NULLABLE_STR` / `_NULLABLE_INT`), never by omitting a key from
 object so a new field can't quietly miss one of these. A test walks both
 schemas and fails on any object that breaks a rule.
 
-**At most 16 union-typed properties per schema** — a nullable type is an
-`anyOf`, so every `_NULLABLE_*` counts. The 16-slot ladder schema shipped
-with 115 and every `/ladder` call failed with a 400 ("Schemas contains too
-many parameters with union types"). Slot fields are therefore plain
-`string`/`integer`: the model sends `""` for an unread name and `0` for an
-unread OVR (`real_ign`'s enum includes `""`), and `_slots_to_list` decodes
-both back to `None` via `_decode_blank`, so nothing downstream ever sees
-them. Neither value can be real — no IGN is empty, no OVR is 0. Only the
-three top-level ladder fields and the season-match stats (14) stay
-nullable. `MAX_UNION_PARAMS` plus a test count every schema against the cap.
+**Two schema-size limits, each found by a live 400 on `/ladder`:**
+- **At most 16 union-typed properties** (a nullable type is an `anyOf`, so
+  every `_NULLABLE_*` counts). Counted per schema *property*, so a nullable
+  field inside an array's item schema counts once. Inline
+  `slot_1`..`slot_16` objects with nullable fields made 115.
+- **An unpublished cap on compiled grammar size** ("The compiled grammar is
+  too large"). Removing the unions from those 32 inline slot objects still
+  hit it: every repeated sub-schema — the roster enum included — is a
+  separate copy in the grammar. An array's item schema compiles once.
+
+Hence each ladder side is an **array whose rows carry a required `slot`
+enum of 1..16** (`_side_schema`), placed by that number in
+`_rows_to_slots`. `MAX_UNION_PARAMS` and a test count the unions; another
+test asserts each roster name appears exactly once in the schema, which is
+the cheap proxy for "no sub-schema repeated per slot". The grammar limit
+can't be checked offline — this machine has no API key — so any schema
+change needs a real `/ladder` run.
 
 `event_type`'s schema is an **enum of the five codes the db actually
 stores** (`E1`/`E2`/`E3`/`HOF`/`Gold-`) — the same conversion table the
@@ -2213,13 +2220,16 @@ writes a screenshot's OVR onto the wrong player's permanent record, silently
 and durably. `claimed` makes it *uniquely*: a name the model put in two
 slots resolves only the first.
 
-**Each side is `slot_1`..`slot_16`, an object — not an array.** Arrays
-cannot be length-constrained (`minItems`/`maxItems` are among the
-constraints structured outputs rejects), which is how one run returned 21
-rows and another 14 opponents against 17 of ours. A required key per slot
-makes "exactly 16, in order" a property of the schema. **An unreadable row
-is that slot with null fields, never a dropped entry** — dropping it shifts
-every row below up by one and attributes them all to the wrong player.
+**Each row states its own slot (1..16); position never comes from the
+array index.** Arrays cannot be length-constrained (`minItems`/`maxItems`
+are rejected), which is how one run returned 21 rows and another 14
+opponents against 17 of ours. Fixed `slot_N` keys solved that but blew the
+grammar-size cap (above), so `_rows_to_slots` enforces "exactly 16, in
+order" instead: a missing slot is all-None **in place**, a duplicate keeps
+the first row, extras can't grow the list, and either anomaly logs a
+warning. **An unreadable row is that slot with null fields, never a
+shift** — renumbering shifts every row below and attributes them all to
+the wrong player.
 `agent.LADDER_SLOTS` mirrors `ladder_flow.MATCHUP_SIZE` (agent can't import
 ladder_flow without pulling discord into its import graph); a test pins them
 equal.
