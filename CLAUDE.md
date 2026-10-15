@@ -485,8 +485,15 @@ every row against a hand-read key (16 opponents, 16 of ours, header):
 - Cheaper too: ~$0.003 per ladder vs ~$0.013 on 4.5.
 - `our_rank` came back null on every 4.5 run and correct (3) on every 5.5 run.
 
-The 6 "off-roster" players were judged against a Sept 26 local db copy, so
-some may just be newer than it. To re-run: put `ANTHROPIC_API_KEY=` in a
+Re-run against a fresh db pulled the same day (19 active NP): **15/16 of
+our players resolved to the right roster entry, all 16 opponents exact,
+header exact, identical across two runs.** Five of the six "off-roster"
+names had just been newer than the stale copy — several under a stored
+`real_ign` spelled differently from the screen (`KruskII` -> `Krusk`,
+`NodeIlgronk` -> `nodellgronk`), which only the roster enum could bridge.
+The one null, `ISpamTheClown`, genuinely isn't an active NP member (the
+nearest row, `SpamLikely`, is `status='I'`). The one remaining misread,
+154 read as 164 OFF, was confirmed against a zoomed crop. To re-run: put `ANTHROPIC_API_KEY=` in a
 `.env` (gitignored) and run a harness like the one described above — each
 run is a few cents.
 - `agent.py` talks to the API over **raw HTTP via `aiohttp`**, not the
