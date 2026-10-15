@@ -32,31 +32,29 @@ The screen shows two teams side by side, each in its own header badge at the top
 The LEFT side is the opponent team.
 The RIGHT side is OUR team (CHRISTiansReborn or another league).
 
-Each side has exactly 16 players, listed top to bottom. Report them by slot,
-where slot_1 is the topmost row and slot_16 the bottom one:
+Each side has exactly 16 players, listed top to bottom. Give every row its
+"slot": its screen position, 1 for the topmost row through 16 for the bottom.
 {
   "opponent_league_name": "OpponentTeamName",
   "event_type": "E1",
   "our_rank": 45,
-  "opponents": {
-    "slot_1":  {"name": "PlayerName", "total_ovr": 7200, "def_ovr": 245},
-    "slot_2":  {"name": "", "total_ovr": 0, "def_ovr": 0},
-    "...":     "through slot_16"
-  },
-  "our_players": {
-    "slot_1":  {"real_ign": "PlayerName", "total_ovr": 7143, "off_ovr": 250, "def_ovr": 232},
-    "...":     "through slot_16"
-  }
+  "opponents": [
+    {"slot": 1, "name": "PlayerName", "total_ovr": 7200, "def_ovr": 245},
+    {"slot": 2, "name": null, "total_ovr": null, "def_ovr": null},
+    "... through slot 16"
+  ],
+  "our_players": [
+    {"slot": 1, "real_ign": "PlayerName", "total_ovr": 7143, "off_ovr": 250, "def_ovr": 232},
+    "... through slot 16"
+  ]
 }
 
 Rules:
-- Slot numbers are screen positions, not a ranking. Never sort or rearrange.
-- Inside a slot, a name you cannot read is "" and a number you cannot read
-  is 0 (no real OVR is ever 0). A slot you cannot read at all is that slot
-  with "" and 0 in every field. Do NOT shift the rows
-  below it up to close the gap — that turns one unreadable row into every
-  later row being attributed to the wrong player.
-- Every slot from slot_1 to slot_16 must be present on both sides.
+- slot is the screen position, not a ranking. Never sort or rearrange.
+- A row you cannot read is still listed under its own slot number, with null
+  fields. Never renumber the rows below it to close the gap - that turns one
+  unreadable row into every later row being attributed to the wrong player.
+- Each slot number from 1 to 16 appears exactly once on each side.
 - opponent_league_name: the opposing team's name, shown in its header badge
   (the same place a name like "seams suspicious" or "Dynasty 1" would appear).
   Use null if not visible.
@@ -68,11 +66,10 @@ Rules:
 - our_rank: OUR team's power rank number, often shown as "#45" or similar next
   to our team's name in its header badge. Use null if not visible.
 - Extract exactly what you see — do not guess or infer missing values
-- Use null for opponent_league_name, event_type or our_rank if you cannot
-  read it clearly; inside a slot use "" or 0 as described above
+- Use null for any value you cannot read clearly
 - Player names must be exactly as shown, including capitalisation and special characters
 - total_ovr, off_ovr, def_ovr, our_rank are integers
-- If a value is cut off or unreadable, do not guess it
+- If a value is cut off or unreadable, use null
 - Return ONLY the JSON object, no other text"""
 
 
@@ -267,10 +264,11 @@ async def _post_and_parse(session: aiohttp.ClientSession, payload: dict,
 #     null on anything not legible in the screenshot;
 #   - numeric/length constraints (minimum, maxLength, ...) are not supported;
 #   - **at most 16 union-typed properties per schema** (a nullable type is an
-#     `anyOf`, so it counts). The ladder schema once carried 115 — every slot
-#     field nullable — and every /ladder call came back 400 "Schemas contains
-#     too many parameters with union types". See _slot_object for how the
-#     slots express "unreadable" without a union.
+#     `anyOf`, so it counts). Counted per *schema property*, not per array
+#     element, so a nullable field inside an array item counts once;
+#   - **an unpublished cap on compiled grammar size.** Repeating a sub-schema
+#     multiplies the grammar; an array's item schema compiles once. See
+#     _side_schema for the two 400s this cost.
 # ---------------------------------------------------------------------------
 
 # The server-side cap on union-typed properties in one schema. A test counts
@@ -295,7 +293,6 @@ def _schema_object(properties: dict) -> dict:
 # ladder order. Mirrors ladder_flow.MATCHUP_SIZE, which isn't imported here to
 # keep discord out of this module's import graph — a test pins the two equal.
 LADDER_SLOTS = 16
-_SLOT_KEYS = tuple(f"slot_{i}" for i in range(1, LADDER_SLOTS + 1))
 
 # Characters that survive the model fine but break the CSV the admin edits in
 # step 2: that format is one `name, total, def` per line, split on commas, so
@@ -318,42 +315,60 @@ def sanitize_name(value):
     return cleaned or None
 
 
-def _slot_object(item_props: dict) -> dict:
-    """One side of the ladder as slot_1..slot_16, not as an array.
+def _side_schema(item_props: dict) -> dict:
+    """One side of the ladder: an array of rows, each carrying its own slot.
 
-    Arrays can't be length-constrained — `minItems`/`maxItems` are among the
-    constraints structured outputs rejects — and leaving it open is how one
-    run returned 21 rows and another returned 14 opponents against 17 of our
-    players. A fixed set of required keys makes "exactly 16, in order" a
-    property of the schema rather than something to repair afterwards: the
-    model has to place every row it reads into a specific slot, and a row it
-    can't read is that slot with blank fields rather than a missing entry that
-    shifts everything below it up by one.
+    **This shape is the third attempt, and the first two each cost a live
+    400**, so the constraints are worth knowing before changing it:
 
-    **Slot fields are deliberately not nullable.** 16 slots x 7 fields is 112
-    properties, and the API allows only 16 union-typed ones per schema — a
-    nullable field is an `anyOf`, so it counts. "Unreadable" is therefore
-    `""` for a name and `0` for an OVR, and `_slots_to_list` turns both back
-    into None before anything else sees them. Neither is a value the data
-    can genuinely hold — no IGN is empty and no OVR is 0 — so this is a wire
-    encoding of null, decoded at the boundary, not a sentinel that leaks.
+    - A bare array of rows (the original) can't be length-constrained —
+      `minItems`/`maxItems` are rejected — and nothing tied a row to its
+      position, which is how one run returned 21 rows and another 14
+      opponents against 17 of ours, and how a skipped row would shift every
+      row below it onto the wrong player.
+    - Fixed keys `slot_1`..`slot_16` fixed the count, but with nullable
+      fields that was 115 union-typed properties against a cap of 16; with
+      the unions removed it still failed, as "compiled grammar is too large":
+      32 inline copies of a row schema (each carrying the roster enum) is
+      32 copies in the grammar.
+
+    Here the row schema exists once, and `slot` is an enum of 1..16, so a
+    row's position is something the model states rather than something its
+    array index implies. `_rows_to_slots` places rows by that number: a
+    missing row is an empty slot *in place*, never a shift, and a duplicate
+    slot keeps the first row rather than overwriting it.
     """
-    return _schema_object({k: _schema_object(item_props) for k in _SLOT_KEYS})
+    slot = {"type": "integer", "enum": list(range(1, LADDER_SLOTS + 1))}
+    return {"type": "array",
+            "items": _schema_object(dict({"slot": slot}, **item_props))}
 
 
-def _decode_blank(value):
-    """A slot field's "couldn't read it" ("" or 0) back to None."""
-    if value is None or value == "" or value == 0:
-        return None
-    return value
+def _rows_to_slots(rows, fields: tuple, side: str) -> list[dict]:
+    """The model's rows back to the ordered 16-list callers expect, placed by
+    each row's own `slot` — never by array position. Every slot is present;
+    one the model didn't return is all-None."""
+    out = {}
+    dupes = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        slot = row.get("slot")
+        if not isinstance(slot, int) or not 1 <= slot <= LADDER_SLOTS:
+            continue
+        if slot in out:
+            dupes += 1          # first wins: a later duplicate is the guess
+            continue
+        out[slot] = {f: row.get(f) for f in fields}
+    missing = LADDER_SLOTS - len(out)
+    if dupes or missing:
+        logger.warning(f"Haiku {side}: {missing} slot(s) not returned, "
+                       f"{dupes} duplicate slot row(s) dropped")
+    return [dict(out.get(i) or {f: None for f in fields}, _slot=i)
+            for i in range(1, LADDER_SLOTS + 1)]
 
 
-def _slots_to_list(side: dict) -> list[dict]:
-    """slot_1..slot_16 back to the ordered 16-list callers expect, with each
-    blank field ("" / 0 — see _slot_object) decoded to None."""
-    return [dict({f: _decode_blank(v) for f, v in (side.get(k) or {}).items()},
-                 _slot=i)
-            for i, k in enumerate(_SLOT_KEYS, start=1)]
+_OPP_FIELDS = ("name", "total_ovr", "def_ovr")
+_OUR_FIELDS = ("real_ign", "total_ovr", "off_ovr", "def_ovr")
 
 
 def build_ladder_schema(roster: list[str] | None = None) -> dict:
@@ -369,9 +384,7 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
     against the roster was the wrong shape: it made every downstream step
     responsible for a guarantee the request should have carried.
 
-    "Unreadable" stays expressible — as `""`, which is in the enum, since a
-    slot field can't be nullable (see _slot_object). That is not a hole in
-    the constraint — it is the
+    `null` stays allowed. That is not a hole in the constraint — it is the
     difference between "this row is someone not on the roster" (now
     impossible) and "I could not read this row" (always possible, and the
     honest answer). Forcing a non-null pick would make an unreadable row
@@ -398,11 +411,8 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
         names = sorted({n for n in roster if n})
     else:
         names = []
-    # "" is "couldn't tell which member this is" — see _slot_object for why
-    # that isn't null. It can't collide with a real entry: names are filtered
-    # for truthiness above.
-    real_ign = ({"type": "string", "enum": [""] + names}
-                if names else {"type": "string"})
+    real_ign = ({"anyOf": [{"type": "string", "enum": names}, {"type": "null"}]}
+                if names else _NULLABLE_STR)
 
     return _schema_object({
         "opponent_league_name": _NULLABLE_STR,
@@ -415,16 +425,16 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
         "our_rank": _NULLABLE_INT,
         # Opponent names are genuinely free text — they belong to the other
         # league and this bot has no roster for them.
-        "opponents": _slot_object({
-            "name":      {"type": "string"},
-            "total_ovr": {"type": "integer"},
-            "def_ovr":   {"type": "integer"},
+        "opponents": _side_schema({
+            "name":      _NULLABLE_STR,
+            "total_ovr": _NULLABLE_INT,
+            "def_ovr":   _NULLABLE_INT,
         }),
-        "our_players": _slot_object({
+        "our_players": _side_schema({
             "real_ign":  real_ign,
-            "total_ovr": {"type": "integer"},
-            "off_ovr":   {"type": "integer"},
-            "def_ovr":   {"type": "integer"},
+            "total_ovr": _NULLABLE_INT,
+            "off_ovr":   _NULLABLE_INT,
+            "def_ovr":   _NULLABLE_INT,
         }),
     })
 
@@ -487,14 +497,14 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
             "(left side) and our players (right side) as JSON."
         )
         prompt += (
-            f"\n\nEach side has exactly {LADDER_SLOTS} players. Report them as "
-            f"slot_1 through slot_{LADDER_SLOTS}, in the order they appear on "
-            "screen from top to bottom. The order is the matchup order and "
-            "carries meaning: slot_3 on the left faces slot_3 on the right. "
-            "Do not sort, rank or rearrange them. If a row is not legible, "
-            "give \"\" and 0 for that slot's fields — never close the gap by shifting the "
-            "rows below it up, because that silently repairs one unreadable "
-            "row into every later row being wrong."
+            f"\n\nEach side has exactly {LADDER_SLOTS} players. Give each row "
+            f"its slot, 1 through {LADDER_SLOTS}, by its position on screen "
+            "from top to bottom. The order is the matchup order and carries "
+            "meaning: slot 3 on the left faces slot 3 on the right. Do not "
+            "sort, rank or rearrange them. If a row is not legible, still "
+            "list it under its own slot with null fields — never renumber the "
+            "rows below it, because that silently repairs one unreadable row "
+            "into every later row being wrong."
         )
         if roster:
             # The schema already makes anything off this list undecodable.
@@ -510,7 +520,7 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
                 + "\n".join(f"- {n}" for n in names)
                 + "\n\nFor each right-side slot, give the entry from that list "
                   "it matches. Use each name at most once. If a row is not "
-                  "legible enough to tell which member it is, use \"\" for "
+                  "legible enough to tell which member it is, use null for "
                   "that slot's real_ign rather than guessing."
             )
         if len(images) > 1:
@@ -541,11 +551,11 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
     result.setdefault("our_rank", None)
     result["opponent_league_name"] = sanitize_name(result["opponent_league_name"])
 
-    # slot_1..slot_16 back to ordered 16-lists, so the index a caller reads
-    # is the position on screen. Every slot is present whether or not the
-    # model could read it; an unread row comes back as Nones, in place.
-    result["opponents"]   = _slots_to_list(result["opponents"])
-    result["our_players"] = _slots_to_list(result["our_players"])
+    # Rows back to ordered 16-lists by their own slot number, so the index a
+    # caller reads is the position on screen. Every slot is present whether
+    # or not the model returned it; an unread row is Nones, in place.
+    result["opponents"]   = _rows_to_slots(result["opponents"], _OPP_FIELDS, "opponents")
+    result["our_players"] = _rows_to_slots(result["our_players"], _OUR_FIELDS, "our_players")
     for o in result["opponents"]:
         o["name"] = sanitize_name(o.get("name"))
 
