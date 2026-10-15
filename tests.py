@@ -10491,6 +10491,75 @@ class TestStartupGuildLog(unittest.TestCase):
                       "on_ready no longer reports which servers it is in")
 
 
+class TestStartupOrder(unittest.IsolatedAsyncioTestCase):
+    """
+    Discord delivers interactions as soon as the gateway connects, and
+    on_ready fires after that. With db.init() in on_ready, /score's
+    autocomplete raised "Database not initialised" for anyone typing during
+    the ~2s window after every restart (seen in production logs).
+    """
+
+    def setUp(self):
+        import optimized_bot as ob
+        self.ob = ob
+
+    async def test_database_is_open_before_the_bot_connects(self):
+        order = []
+
+        def record(name):
+            async def _f(*a, **k):
+                order.append(name)
+            return _f
+
+        with patch.object(self.ob.db, "init", record("db.init")), \
+             patch.object(self.ob.db, "backup_database", record("backup")), \
+             patch.object(self.ob.db, "close", record("db.close")), \
+             patch.object(self.ob.db, "close_archive_connections", record("close_archives")), \
+             patch.object(self.ob.bot, "start", record("bot.start")), \
+             patch.object(self.ob.bot, "close", record("bot.close")), \
+             patch.object(self.ob.bot, "is_closed", lambda: True):
+            await self.ob.safe_start()
+        self.assertLess(order.index("db.init"), order.index("bot.start"))
+        self.assertLess(order.index("backup"), order.index("bot.start"))
+
+    async def test_a_failed_init_never_connects(self):
+        """No database means every command fails; better to stop loudly."""
+        started = []
+
+        async def boom():
+            raise RuntimeError("disk")
+
+        async def start(*a, **k):
+            started.append(True)
+
+        async def noop(*a, **k):
+            pass
+
+        with patch.object(self.ob.db, "init", boom), \
+             patch.object(self.ob.db, "close", noop), \
+             patch.object(self.ob.db, "close_archive_connections", noop), \
+             patch.object(self.ob.bot, "start", start), \
+             patch.object(self.ob.bot, "close", noop), \
+             patch.object(self.ob.bot, "is_closed", lambda: True):
+            with self.assertRaises(RuntimeError):
+                await self.ob.safe_start()
+        self.assertEqual(started, [])
+
+    def test_on_ready_no_longer_opens_the_database(self):
+        """on_ready runs after interactions can already arrive, and again on
+        every reconnect — neither is the moment to open the db or back it up."""
+        import ast
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            tree_ = ast.parse(f.read())
+        on_ready = next(n for n in ast.walk(tree_)
+                        if isinstance(n, ast.AsyncFunctionDef) and n.name == "on_ready")
+        attrs = {n.func.attr for n in ast.walk(on_ready)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        self.assertNotIn("init", attrs)
+        self.assertNotIn("backup_database", attrs)
+
+
 class TestLeaveGuildScript(unittest.TestCase):
     """
     leave_guild.py — the command-line way out of a server.

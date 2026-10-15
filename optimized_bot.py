@@ -3067,17 +3067,10 @@ def _format_guilds(guilds) -> str:
 async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
     logger.info("Registered to %d server(s): %s", len(bot.guilds), _format_guilds(bot.guilds))
+    # db.init() and the startup backup live in safe_start, not here: Discord
+    # delivers interactions as soon as the gateway connects, which is before
+    # on_ready fires — and on_ready fires again on every reconnect.
     try:
-        await db.init()
-        logger.info("Database ready")
-
-        # Back up immediately on every startup — this is exactly the moment
-        # an accidental file overwrite (uploading the wrong/older db over the
-        # live one during a deploy) would otherwise go unnoticed and
-        # unrecoverable. A fresh timestamped copy here means there's always
-        # a very recent known-good snapshot to fall back on.
-        await db.backup_database()
-
         # Register as guild commands (rank above global in autofill)
         # then clear global registrations so there's no overlap
         for guild in bot.guilds:
@@ -5105,6 +5098,23 @@ async def rename_slash(interaction: discord.Interaction, player: str, new_nickna
 
 async def safe_start():
     try:
+        # Before bot.start(), never in on_ready. Discord starts delivering
+        # interactions the moment the gateway connects, and on_ready comes
+        # after that: with init there, anyone typing in /score during the
+        # ~2s window got "Database not initialised" out of the autocomplete.
+        # A failure here stops the bot rather than letting it come up with no
+        # database — every command would fail anyway, less visibly.
+        await db.init()
+        logger.info("Database ready")
+
+        # Back up immediately on every startup — this is exactly the moment
+        # an accidental file overwrite (uploading the wrong/older db over the
+        # live one during a deploy) would otherwise go unnoticed and
+        # unrecoverable. A fresh timestamped copy here means there's always
+        # a very recent known-good snapshot to fall back on. Here rather than
+        # on_ready so a gateway reconnect doesn't take another one.
+        await db.backup_database()
+
         for attempt in range(3):
             try:
                 await bot.start(TOKEN)
