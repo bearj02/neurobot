@@ -40,7 +40,7 @@ where slot_1 is the topmost row and slot_16 the bottom one:
   "our_rank": 45,
   "opponents": {
     "slot_1":  {"name": "PlayerName", "total_ovr": 7200, "def_ovr": 245},
-    "slot_2":  {"name": null, "total_ovr": null, "def_ovr": null},
+    "slot_2":  {"name": "", "total_ovr": 0, "def_ovr": 0},
     "...":     "through slot_16"
   },
   "our_players": {
@@ -51,7 +51,9 @@ where slot_1 is the topmost row and slot_16 the bottom one:
 
 Rules:
 - Slot numbers are screen positions, not a ranking. Never sort or rearrange.
-- A slot you cannot read is that slot with null fields. Do NOT shift the rows
+- Inside a slot, a name you cannot read is "" and a number you cannot read
+  is 0 (no real OVR is ever 0). A slot you cannot read at all is that slot
+  with "" and 0 in every field. Do NOT shift the rows
   below it up to close the gap — that turns one unreadable row into every
   later row being attributed to the wrong player.
 - Every slot from slot_1 to slot_16 must be present on both sides.
@@ -66,10 +68,11 @@ Rules:
 - our_rank: OUR team's power rank number, often shown as "#45" or similar next
   to our team's name in its header badge. Use null if not visible.
 - Extract exactly what you see — do not guess or infer missing values
-- Use null for any value you cannot read clearly
+- Use null for opponent_league_name, event_type or our_rank if you cannot
+  read it clearly; inside a slot use "" or 0 as described above
 - Player names must be exactly as shown, including capitalisation and special characters
 - total_ovr, off_ovr, def_ovr, our_rank are integers
-- If a value is cut off or unreadable, use null
+- If a value is cut off or unreadable, do not guess it
 - Return ONLY the JSON object, no other text"""
 
 
@@ -262,8 +265,17 @@ async def _post_and_parse(session: aiohttp.ClientSession, payload: dict,
 #   - "optional" is expressed as a nullable type, not by leaving a key out of
 #     `required` — which suits this prompt exactly, since it already asks for
 #     null on anything not legible in the screenshot;
-#   - numeric/length constraints (minimum, maxLength, ...) are not supported.
+#   - numeric/length constraints (minimum, maxLength, ...) are not supported;
+#   - **at most 16 union-typed properties per schema** (a nullable type is an
+#     `anyOf`, so it counts). The ladder schema once carried 115 — every slot
+#     field nullable — and every /ladder call came back 400 "Schemas contains
+#     too many parameters with union types". See _slot_object for how the
+#     slots express "unreadable" without a union.
 # ---------------------------------------------------------------------------
+
+# The server-side cap on union-typed properties in one schema. A test counts
+# both schemas against it.
+MAX_UNION_PARAMS = 16
 
 _NULLABLE_STR = {"anyOf": [{"type": "string"}, {"type": "null"}]}
 _NULLABLE_INT = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
@@ -315,15 +327,32 @@ def _slot_object(item_props: dict) -> dict:
     players. A fixed set of required keys makes "exactly 16, in order" a
     property of the schema rather than something to repair afterwards: the
     model has to place every row it reads into a specific slot, and a row it
-    can't read is that slot with null fields rather than a missing entry that
+    can't read is that slot with blank fields rather than a missing entry that
     shifts everything below it up by one.
+
+    **Slot fields are deliberately not nullable.** 16 slots x 7 fields is 112
+    properties, and the API allows only 16 union-typed ones per schema — a
+    nullable field is an `anyOf`, so it counts. "Unreadable" is therefore
+    `""` for a name and `0` for an OVR, and `_slots_to_list` turns both back
+    into None before anything else sees them. Neither is a value the data
+    can genuinely hold — no IGN is empty and no OVR is 0 — so this is a wire
+    encoding of null, decoded at the boundary, not a sentinel that leaks.
     """
     return _schema_object({k: _schema_object(item_props) for k in _SLOT_KEYS})
 
 
+def _decode_blank(value):
+    """A slot field's "couldn't read it" ("" or 0) back to None."""
+    if value is None or value == "" or value == 0:
+        return None
+    return value
+
+
 def _slots_to_list(side: dict) -> list[dict]:
-    """slot_1..slot_16 back to the ordered 16-list callers expect."""
-    return [dict(side.get(k) or {}, _slot=i)
+    """slot_1..slot_16 back to the ordered 16-list callers expect, with each
+    blank field ("" / 0 — see _slot_object) decoded to None."""
+    return [dict({f: _decode_blank(v) for f, v in (side.get(k) or {}).items()},
+                 _slot=i)
             for i, k in enumerate(_SLOT_KEYS, start=1)]
 
 
@@ -340,7 +369,9 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
     against the roster was the wrong shape: it made every downstream step
     responsible for a guarantee the request should have carried.
 
-    `null` stays allowed. That is not a hole in the constraint — it is the
+    "Unreadable" stays expressible — as `""`, which is in the enum, since a
+    slot field can't be nullable (see _slot_object). That is not a hole in
+    the constraint — it is the
     difference between "this row is someone not on the roster" (now
     impossible) and "I could not read this row" (always possible, and the
     honest answer). Forcing a non-null pick would make an unreadable row
@@ -367,8 +398,11 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
         names = sorted({n for n in roster if n})
     else:
         names = []
-    real_ign = ({"anyOf": [{"type": "string", "enum": names}, {"type": "null"}]}
-                if names else _NULLABLE_STR)
+    # "" is "couldn't tell which member this is" — see _slot_object for why
+    # that isn't null. It can't collide with a real entry: names are filtered
+    # for truthiness above.
+    real_ign = ({"type": "string", "enum": [""] + names}
+                if names else {"type": "string"})
 
     return _schema_object({
         "opponent_league_name": _NULLABLE_STR,
@@ -382,15 +416,15 @@ def build_ladder_schema(roster: list[str] | None = None) -> dict:
         # Opponent names are genuinely free text — they belong to the other
         # league and this bot has no roster for them.
         "opponents": _slot_object({
-            "name":      _NULLABLE_STR,
-            "total_ovr": _NULLABLE_INT,
-            "def_ovr":   _NULLABLE_INT,
+            "name":      {"type": "string"},
+            "total_ovr": {"type": "integer"},
+            "def_ovr":   {"type": "integer"},
         }),
         "our_players": _slot_object({
             "real_ign":  real_ign,
-            "total_ovr": _NULLABLE_INT,
-            "off_ovr":   _NULLABLE_INT,
-            "def_ovr":   _NULLABLE_INT,
+            "total_ovr": {"type": "integer"},
+            "off_ovr":   {"type": "integer"},
+            "def_ovr":   {"type": "integer"},
         }),
     })
 
@@ -458,7 +492,7 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
             "screen from top to bottom. The order is the matchup order and "
             "carries meaning: slot_3 on the left faces slot_3 on the right. "
             "Do not sort, rank or rearrange them. If a row is not legible, "
-            "give nulls for that slot — never close the gap by shifting the "
+            "give \"\" and 0 for that slot's fields — never close the gap by shifting the "
             "rows below it up, because that silently repairs one unreadable "
             "row into every later row being wrong."
         )
@@ -476,7 +510,7 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
                 + "\n".join(f"- {n}" for n in names)
                 + "\n\nFor each right-side slot, give the entry from that list "
                   "it matches. Use each name at most once. If a row is not "
-                  "legible enough to tell which member it is, use null for "
+                  "legible enough to tell which member it is, use \"\" for "
                   "that slot's real_ign rather than guessing."
             )
         if len(images) > 1:
@@ -509,7 +543,7 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
 
     # slot_1..slot_16 back to ordered 16-lists, so the index a caller reads
     # is the position on screen. Every slot is present whether or not the
-    # model could read it; a null row stays a null row in place.
+    # model could read it; an unread row comes back as Nones, in place.
     result["opponents"]   = _slots_to_list(result["opponents"])
     result["our_players"] = _slots_to_list(result["our_players"])
     for o in result["opponents"]:
