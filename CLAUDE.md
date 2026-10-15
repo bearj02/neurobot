@@ -486,6 +486,17 @@ type (`_NULLABLE_STR` / `_NULLABLE_INT`), never by omitting a key from
 object so a new field can't quietly miss one of these. A test walks both
 schemas and fails on any object that breaks a rule.
 
+**At most 16 union-typed properties per schema** — a nullable type is an
+`anyOf`, so every `_NULLABLE_*` counts. The 16-slot ladder schema shipped
+with 115 and every `/ladder` call failed with a 400 ("Schemas contains too
+many parameters with union types"). Slot fields are therefore plain
+`string`/`integer`: the model sends `""` for an unread name and `0` for an
+unread OVR (`real_ign`'s enum includes `""`), and `_slots_to_list` decodes
+both back to `None` via `_decode_blank`, so nothing downstream ever sees
+them. Neither value can be real — no IGN is empty, no OVR is 0. Only the
+three top-level ladder fields and the season-match stats (14) stay
+nullable. `MAX_UNION_PARAMS` plus a test count every schema against the cap.
+
 `event_type`'s schema is an **enum of the five codes the db actually
 stores** (`E1`/`E2`/`E3`/`HOF`/`Gold-`) — the same conversion table the
 system prompt spells out, now enforced. It's written to `matchup_day`

@@ -10103,6 +10103,43 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         walk(self.agent.LADDER_OUTPUT_SCHEMA, "ladder")
         walk(self.agent.SEASON_MATCH_OUTPUT_SCHEMA, "season-match")
 
+    def test_neither_schema_exceeds_the_union_type_cap(self):
+        """The API rejects a schema with more than 16 union-typed properties
+        (a nullable type is an anyOf, so it counts) — a 400 on every call.
+        The ladder schema once had 115 and /ladder failed outright. Counted
+        with a roster bound as well as without, since that changes real_ign."""
+        def count(node):
+            if isinstance(node, dict):
+                here = 1 if ("anyOf" in node or isinstance(node.get("type"), list)) else 0
+                return here + sum(count(v) for v in node.values())
+            if isinstance(node, list):
+                return sum(count(v) for v in node)
+            return 0
+        for name, schema in (
+            ("ladder", self.agent.LADDER_OUTPUT_SCHEMA),
+            ("ladder+roster", self.agent.build_ladder_schema(["Grizzly", "Ruffis"])),
+            ("season-match", self.agent.SEASON_MATCH_OUTPUT_SCHEMA),
+        ):
+            with self.subTest(schema=name):
+                self.assertLessEqual(count(schema), self.agent.MAX_UNION_PARAMS)
+
+    async def test_blank_slot_fields_come_back_as_none(self):
+        """Slot fields can't be nullable (the union cap), so the model sends
+        "" / 0 for an unread value. Those must be decoded at the boundary —
+        a 0 OVR reaching the db would be a fabricated stat, and a "" name
+        would look like a read row."""
+        session = _FakeAnthropicSession(self, [_ok_body(
+            self.agent.extract_ladder_from_screenshots,
+            opponents=[{"name": "", "total_ovr": 0, "def_ovr": 0},
+                       {"name": "Real", "total_ovr": 7100, "def_ovr": 0}])])
+        with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"),              patch.object(self.agent, "aiohttp", _fake_aiohttp(session)),              patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+            result = await self.agent.extract_ladder_from_screenshots(["u"])
+        first, second = result["opponents"][:2]
+        self.assertEqual((first["name"], first["total_ovr"], first["def_ovr"]),
+                         (None, None, None))
+        self.assertEqual((second["name"], second["total_ovr"], second["def_ovr"]),
+                         ("Real", 7100, None))
+
     def test_unreadable_values_stay_expressible_as_null(self):
         """The prompts ask for null on anything illegible. A schema that
         forced a string or an int would turn 'couldn't read it' into a
@@ -10171,8 +10208,7 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         up. Free text plus reconciliation was the wrong shape."""
         schema = self.agent.build_ladder_schema(["Grizzly", "Ruffis", "JX8"])
         real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
-        enum = next(b["enum"] for b in real_ign["anyOf"] if "enum" in b)
-        self.assertEqual(enum, ["Grizzly", "JX8", "Ruffis"])
+        self.assertEqual(real_ign["enum"], ["", "Grizzly", "JX8", "Ruffis"])
 
     def test_the_enum_is_stable_across_calls(self):
         """The request body has to be byte-identical between runs or the
@@ -10183,14 +10219,15 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(a, b)
 
     def test_an_illegible_row_can_still_be_declined(self):
-        """null must stay reachable. It is the difference between 'someone
+        """A decline must stay reachable — as "", since slot fields can't be
+        nullable under the union cap. It is the difference between 'someone
         not on the roster' (now impossible) and 'I can't read this row'
         (always possible). Forcing a pick turns an unreadable row into a
         confidently wrong one, and a wrong row is invisible where a dropped
         one shows up in the count."""
         schema = self.agent.build_ladder_schema(["Grizzly"])
         real_ign = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]
-        self.assertIn({"type": "null"}, real_ign["anyOf"])
+        self.assertIn("", real_ign["enum"])
 
     def test_opponents_are_not_constrained_by_our_roster(self):
         """They belong to the other league — binding them to our names would
@@ -10218,11 +10255,8 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
                 ["u"], roster=["Grizzly", "Ruffis"])
         payload = session.payloads[0]
         schema = payload["output_config"]["format"]["schema"]
-        enum = next(
-            b["enum"] for b in
-            schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]["anyOf"]
-            if "enum" in b)
-        self.assertEqual(enum, ["Grizzly", "Ruffis"])
+        enum = schema["properties"]["our_players"]["properties"]["slot_1"]["properties"]["real_ign"]["enum"]
+        self.assertEqual(enum, ["", "Grizzly", "Ruffis"])
         text = "".join(c["text"] for c in payload["messages"][0]["content"]
                        if c["type"] == "text")
         self.assertIn("Grizzly", text)
