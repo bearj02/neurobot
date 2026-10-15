@@ -8,7 +8,7 @@ Two unrelated screens, two extractors:
                                          post-game screen (/seasonmatch)
 
 The ladder extractor accepts up to 3 Discord attachment images, sends them to
-claude-haiku-4-5 and returns:
+Claude Haiku 5.5 and returns:
   - opponent_league_name: the opposing team/league's name, if visible
   - event_type:           the division (E1/E2/E3/HOF/Gold-), if visible
   - our_rank:             our team's power rank, if visible
@@ -24,7 +24,21 @@ from logger_config import global_logger as logger
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 API_URL = "https://api.anthropic.com/v1/messages"
-MODEL   = "claude-haiku-4-5-20251001"
+# Haiku 5.5, not 4.5 — measured, not assumed. On a real 16-v-16 ladder
+# (three overlapping screenshots, 2868x1320) graded field by field against a
+# hand-read key, Haiku 4.5 got 24 of 35 rows wrong: it caps images at 1568px
+# on the long edge, so these arrived at ~55% scale and it swapped 3/8/9 and
+# 5/6 all over (the "3 read as 8" OVR reports), and when a player wasn't on
+# the roster enum it repeated a roster name instead of declining. Haiku 5.5
+# took ~2.2x the image tokens (it sees the screenshots near native size),
+# read every OVR but one correctly, declined every off-roster row with null,
+# and still costs less per call.
+MODEL   = "claude-haiku-5-5"
+
+# Haiku 5.5 thinks by default, and thinking counts toward max_tokens: at the
+# old 3000 cap the first live run stopped mid-JSON. Low effort was what was
+# measured above; it is plenty for transcription.
+EFFORT  = "low"
 
 SYSTEM_PROMPT = """You are a Madden Mobile league data extractor.
 You will receive screenshots of a League vs League matchup screen.
@@ -532,9 +546,19 @@ async def extract_ladder_from_screenshots(attachment_urls: list[str],
 
         payload = {
             "model":      MODEL,
-            "max_tokens": 1500,
+            # 16000. Thinking shares this budget with the JSON: a real full
+            # 16-v-16 ladder on Haiku 5.5 at low effort came to 2964-3666
+            # output tokens, and the same request at the old 3000 cap was cut
+            # off mid-JSON. A max_tokens stop is the one parse failure
+            # _post_and_parse deliberately won't retry, because an identical
+            # request is cut off in the identical place.
+            #
+            # max_tokens is a ceiling, not a charge — raising it costs
+            # nothing unless the tokens are actually generated.
+            "max_tokens": 16000,
             "system":     SYSTEM_PROMPT,
             "output_config": {
+                "effort": EFFORT,
                 "format": {"type": "json_schema",
                            "schema": build_ladder_schema(roster)},
             },
@@ -647,9 +671,11 @@ async def extract_season_match_from_screenshot(attachment_urls: list[str]) -> di
         b64, media_type = await _fetch_image_b64(session, attachment_urls[0])
         payload = {
             "model":      MODEL,
-            "max_tokens": 700,
+            # 8000, not 700: thinking counts toward it (see EFFORT).
+            "max_tokens": 8000,
             "system":     SEASON_MATCH_SYSTEM_PROMPT,
             "output_config": {
+                "effort": EFFORT,
                 "format": {"type": "json_schema", "schema": SEASON_MATCH_OUTPUT_SCHEMA},
             },
             "messages":   [{"role": "user", "content": [
