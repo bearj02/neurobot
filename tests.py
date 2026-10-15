@@ -2643,6 +2643,35 @@ class TestCommandLogic(unittest.IsolatedAsyncioTestCase):
         msg = inter.response.send_message.call_args.args[0]
         self.assertNotIn("None", msg)
 
+    async def test_score_modal_gif_goes_through_the_followup_not_the_channel(self):
+        """/score works in a channel the bot can't see — interactions need no
+        channel permissions — but channel.send there is 403 Missing Access
+        (50001), logged by gif_sender on every score. The gif has to go out
+        the same way the reply did."""
+        import optimized_bot
+        from optimized_bot import ScoreModal
+        row     = await db.get_player("Grizzly")
+        channel = MagicMock()
+        modal   = ScoreModal("Grizzly", row, game_date=datetime.date.fromisoformat(TODAY),
+                             channel=channel)
+        modal.score_val.value         = "22"
+        modal.def_ovr.value           = ""
+        modal.fourth_downs.value      = ""
+        modal.fourth_down_convs.value = ""
+        modal.fumbles.value           = ""
+        inter = self._make_interaction()
+        with patch.object(optimized_bot, "get_score_gif", return_value="gifs22/x.gif"):
+            await modal.on_submit(inter)
+        queued = []
+        while not optimized_bot.gif_queue.empty():
+            queued.append(optimized_bot.gif_queue.get_nowait())
+            optimized_bot.gif_queue.task_done()
+        self.assertEqual(len(queued), 1)
+        target, payload = queued[0]
+        self.assertIs(target, inter.followup)
+        self.assertIsNot(target, channel)
+        self.assertEqual(payload, ("gifs22/x.gif", False))
+
     async def test_score_modal_legacy_negative_forces_zero_score(self):
         """A negative number (legacy alias) must store 0, not abs(value)."""
         from optimized_bot import ScoreModal
