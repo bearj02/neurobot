@@ -680,12 +680,167 @@ checking before assuming it's fully dead the way the two `.sql` files were.
 
 ## Anthropic-specific
 
-- `/ladder`'s screenshot extraction calls Claude Haiku
-  (`claude-haiku-4-5-20251001`) directly via the Anthropic API in `agent.py` —
-  vision extraction of opponent roster + league name + division + our rank
-  from League vs League screenshots. **Not yet tested against a real
-  screenshot** — this sandbox has no network access to call the live API.
-  Worth a real `/ladder` run after any prompt change to confirm accuracy.
+- `/ladder`'s and `/seasonmatch`'s screenshot extraction call **Claude
+  Haiku 5.5** (`claude-haiku-5-5`, `output_config.effort: "low"`) directly
+  via the Anthropic API in `agent.py`.
+
+**On this branch:** every measurement below was taken on Neuroverse's
+NP ladder (the `test_imgs/` screenshots and an NP roster), before or
+outside the split — the code is shared, so the findings carry over, but
+nothing here has yet been re-run against an RX ladder. The model, effort,
+schema and token caps are identical on both branches; `agent.py` differs
+only in the one branding line of `SYSTEM_PROMPT`.
+
+### Haiku 5.5, and how that was decided (Oct 2026)
+
+Measured on a real ladder, not assumed. `test_imgs/` (untracked) holds three
+overlapping screenshots of the 2026-10-15 NP vs "Black n Blue" match; a
+harness ran the real `extract_ladder_from_screenshots` on them and graded
+every row against a hand-read key (16 opponents, 16 of ours, header):
+
+| Setup | Wrong rows |
+|---|---|
+| Haiku 4.5, roster enum (what shipped) | 24 |
+| Haiku 4.5, no roster | 20 |
+| Haiku 4.5, each screenshot split into left/right images | 32 — digits sharper, but it lost slot numbering |
+| Haiku 5.5, low effort, roster enum | **1 digit** (154 read 164); 6 off-roster rows correctly null |
+
+- **Haiku 4.5 caps images at 1568px on the long edge.** These screenshots are
+  2868 wide, so it saw them at ~55% and swapped 3/8/9 and 5/6 constantly —
+  the long-standing "3 read as 8" OVR reports. Haiku 5.5 took ~2.2x the image
+  tokens on the same images, i.e. it sees them near native size.
+- **On 4.5 the roster enum produced wrong players**: with 6 of the 16 not on
+  the roster, it filled four rows with copies of one roster member (OVRs
+  included) and labelled ClownUser as Rook. On 5.5 the same enum declines
+  every off-roster row with null — the designed behaviour, routing them to
+  the manual-match view. It also returns the db's spelling (`Djhmoa`,
+  `OneManWolfPack`) rather than the screen's, which is what makes the exact
+  `real_ign` match hit.
+- **5.5 thinks by default and thinking counts toward `max_tokens`.** At the
+  old 3000 cap the first run stopped mid-JSON; a full ladder measured
+  2964-3666 output tokens at low effort. Now 16000 (ladder) / 8000 (season).
+- Cheaper too: ~$0.003 per ladder vs ~$0.013 on 4.5.
+- `our_rank` came back null on every 4.5 run and correct (3) on every 5.5 run.
+
+Re-run against a fresh db pulled the same day (19 active NP): **15/16 of
+our players resolved to the right roster entry, all 16 opponents exact,
+header exact, identical across two runs.** Five of the six "off-roster"
+names had just been newer than the stale copy — several under a stored
+`real_ign` spelled differently from the screen (`KruskII` -> `Krusk`,
+`NodeIlgronk` -> `nodellgronk`), which only the roster enum could bridge.
+The one null, `ISpamTheClown`, genuinely isn't an active NP member (the
+nearest row, `SpamLikely`, is `status='I'`). The one remaining misread,
+154 read as 164 OFF, was confirmed against a zoomed crop. To re-run: put `ANTHROPIC_API_KEY=` in a
+`.env` (gitignored) and run a harness like the one described above — each
+run is a few cents.
+- `agent.py` talks to the API over **raw HTTP via `aiohttp`**, not the
+  `anthropic` SDK. That's deliberate inertia, not a recommendation: the
+  module predates any SDK dependency and the host installs from
+  `requirements.txt` with no shell to fix a bad install with. If it's ever
+  worth switching, that's its own change — don't half-migrate it.
+
+### Structured outputs: the model cannot emit invalid JSON any more
+
+Both extractors send `output_config.format` with a `json_schema`
+(`LADDER_OUTPUT_SCHEMA`, `SEASON_MATCH_OUTPUT_SCHEMA`), which constrains
+decoding to the schema rather than asking the prompt nicely for JSON.
+
+**Why it was added**, because the failure is worth recognising again: a
+live `/ladder` run logged `Expecting value: line 8 column 14 (char 243)`
+against a response reading `{"name": JosoPrime", ...}` — Haiku dropped a
+single opening quote mark, mid-way through 32 near-identical rows, and that
+one character killed the whole command (`optimized_bot.py` catches the
+`ValueError`, posts an error and returns — no retry, no fall-through to the
+manual builder). Everything else in the response was well-formed.
+
+Schema rules, all enforced server-side as a 400 rather than a warning:
+every object needs `additionalProperties: False` **and** a `required` list
+naming *all* its properties; "optional" is therefore expressed as a nullable
+type (`_NULLABLE_STR` / `_NULLABLE_INT`), never by omitting a key from
+`required` — which suits both prompts exactly, since each already asks for
+`null` on anything not legible. Numeric and length constraints (`minimum`,
+`maxLength`, …) are not supported. `_schema_object()` builds a conforming
+object so a new field can't quietly miss one of these. A test walks both
+schemas and fails on any object that breaks a rule.
+
+**Two schema-size limits, each found by a live 400 on `/ladder`:**
+- **At most 16 union-typed properties** (a nullable type is an `anyOf`, so
+  every `_NULLABLE_*` counts). Counted per schema *property*, so a nullable
+  field inside an array's item schema counts once. Inline
+  `slot_1`..`slot_16` objects with nullable fields made 115.
+- **An unpublished cap on compiled grammar size** ("The compiled grammar is
+  too large"). Removing the unions from those 32 inline slot objects still
+  hit it: every repeated sub-schema — the roster enum included — is a
+  separate copy in the grammar. An array's item schema compiles once.
+
+Hence each ladder side is an **array whose rows carry a required `slot`
+enum of 1..16** (`_side_schema`), placed by that number in
+`_rows_to_slots`. `MAX_UNION_PARAMS` and a test count the unions; another
+test asserts each roster name appears exactly once in the schema, which is
+the cheap proxy for "no sub-schema repeated per slot". The grammar limit
+can't be checked offline — this machine has no API key — so any schema
+change needs a real `/ladder` run.
+
+`event_type`'s schema is an **enum of the five codes the db actually
+stores** (`E1`/`E2`/`E3`/`HOF`/`Gold-`) — the same conversion table the
+system prompt spells out, now enforced. It's written to `matchup_day`
+directly, so `"Elite I"` arriving instead would be a silently wrong
+division.
+
+### One retry, and the two things it deliberately doesn't do
+
+`_post_and_parse()` re-sends the *identical* request once if the reply
+doesn't parse. It covers what a schema can't reach — a response with no text
+block in it, or something transient API-side.
+
+- **It never repairs the broken text.** Guessing where a missing quote
+  belongs is exactly the class of silent-wrong-answer this codebase avoids
+  everywhere else (same reasoning as refusing fuzzy name matching in the
+  ladder flow).
+- **It never retries a `max_tokens` stop.** An identical request is cut off
+  in the identical place; a second call only costs time and money. The
+  caller gets a message saying the token limit was hit, which needs the
+  opposite response from a malformed reply. Both are tested, including that
+  retrying a `max_tokens` stop fails the test.
+
+An HTTP error (401, or a 400 on the schema) isn't retried either — it's a
+request problem, and re-sending can't fix it.
+
+### Extraction logging — what the log must contain
+
+The original handler logged `raw[:500]`, and in the incident above the dump
+stopped **exactly** at 500 characters, mid-row. That looked identical to the
+model running out of tokens. It wasn't — but nothing in the log could tell
+them apart, and the two have opposite fixes. So:
+
+- `_log_api_response()` logs `id`, `model`, **`stop_reason`**, token usage
+  and the attempt number, **before** anything tries to parse the body — so a
+  response with an unexpected shape still leaves a trace.
+- `_log_parse_failure()` logs the whole raw body (capped at `_RAW_LOG_LIMIT`
+  = 20000 purely so a pathological reply can't flood the rotating file, and
+  it says so in the log when the cap bites), plus `_error_context()`, which
+  puts a caret under the exact offset `json` objected to. That window is
+  flattened onto one line — a real newline inside it pushes the caret away
+  from the character it points at, which is the one thing it exists to get
+  right.
+- `logger.debug` carries the full raw body on success too, so a good
+  extraction can be diffed against a bad one. `LOG_LEVEL=DEBUG` on the panel
+  turns it on without a redeploy.
+
+`_response_text()` joins every text block instead of reaching into
+`data["content"][0]["text"]`, which raised an **IndexError** on an empty
+content list — not a `ValueError`, so the caller's `except ValueError` had
+no chance of catching it and the command crashed outright.
+
+**One hypothesis left unproven:** the league was "Brasil MVPs Elite A",
+every other name in that batch was plain ASCII and parsed clean, and
+`JosoPrime` is plausibly `JoãoPrime` — while the prompt demands names
+"exactly as shown, including special characters". That would make the
+non-ASCII row the one where the model wavered. Consistent with this
+project's record of special characters causing extraction trouble, but it's
+a correlation in a single sample, and structured outputs make it moot for
+*syntax* either way (a misread name is still a misread name — that's what
+the manual-match flow is for).
 
 ## Multi-season archive system (/legacy) and /stats
 
@@ -2225,3 +2380,108 @@ never run). The stub now has a no-op `configure_logging`; the logging tests
 load the real module from file via `importlib`, and
 `TestLadderUIErrorReporting` patches `ladder_flow.logger` with the real
 `global_logger` so `assertLogs` can see it.
+
+## /ladder screenshot extraction: constrain the request, don't clean the reply
+
+The flow, in order. Each step's output is the next one's input, and no step
+repairs an earlier one's mistakes:
+
+1. **Get the active roster** (`db.get_active_roster`).
+2. **Extract**, told there are exactly 16 per side and that order is fixed.
+3. **Resolve** each right-side slot to a roster member — only a *unique*
+   match counts (`_resolve_our_players`).
+4. **Apply OVRs** to the matched players.
+5. **Review suspicious OVR jumps** (`OvrSanityCheckView`).
+6. **Fill opponents** into a pre-built 16-slot default, field by field.
+7. **Admin fixes the CSV** (step 2 of the builder).
+8. **Admin pairs the ladder** (steps 3-4).
+9. **Save** (`_save_or_report`).
+
+**The roster goes IN as an `enum` on `our_players[].real_ign`.** An
+off-roster name is not something the model can emit, so there is nothing
+downstream to match, fuzzy-match or sanitise. The earlier shape — extract
+free text, then reconcile — made every later step responsible for a
+guarantee the request should have carried, and it leaked all the way to
+step 1 needing `sanitize_selection` before it could render its own count.
+The roster is also named in the prompt: the enum prevents wrong answers,
+the list is what lets the model read a smudged row *as* a roster entry
+instead of abstaining.
+
+**The enum narrows candidates; it does not finish the job.** `real_ign` is
+explicitly not unique, so one spelling can belong to two active players in
+the same league. A name matching **two** members is exactly as unresolved as
+one matching **none** — both go to the admin. `get_player_by_real_ign`'s
+`ORDER BY id LIMIT 1` reports *a* player rather than the ambiguity, which is
+why step 3 uses **`db.get_players_by_real_ign`** (plural) instead. Guessing
+writes a screenshot's OVR onto the wrong player's permanent record, silently
+and durably. `claimed` makes it *uniquely*: a name the model put in two
+slots resolves only the first.
+
+**Each row states its own slot (1..16); position never comes from the
+array index.** Arrays cannot be length-constrained (`minItems`/`maxItems`
+are rejected), which is how one run returned 21 rows and another 14
+opponents against 17 of ours. Fixed `slot_N` keys solved that but blew the
+grammar-size cap (above), so `_rows_to_slots` enforces "exactly 16, in
+order" instead: a missing slot is all-None **in place**, a duplicate keeps
+the first row, extras can't grow the list, and either anomaly logs a
+warning. **An unreadable row is that slot with null fields, never a
+shift** — renumbering shifts every row below and attributes them all to
+the wrong player.
+`agent.LADDER_SLOTS` mirrors `ladder_flow.MATCHUP_SIZE` (agent can't import
+ladder_flow without pulling discord into its import graph); a test pins them
+equal.
+
+**Names are sanitised at extraction** (`agent.sanitize_name`): step 2's
+editor is one `name, total, def` per line split on commas, so a comma inside
+a name silently shifts the two numbers into the wrong columns. `None` stays
+`None` — an empty name and an unread row are different facts.
+
+**Every opponent slot always has a name, and there is no "empty" state.**
+A ladder is 16 rows; the admin is shown all 16 in step 2's CSV and corrects
+them by hand; a row nobody filled in still says `Opponent 7`. Extraction and
+the CSV paste overwrite a name when they have one and leave it alone when
+they don't.
+
+This took two goes to get right, and the first two answers are instructive.
+The empty marker was originally the string `'-'` — a perfectly legal IGN, so
+an opponent actually called `-` was treated as missing and dropped from the
+CSV, which would have deleted them on the next paste. Swapping it for `None`
+fixed that one bug and kept the real problem: a sentinel means every reader
+has to agree on what it means, it forced `opp_ign` (NOT NULL) to be deleted
+rather than written, and the only thing it bought was a filled/total tally
+on a screen whose entire purpose is the admin fixing the rows themselves.
+**Removing the concept removed the bug class.** The Done button is no longer
+gated on a fill count either — it needed the same notion to gate on.
+
+`None` still appears, but only in *inputs*: the extractor and the CSV parser
+return None for a field they had no value for, and `fill_opponents` skips
+those. It is never stored.
+
+**Saving is gated on validation, not on a fill count.** `validate_opponents`
+checks all 48 fields — 16 rows x name, Total OVR, DEF OVR — and step 2's
+Done button refuses to advance until every one is present and the right
+shape, naming the rows that aren't. Whether a name is there and an OVR is a
+number is an objective fact about the data; "has this slot been touched"
+was an inference about intent that nothing could actually answer. It says
+nothing about the `Opponent N` defaults on purpose: a row left named that
+with real OVRs beside it is a row the admin looked at and accepted, and
+rejecting it would put a special name back into the logic.
+
+**Resuming an aborted run is decided in `start_ladder_flow`**, by whether
+`preopponents` was passed — a fact the function already has — not by
+comparing the slots against a fresh set of defaults further down. An
+extraction therefore never gets overwritten by a stale saved ladder, which
+a later inference could get wrong.
+
+**`LadderState.opponents` is MATCHUP_SIZE from construction**, and
+`fill_opponents` overwrites it **per field**, never per row. It used to be
+assigned over with whatever the extraction returned, at whatever length:
+
+    IndexError: list assignment index out of range
+      File "ladder_flow.py", line 460, in on_submit
+        self.state.opponents[i] = opp
+
+A 14-row extraction left a 14-long list and pasting a full CSV walked off
+the end. Per-field matters too: the extraction returns all 16 slots now, so
+replacing a row wholesale would put `None` where the `-` placeholder was,
+and the flow reads `name != '-'` as "an opponent is entered here".
