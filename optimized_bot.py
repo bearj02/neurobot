@@ -190,6 +190,8 @@ async def gif_sender():
     await bot.wait_until_ready()
     logger.info("gif_sender started")
     while not bot.is_closed():
+        # `channel` is anything with .send(): a channel for on_message's
+        # triggers, an interaction followup for /score (see ScoreModal).
         channel, payload = await gif_queue.get()
         try:
             if isinstance(payload, tuple):
@@ -203,7 +205,8 @@ async def gif_sender():
                 await asyncio.sleep(retry_after)
                 await gif_queue.put((channel, payload))
             else:
-                logger.error(f"gif_sender HTTPException: {e}")
+                logger.error(f"gif_sender HTTPException sending to "
+                             f"{getattr(channel, 'id', type(channel).__name__)}: {e}")
         except Exception as e:
             logger.error(f"gif_sender error: {e}")
         finally:
@@ -526,11 +529,15 @@ class ScoreModal(Modal, title="Record Score"):
             i18n.t('score.success', lang, player=self.player, league=league, actual=actual_display,
                    missed=missed_str, def_str=def_str, fourth=fourth_str, date=date_str) + fumbles_str
         )
+        # Posted through the interaction's followup, not self.channel: a slash
+        # command works in a channel the bot can't see (interactions need no
+        # channel permissions), but channel.send there is a 403 Missing Access.
+        # self.channel only decides whether this flow posts a gif at all.
         if self.channel and gif_path:
             if gif_path.endswith('.gif'):
-                await gif_queue.put((self.channel, (gif_path, False)))
+                await gif_queue.put((interaction.followup, (gif_path, False)))
             else:
-                await gif_queue.put((self.channel, gif_path))
+                await gif_queue.put((interaction.followup, gif_path))
 
 
 class PastMatchupSelect(View):
