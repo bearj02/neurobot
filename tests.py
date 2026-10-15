@@ -10585,16 +10585,16 @@ class TestLeaveGuildScript(unittest.TestCase):
 
     def test_no_argument_means_list_only(self):
         """Safe by default: the destructive path has to be asked for by id."""
-        self.assertIsNone(self.lg.parse_args(["leave_guild.py"]))
+        self.assertEqual(self.lg.parse_args(["leave_guild.py"]), ("list", None))
 
     def test_a_guild_id_comes_back_as_an_int(self):
         self.assertEqual(
             self.lg.parse_args(["leave_guild.py", "1414050080515690559"]),
-            1414050080515690559)
+            ("leave", 1414050080515690559))
 
     def test_surrounding_whitespace_is_tolerated(self):
         """A id pasted out of Discord often arrives with a space on it."""
-        self.assertEqual(self.lg.parse_args(["leave_guild.py", " 123 "]), 123)
+        self.assertEqual(self.lg.parse_args(["leave_guild.py", " 123 "]), ("leave", 123))
 
     def test_a_non_numeric_argument_is_refused(self):
         """Guild names are not unique and get renamed — resolving one by name
@@ -10609,6 +10609,89 @@ class TestLeaveGuildScript(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self.lg.parse_args(["leave_guild.py", "123", "456"])
         self.assertIn("Expected one guild id", str(ctx.exception))
+
+    def test_blacklist_flags_parse(self):
+        self.assertEqual(self.lg.parse_args(["x", "--blacklist", "5"]), ("blacklist", 5))
+        self.assertEqual(self.lg.parse_args(["x", "--unblacklist", "5"]), ("unblacklist", 5))
+        self.assertEqual(self.lg.parse_args(["x", "--blacklisted"]), ("show", None))
+
+    def test_blacklist_needs_exactly_one_numeric_id(self):
+        for argv in (["x", "--blacklist"], ["x", "--blacklist", "Some Server"],
+                     ["x", "--blacklist", "1", "2"], ["x", "--blacklisted", "1"],
+                     ["x", "--nope", "1"]):
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                self.lg.parse_args(argv)
+
+    # --- the blacklist file -----------------------------------------------
+
+    def _tmp_path(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        return os.path.join(d, "guild_blacklist.json")
+
+    def test_a_missing_file_is_an_empty_blacklist(self):
+        self.assertEqual(self.lg.load_blacklist(self._tmp_path()), {})
+
+    def test_add_then_remove_round_trips(self):
+        path = self._tmp_path()
+        self.assertTrue(self.lg.add_to_blacklist(42, "Spam Server", path))
+        self.assertFalse(self.lg.add_to_blacklist(42, None, path))   # already there
+        entries = self.lg.load_blacklist(path)
+        self.assertEqual(list(entries), [42])
+        self.assertEqual(entries[42]["name"], "Spam Server",
+                         "re-adding without a name must not wipe the known one")
+        self.assertTrue(self.lg.remove_from_blacklist(42, path))
+        self.assertFalse(self.lg.remove_from_blacklist(42, path))
+        self.assertEqual(self.lg.load_blacklist(path), {})
+
+    def test_ids_survive_as_ints(self):
+        """JSON keys are strings; a guild.id is an int. A str/int mismatch
+        would make every lookup miss and the blacklist silently do nothing."""
+        path = self._tmp_path()
+        self.lg.add_to_blacklist(1355015684182118551, None, path)
+        self.assertIn(1355015684182118551, self.lg.load_blacklist(path))
+
+    def test_an_unreadable_file_raises_and_is_never_overwritten(self):
+        """Read as empty, the next save would erase every entry it couldn't
+        read — and an empty blacklist lets everyone back in."""
+        path = self._tmp_path()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        with self.assertRaises(ValueError):
+            self.lg.load_blacklist(path)
+        with self.assertRaises(ValueError):
+            self.lg.add_to_blacklist(1, None, path)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{not json")
+
+    def test_file_only_actions_need_no_token(self):
+        path = self._tmp_path()
+        env = {k: v for k, v in os.environ.items() if k != "DISCORD_TOKEN"}
+        with patch.object(self.lg, "BLACKLIST_PATH", path), \
+             patch.object(self.lg.load_blacklist, "__defaults__", (path,)), \
+             patch.object(self.lg.add_to_blacklist, "__defaults__", (None, path)), \
+             patch.object(self.lg.remove_from_blacklist, "__defaults__", (path,)), \
+             patch.dict(os.environ, env, clear=True):
+            self.assertEqual(self.lg.main(["x", "--blacklisted"]), 0)
+            # --blacklist writes the entry before it ever needs a token, so
+            # the block is in force even when the login can't happen.
+            self.assertEqual(self.lg.main(["x", "--blacklist", "77"]), 1)
+            self.assertIn(77, self.lg.load_blacklist(path))
+            self.assertEqual(self.lg.main(["x", "--unblacklist", "77"]), 0)
+            self.assertEqual(self.lg.load_blacklist(path), {})
+
+    def test_the_listing_marks_blacklisted_servers(self):
+        g = self._guild("Spam", 9)
+        self.assertIn("BLACKLISTED", self.lg.format_guild(g, True))
+        self.assertNotIn("BLACKLISTED", self.lg.format_guild(g))
+
+    def test_the_blacklist_file_is_not_tracked(self):
+        """Tracked, the GitHub sync would reset it on every restart and
+        silently drop entries added on the server."""
+        with open(os.path.join(os.path.dirname(__file__), ".gitignore"),
+                  encoding="utf-8") as f:
+            self.assertIn("guild_blacklist.json", f.read().split())
 
     # --- lookup ----------------------------------------------------------
 
@@ -10671,6 +10754,63 @@ class TestLeaveGuildScript(unittest.TestCase):
                    "tournament", "agent", "utils", "logger_config"}
         self.assertEqual(imported & project, set(),
                          f"leave_guild.py pulls in {imported & project}")
+
+
+class TestGuildBlacklistEnforcement(unittest.IsolatedAsyncioTestCase):
+    """The running bot's half: a bot can't refuse being added, so it leaves
+    on arrival (on_guild_join) and at startup (servers added while offline)."""
+
+    def setUp(self):
+        import optimized_bot as ob
+        self.ob = ob
+
+    def _guild(self, gid, fail=False):
+        calls = []
+
+        async def leave():
+            calls.append(gid)
+            if fail:
+                raise self.ob.discord.HTTPException(
+                    types.SimpleNamespace(status=500, reason="x"), "boom")
+        return types.SimpleNamespace(id=gid, name=f"g{gid}", leave=leave), calls
+
+    async def test_a_blacklisted_server_is_left(self):
+        g, calls = self._guild(5)
+        self.assertTrue(await self.ob._leave_if_blacklisted(g, {5: {}}))
+        self.assertEqual(calls, [5])
+
+    async def test_any_other_server_is_left_alone(self):
+        g, calls = self._guild(6)
+        self.assertFalse(await self.ob._leave_if_blacklisted(g, {5: {}}))
+        self.assertEqual(calls, [])
+
+    async def test_an_unreadable_blacklist_leaves_nothing_and_does_not_raise(self):
+        """Raising here would kill on_ready before commands sync."""
+        g, calls = self._guild(5)
+
+        def bad():
+            raise ValueError("corrupt")
+        with patch.object(self.ob, "load_blacklist", bad):
+            self.assertFalse(await self.ob._leave_if_blacklisted(g))
+        self.assertEqual(calls, [])
+
+    async def test_a_refused_leave_is_reported_not_raised(self):
+        g, calls = self._guild(5, fail=True)
+        self.assertFalse(await self.ob._leave_if_blacklisted(g, {5: {}}))
+
+    def test_both_entry_points_enforce_it(self):
+        import ast
+        with open(os.path.join(os.path.dirname(__file__), "optimized_bot.py"),
+                  encoding="utf-8") as f:
+            tree_ = ast.parse(f.read())
+        for name in ("on_guild_join", "on_ready"):
+            with self.subTest(handler=name):
+                fn = next((n for n in ast.walk(tree_)
+                           if isinstance(n, ast.AsyncFunctionDef) and n.name == name), None)
+                self.assertIsNotNone(fn, f"{name} is gone")
+                calls = {n.func.id for n in ast.walk(fn)
+                         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+                self.assertIn("_leave_if_blacklisted", calls)
 
 
 class TestLoggingConfiguration(unittest.TestCase):

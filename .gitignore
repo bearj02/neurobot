@@ -10,3 +10,6 @@ logs/
 .venv/
 venv/
 .env
+# server-only, managed by leave_guild.py; tracked, the GitHub sync would reset it
+guild_blacklist.json
+guild_blacklist.json.tmp

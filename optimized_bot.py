@@ -36,6 +36,9 @@ from tournament import TournamentManager
 tournaments = TournamentManager()
 from logger_config import global_logger as logger, configure_logging
 from utils import EMBED_FIELD_LIMIT, FENCED_FIELD_LIMIT, chunk_lines_to_fit
+# leave_guild owns the blacklist file; it imports nothing from this project,
+# so this direction is safe (the reverse is pinned by a test).
+from leave_guild import load_blacklist
 
 # ============================================================================
 # CONFIGURATION
@@ -3063,22 +3066,62 @@ def _format_guilds(guilds) -> str:
     return ", ".join(f"{g.name} ({g.id})" for g in guilds) or "none"
 
 
+async def _leave_if_blacklisted(guild, blacklist=None) -> bool:
+    """
+    Leave `guild` if it's in guild_blacklist.json (managed by leave_guild.py).
+    Returns True if it left.
+
+    A bot can't refuse being added to a server, so leaving on arrival is the
+    only enforcement there is. The file is re-read per call (it's tiny), so
+    `leave_guild.py --blacklist` takes effect without a restart. An unreadable
+    file is logged and enforces nothing — loudly wrong beats taking the bot
+    down over it.
+    """
+    if blacklist is None:
+        try:
+            blacklist = load_blacklist()
+        except ValueError as e:
+            logger.error("Guild blacklist not enforced: %s", e)
+            return False
+    if guild.id not in blacklist:
+        return False
+    logger.warning("Leaving blacklisted server %s (%s)", guild.name, guild.id)
+    try:
+        await guild.leave()
+    except discord.HTTPException as e:
+        logger.error("Could not leave blacklisted server %s (%s): %s",
+                     guild.name, guild.id, e)
+        return False
+    return True
+
+
+@bot.event
+async def on_guild_join(guild):
+    logger.info("Added to server %s (%s)", guild.name, guild.id)
+    await _leave_if_blacklisted(guild)
+
+
 @bot.event
 async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
-    logger.info("Registered to %d server(s): %s", len(bot.guilds), _format_guilds(bot.guilds))
+    # Servers it was added to while offline arrive here, not via
+    # on_guild_join. Leave those before syncing commands to them.
+    left = {g.id for g in list(bot.guilds) if await _leave_if_blacklisted(g)}
+    # bot.guilds can still list a server for a moment after leaving it.
+    guilds = [g for g in bot.guilds if g.id not in left]
+    logger.info("Registered to %d server(s): %s", len(guilds), _format_guilds(guilds))
     # db.init() and the startup backup live in safe_start, not here: Discord
     # delivers interactions as soon as the gateway connects, which is before
     # on_ready fires — and on_ready fires again on every reconnect.
     try:
         # Register as guild commands (rank above global in autofill)
         # then clear global registrations so there's no overlap
-        for guild in bot.guilds:
+        for guild in guilds:
             tree.copy_global_to(guild=guild)
             await tree.sync(guild=guild)
         tree.clear_commands(guild=None)  # wipe global list locally
         await tree.sync()               # push empty list to Discord globally
-        logger.info(f"Slash commands registered to {len(bot.guilds)} guild(s), globals cleared")
+        logger.info(f"Slash commands registered to {len(guilds)} guild(s), globals cleared")
 
         bot.loop.create_task(gif_sender())
         logger.info("GIF queue started")

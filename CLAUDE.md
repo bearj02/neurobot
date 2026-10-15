@@ -30,7 +30,17 @@ table" below.
 - `tests.py` — full discord.py stub + 530+ tests, no real Discord/network needed
 - `db_schema.sql`, `logger_config.py` — supporting files, rarely touched
 
-## Critical: how deployment actually works (NO shell access)
+## Critical: how deployment actually works
+
+**Update, 2026-10-15: bot-hosting.net's UI update added a working shell**
+(reported by the user). Everything below was written when there was none,
+and most of it still holds for a different reason — code changes still
+deploy by restart + GitHub pull, and migrations should still run from code
+so they apply everywhere without anyone remembering to run them. What the
+shell changes: one-off scripts (`leave_guild.py`) run directly instead of
+via the Startup tab, and a db can be inspected in place. Verify a given
+operation actually works there before building on it — the previous
+"terminal" looked like a shell and only echoed input.
 
 **As of Sept 2026, this project migrated from manual file-manager uploads
 to a GitHub-connected workflow** (see the "GitHub deployment workflow"
@@ -2115,30 +2125,47 @@ pinned by source inspection: SQLite returns the lowest rowid first for a
 small table, so a behavioural test stays green with the clause removed —
 verified by removing it.
 
-## leave_guild.py — getting the bot out of a server
+## leave_guild.py — getting the bot out of a server, and keeping it out
 
-`on_ready`'s startup line (see `_format_guilds`) turned up a server nobody
-recognised the day it was added, which is what this script is for. There is
-no in-Discord route that doesn't depend on already being in the server with
-the right permissions; `Guild.leave()` is the only API for it.
+`on_ready`'s startup line (see `_format_guilds`) turned up servers nobody
+recognised. There is no in-Discord route that doesn't depend on already
+being in the server with the right permissions; `Guild.leave()` is the only
+API for it.
 
-    python leave_guild.py                     # list every server, change nothing
-    python leave_guild.py <guild id>          # leave that one
+    python leave_guild.py                       # list every server, change nothing
+    python leave_guild.py <guild id>            # leave that one, once
+    python leave_guild.py --blacklist <id>      # leave it, and auto-leave if re-added
+    python leave_guild.py --unblacklist <id>    # stop auto-leaving it
+    python leave_guild.py --blacklisted         # show the blacklist (no login)
 
-**"The command line" here is the panel's Startup tab, not a terminal** —
-this host has no shell, and the panel's own "terminal" just echoes input
-back. The sequence is: point Startup at `leave_guild.py <id>`, restart, read
-the console, then **point it back at `optimized_bot.py` and restart again**.
-Miss that last step and the bot never comes back up.
+Run from the panel's shell, alongside the running bot.
 
-Three properties worth not undoing:
+**Leaving alone didn't stick — the bot was re-added to servers it had left.**
+A bot cannot refuse an invite, so the blacklist is enforced by leaving on
+arrival: `optimized_bot._leave_if_blacklisted()` runs from `on_guild_join`
+and, for servers added while offline, from `on_ready` (which then skips
+those servers when syncing commands — `bot.guilds` can still list one for
+a moment after leaving). **The root fix is upstream:** Developer Portal ->
+the application -> Bot -> turn off "Public Bot", so only the owner can add
+it at all. Re-adds mean that's still on, or someone kept an old invite.
+
+The blacklist is **`guild_blacklist.json`, server-only and `.gitignore`d**
+like the db — tracked, the GitHub sync would reset it on every restart. It's
+re-read on every check, so a new entry applies without a restart.
+`load_blacklist` lives in `leave_guild.py` and `optimized_bot` imports it
+(one reader, safe because of the next point). An unreadable file **raises
+rather than reading as empty**: empty means "let everyone in", and reading
+it as empty would let the next save erase the entries. The bot logs it and
+enforces nothing rather than going down over it. `--blacklist` writes the
+entry *before* logging in, so the block holds even when the login fails.
+
+Properties worth not undoing:
 
 - **It imports nothing from this project.** Importing `optimized_bot` would
   run db migrations, take a backup and re-sync the whole command tree as a
   side effect of wanting to leave one server, and `load_league_names_sync()`
   runs at import in three more modules besides. A test pins this by ast-
-  scanning the imports, because the cost of the regression is a surprise
-  write to the live database.
+  scanning the imports. The dependency runs one way only: bot -> script.
 - **No guild id means list only.** The destructive path has to be asked for
   by id, and it never resolves a server by name — names aren't unique and
   get renamed.
@@ -2146,12 +2173,6 @@ Three properties worth not undoing:
   aiohttp printing "Unclosed connector" and a repr of its connection deque
   into the console at exactly the moment someone is reading an error out of
   it. Confirmed against a real bad token, not assumed.
-
-**If an unknown server turns up again, the script is the symptom, not the
-fix.** A bot with "Public Bot" enabled in the Discord Developer Portal can
-be added to any server by anyone with the invite link. Turning that toggle
-off (Developer Portal -> your application -> Bot -> Public Bot) restricts
-adding it to the application owner, which is what stops it recurring.
 
 ## Discord's 1024-char embed field limit, and the fence that costs 8 more
 
