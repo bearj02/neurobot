@@ -450,12 +450,45 @@ checking before assuming it's fully dead the way the two `.sql` files were.
 
 ## Anthropic-specific
 
-- `/ladder`'s screenshot extraction calls Claude Haiku
-  (`claude-haiku-4-5-20251001`) directly via the Anthropic API in `agent.py` —
-  vision extraction of opponent roster + league name + division + our rank
-  from League vs League screenshots. **Not yet tested against a real
-  screenshot** — this sandbox has no network access to call the live API.
-  Worth a real `/ladder` run after any prompt change to confirm accuracy.
+- `/ladder`'s and `/seasonmatch`'s screenshot extraction call **Claude
+  Haiku 5.5** (`claude-haiku-5-5`, `output_config.effort: "low"`) directly
+  via the Anthropic API in `agent.py`.
+
+### Haiku 5.5, and how that was decided (Oct 2026)
+
+Measured on a real ladder, not assumed. `test_imgs/` (untracked) holds three
+overlapping screenshots of the 2026-10-15 NP vs "Black n Blue" match; a
+harness ran the real `extract_ladder_from_screenshots` on them and graded
+every row against a hand-read key (16 opponents, 16 of ours, header):
+
+| Setup | Wrong rows |
+|---|---|
+| Haiku 4.5, roster enum (what shipped) | 24 |
+| Haiku 4.5, no roster | 20 |
+| Haiku 4.5, each screenshot split into left/right images | 32 — digits sharper, but it lost slot numbering |
+| Haiku 5.5, low effort, roster enum | **1 digit** (154 read 164); 6 off-roster rows correctly null |
+
+- **Haiku 4.5 caps images at 1568px on the long edge.** These screenshots are
+  2868 wide, so it saw them at ~55% and swapped 3/8/9 and 5/6 constantly —
+  the long-standing "3 read as 8" OVR reports. Haiku 5.5 took ~2.2x the image
+  tokens on the same images, i.e. it sees them near native size.
+- **On 4.5 the roster enum produced wrong players**: with 6 of the 16 not on
+  the roster, it filled four rows with copies of one roster member (OVRs
+  included) and labelled ClownUser as Rook. On 5.5 the same enum declines
+  every off-roster row with null — the designed behaviour, routing them to
+  the manual-match view. It also returns the db's spelling (`Djhmoa`,
+  `OneManWolfPack`) rather than the screen's, which is what makes the exact
+  `real_ign` match hit.
+- **5.5 thinks by default and thinking counts toward `max_tokens`.** At the
+  old 3000 cap the first run stopped mid-JSON; a full ladder measured
+  2964-3666 output tokens at low effort. Now 16000 (ladder) / 8000 (season).
+- Cheaper too: ~$0.003 per ladder vs ~$0.013 on 4.5.
+- `our_rank` came back null on every 4.5 run and correct (3) on every 5.5 run.
+
+The 6 "off-roster" players were judged against a Sept 26 local db copy, so
+some may just be newer than it. To re-run: put `ANTHROPIC_API_KEY=` in a
+`.env` (gitignored) and run a harness like the one described above — each
+run is a few cents.
 - `agent.py` talks to the API over **raw HTTP via `aiohttp`**, not the
   `anthropic` SDK. That's deliberate inertia, not a recommendation: the
   module predates any SDK dependency and the host installs from

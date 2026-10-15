@@ -10220,15 +10220,33 @@ class TestHaikuStructuredOutput(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload["output_config"]["format"]["schema"],
                                  getattr(self.agent, schema_name))
 
+    async def test_extraction_runs_on_haiku_5_5_at_low_effort(self):
+        """Measured on a real ladder: Haiku 4.5 got 24 of 35 rows wrong (it
+        downscales these screenshots to ~55%), Haiku 5.5 at low effort got
+        one digit wrong. Both extractors must send the effort, or 5.5 thinks
+        at its default and eats the token budget."""
+        self.assertEqual(self.agent.MODEL, "claude-haiku-5-5")
+        for fn in (self.agent.extract_ladder_from_screenshots,
+                   self.agent.extract_season_match_from_screenshot):
+            with self.subTest(fn=fn.__name__):
+                session = _FakeAnthropicSession(self, [_ok_body(fn)])
+                with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"),                      patch.object(self.agent, "aiohttp", _fake_aiohttp(session)),                      patch.object(self.agent, "_fetch_image_b64", _fake_fetch):
+                    await fn(["u"])
+                payload = session.payloads[0]
+                self.assertEqual(payload["output_config"]["effort"], "low")
+                self.assertGreaterEqual(payload["max_tokens"], 8000)
+
     async def test_the_ladder_budget_clears_a_measured_real_extraction(self):
-        """A real full 16-v-16 came back at output_tokens=1166 against the
-        original max_tokens of 1500 — 22% headroom on a response whose
+        """A real full 16-v-16 on Haiku 5.5 came back at up to 3666 output
+        tokens (thinking shares the budget), and the old 3000 cap cut one
+        off mid-JSON. Same story earlier on 4.5: 1166 against 1500, 22%
+        headroom on a response whose
         length scales with how long the 32 names are. A max_tokens stop is
         the one parse failure the retry deliberately won't cover, so this
         pins real room above the measurement rather than just above zero.
         max_tokens is a ceiling, not a charge: raising it costs nothing
         unless the tokens are generated."""
-        observed = 1166
+        observed = 3666   # Haiku 5.5, low effort, thinking included
         session = _FakeAnthropicSession(
             self, [_ok_body(self.agent.extract_ladder_from_screenshots)])
         with patch.object(self.agent, "ANTHROPIC_API_KEY", "k"), \
