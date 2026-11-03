@@ -26,7 +26,8 @@ async def newday():
     UNIQUE/NOT NULL/CHECK, not foreign keys.
     """
     today = datetime.date.today()
-    teams = await db.list_teams()
+    # A league that has left the system (/li) gets no daily placeholder row.
+    teams = [tid for tid in await db.list_teams() if db.is_league_active(tid)]
     if not teams:
         logger.error("newday: no teams found in the teams table — nothing to initialise")
         return

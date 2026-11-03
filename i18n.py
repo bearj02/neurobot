@@ -361,6 +361,8 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/ign", "Update a player's real in-game name for when they change it in-game (their bot nickname stays the same).\n`/ign player:Slayer new_real_ign:xX_NewName_Xx`"),
         ("/rename", "Change a player's bot nickname without touching their real in-game name mapping.\n`/rename player:Slayer new_nickname:SlayerX`"),
         ("/league", "Add or rename a league.\n`/league action:Add new league`"),
+        ('/la', 'Activate a league from the inactive leagues list.\n`/la league:NI`\nInactive leagues will only ever appear in the autofill list for this command.'),
+        ('/li', 'Make a currently active league inactive, e.g. one that has left the system. Nothing is deleted: its players and scores stay in the database, and players now in other leagues keep their history. It disappears from every league autofill list and from `/openspots`.\n`/li league:NI`\nTo change scores or players belonging to an inactive league, have an admin briefly reactivate it with `/la`, make the change, then deactivate it again with `/li`.'),
         ("/weights", "Manage power rank or ladder weight factors.\n`/weights category:Power Rank`"),
         ("/newday", "Manually trigger the new day reset."),
         ("/sync", "Re-register slash commands to this server."),
@@ -376,6 +378,8 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/ign", "Actualiza el IGN real de un jugador cuando lo cambie en el juego (su apodo en el bot no cambia).\n`/ign player:Slayer new_real_ign:xX_NewName_Xx`"),
         ("/rename", "Cambia el apodo de un jugador en el bot sin tocar su IGN real asignado.\n`/rename player:Slayer new_nickname:SlayerX`"),
         ("/league", "Agrega o renombra una liga.\n`/league action:Add new league`"),
+        ('/la', 'Activa una liga de la lista de ligas inactivas.\n`/la league:NI`\nLas ligas inactivas solo aparecerán en la lista de autocompletado de este comando.'),
+        ('/li', 'Marca como inactiva una liga que está activa, por ejemplo una que dejó el sistema. No se borra nada: sus jugadores y puntuaciones siguen en la base de datos, y los jugadores que ahora están en otras ligas conservan su historial. Desaparece de todas las listas de autocompletado de ligas y de `/openspots`.\n`/li league:NI`\nPara cambiar puntuaciones o jugadores de una liga inactiva, pide a un admin que la reactive brevemente con `/la`, haz el cambio y vuelve a desactivarla con `/li`.'),
         ("/weights", "Gestiona los factores de ponderación de poder o de escalafón.\n`/weights category:Power Rank`"),
         ("/newday", "Activa manualmente el reinicio del nuevo día."),
         ("/sync", "Vuelve a registrar los comandos de barra en este servidor."),
@@ -391,6 +395,8 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/ign", "Met à jour l'IGN réel d'un joueur lorsqu'il en change en jeu (son pseudo dans le bot ne change pas).\n`/ign player:Slayer new_real_ign:xX_NewName_Xx`"),
         ("/rename", "Change le pseudo d'un joueur dans le bot sans toucher à son IGN réel associé.\n`/rename player:Slayer new_nickname:SlayerX`"),
         ("/league", "Ajoute ou renomme une ligue.\n`/league action:Add new league`"),
+        ('/la', "Réactive une ligue de la liste des ligues inactives.\n`/la league:NI`\nLes ligues inactives n'apparaîtront que dans la liste de saisie automatique de cette commande."),
+        ('/li', "Rend inactive une ligue actuellement active, par exemple une ligue qui a quitté le système. Rien n'est supprimé : ses joueurs et ses scores restent dans la base de données, et les joueurs désormais dans d'autres ligues conservent leur historique. Elle disparaît de toutes les listes de saisie automatique de ligues et de `/openspots`.\n`/li league:NI`\nPour modifier les scores ou les joueurs d'une ligue inactive, demandez à un admin de la réactiver brièvement avec `/la`, faites la modification, puis désactivez-la à nouveau avec `/li`."),
         ("/weights", "Gère les facteurs de pondération de puissance ou de classement.\n`/weights category:Power Rank`"),
         ("/newday", "Déclenche manuellement la réinitialisation du nouveau jour."),
         ("/sync", "Réenregistre les commandes slash sur ce serveur."),
@@ -406,6 +412,8 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/ign", "Atualiza o IGN real de um jogador para quando ele mudar no jogo (o apelido no bot permanece o mesmo).\n`/ign player:Slayer new_real_ign:xX_NewName_Xx`"),
         ("/rename", "Muda o apelido de um jogador no bot sem alterar seu IGN real vinculado.\n`/rename player:Slayer new_nickname:SlayerX`"),
         ("/league", "Adiciona ou renomeia uma liga.\n`/league action:Add new league`"),
+        ('/la', 'Ativa uma liga da lista de ligas inativas.\n`/la league:NI`\nLigas inativas só aparecerão na lista de preenchimento automático deste comando.'),
+        ('/li', 'Torna inativa uma liga que está ativa, por exemplo uma que saiu do sistema. Nada é apagado: seus jogadores e pontuações continuam no banco de dados, e os jogadores que agora estão em outras ligas mantêm seu histórico. Ela some de todas as listas de preenchimento automático de ligas e do `/openspots`.\n`/li league:NI`\nPara alterar pontuações ou jogadores de uma liga inativa, peça a um admin que a reative brevemente com `/la`, faça a alteração e depois desative-a novamente com `/li`.'),
         ("/weights", "Gerencia os fatores de ponderação de poder ou de ranking.\n`/weights category:Power Rank`"),
         ("/newday", "Aciona manualmente a redefinição do novo dia."),
         ("/sync", "Registra novamente os comandos de barra neste servidor."),
@@ -421,6 +429,8 @@ TRANSLATIONS['manual.page4.fields'] = {
         ("/ign", "Aktualisiert den echten Spielnamen eines Spielers, wenn er ihn im Spiel ändert (der Bot-Spitzname bleibt gleich).\n`/ign player:Slayer new_real_ign:xX_NewName_Xx`"),
         ("/rename", "Ändert den Bot-Spitznamen eines Spielers, ohne seine echte IGN-Zuordnung zu verändern.\n`/rename player:Slayer new_nickname:SlayerX`"),
         ("/league", "Fügt eine Liga hinzu oder benennt sie um.\n`/league action:Add new league`"),
+        ('/la', 'Aktiviert eine Liga aus der Liste der inaktiven Ligen.\n`/la league:NI`\nInaktive Ligen erscheinen nur in der Autovervollständigung dieses Befehls.'),
+        ('/li', 'Setzt eine aktive Liga auf inaktiv, z. B. eine, die das System verlassen hat. Es wird nichts gelöscht: Ihre Spieler und Wertungen bleiben in der Datenbank, und Spieler, die jetzt in anderen Ligen sind, behalten ihre Historie. Sie verschwindet aus allen Liga-Autovervollständigungen und aus `/openspots`.\n`/li league:NI`\nUm Wertungen oder Spieler einer inaktiven Liga zu ändern, lass sie von einem Admin kurz mit `/la` reaktivieren, nimm die Änderung vor und deaktiviere sie danach wieder mit `/li`.'),
         ("/weights", "Verwaltet Power-Rank- oder Ranglisten-Gewichtungsfaktoren.\n`/weights category:Power Rank`"),
         ("/newday", "Löst den Tageswechsel-Reset manuell aus."),
         ("/sync", "Registriert die Slash-Befehle auf diesem Server neu."),
@@ -586,6 +596,42 @@ TRANSLATIONS['common.invalid_league'] = {
     'fr': "Ligue invalide « {league} ». Utilisez : {leagues}",
     'pt': "Liga inválida '{league}'. Use: {leagues}",
     'de': "Ungültige Liga „{league}“. Verwende: {leagues}",
+}
+# --- /la and /li (league activation) ---
+TRANSLATIONS['common.inactive_league'] = {
+    'en': "{league} is inactive. An admin can reactivate it with /la.",
+    'es': "{league} está inactiva. Un admin puede reactivarla con /la.",
+    'fr': "{league} est inactive. Un admin peut la réactiver avec /la.",
+    'pt': "{league} está inativa. Um admin pode reativá-la com /la.",
+    'de': "{league} ist inaktiv. Ein Admin kann sie mit /la reaktivieren.",
+}
+TRANSLATIONS['la.success'] = {
+    'en': "✅ **{league}** is active again and back in the league lists.",
+    'es': "✅ **{league}** vuelve a estar activa y aparece de nuevo en las listas de ligas.",
+    'fr': "✅ **{league}** est de nouveau active et réapparaît dans les listes de ligues.",
+    'pt': "✅ **{league}** está ativa novamente e voltou às listas de ligas.",
+    'de': "✅ **{league}** ist wieder aktiv und erscheint wieder in den Ligalisten.",
+}
+TRANSLATIONS['li.success'] = {
+    'en': "✅ **{league}** is now inactive. It's hidden from the league lists; its players and scores are kept. Use /la to reactivate it.",
+    'es': "✅ **{league}** ahora está inactiva. Queda oculta en las listas de ligas; sus jugadores y puntuaciones se conservan. Usa /la para reactivarla.",
+    'fr': "✅ **{league}** est maintenant inactive. Elle est masquée des listes de ligues ; ses joueurs et ses scores sont conservés. Utilisez /la pour la réactiver.",
+    'pt': "✅ **{league}** agora está inativa. Fica oculta nas listas de ligas; seus jogadores e pontuações são mantidos. Use /la para reativá-la.",
+    'de': "✅ **{league}** ist jetzt inaktiv. Sie ist in den Ligalisten ausgeblendet; ihre Spieler und Wertungen bleiben erhalten. Mit /la reaktivieren.",
+}
+TRANSLATIONS['la.already_active'] = {
+    'en': "{league} is already active.",
+    'es': "{league} ya está activa.",
+    'fr': "{league} est déjà active.",
+    'pt': "{league} já está ativa.",
+    'de': "{league} ist bereits aktiv.",
+}
+TRANSLATIONS['li.already_inactive'] = {
+    'en': "{league} is already inactive.",
+    'es': "{league} ya está inactiva.",
+    'fr': "{league} est déjà inactive.",
+    'pt': "{league} já está inativa.",
+    'de': "{league} ist bereits inaktiv.",
 }
 TRANSLATIONS['common.invalid_date_format'] = {
     'en': "⚠️ Use format `YYYY-MM-DD`.",

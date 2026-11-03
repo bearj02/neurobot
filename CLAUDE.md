@@ -2354,3 +2354,41 @@ A 14-row extraction left a 14-long list and pasting a full CSV walked off
 the end. Per-field matters too: the extraction returns all 16 slots now, so
 replacing a row wholesale would put `None` where the `-` placeholder was,
 and the flow reads `name != '-'` as "an opponent is entered here".
+
+## Inactive leagues: /li and /la (Nov 2026)
+
+Leagues that leave the system can't simply be deleted from `teams`: their
+players' `game_scores` rows carry the league's `team_id`, several of those
+players are still active elsewhere, and with `foreign_keys=ON` the delete
+would fail anyway. `/li` deactivates one instead and `/la` reactivates it.
+Both are admin-gated, sharing `_set_league_active_reply()`.
+
+- **Stored in its own table, `inactive_leagues`** (`db.INACTIVE_LEAGUES_SCHEMA`,
+  created by `_migrate_schema`), not as a column on `teams`. Tests and some
+  scripts insert into `teams` positionally (`VALUES (?, ?, ?)`), and a fourth
+  column would break all of them.
+- **`db.INACTIVE_LEAGUES` is an in-memory mirror**, loaded in `db.init()` and
+  kept current by `set_league_active()`. Autocompletes and the sync
+  `_validate_league` read it rather than querying.
+- **Every live league parameter is now an autocomplete, not
+  `@app_commands.choices`.** Static choices are fixed at registration, so a
+  deactivated league would have stayed in the picker until a `/sync`.
+  `active_league_autocomplete` is used everywhere except `/la`
+  (`inactive_league_autocomplete`, the only place an inactive league is ever
+  offered) and `/legacy` (`archive_league_autocomplete`, which hides inactive
+  leagues only in its live-list fallback; an archive's own teams list is
+  that season's record). `LEAGUE_CHOICES` no longer exists. A side benefit:
+  a league added with `/league` is offered immediately.
+- **An autocomplete only suggests**, so every league-taking handler
+  re-checks its value via `_validate_league` / `_league_or_reply`, which
+  reject unknown *and* inactive leagues. An AST test fails if any command
+  with a `league` parameter uses static choices or never validates it.
+- `LEAGUE_NAMES` still holds **every** league, so a score recorded under a
+  league that has since left still displays its name. Use `_active_leagues()`
+  for anything offered to a user.
+- Also hidden: `/openspots` (`get_open_spots`, live db only), `/newday` (no
+  placeholder row), and `/transfer`'s menu (except the player's own current
+  league, so the default still renders).
+- **Not blocked: player-keyed commands** (`/score`, `/nick`, `/history`...) on
+  a player whose `team_id` is an inactive league. The manual tells admins to
+  reactivate briefly, make the change, then deactivate again.

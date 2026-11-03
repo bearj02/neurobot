@@ -84,9 +84,10 @@ def game_day() -> datetime.date:
 # what the database actually contains.
 #
 # Loaded synchronously (db.load_league_names_sync, stdlib sqlite3, read-only)
-# rather than via the async db layer because LEAGUE_CHOICES below is consumed
-# by @app_commands.choices decorators, which run while this module is still
-# being imported — before db.init() and before there's an event loop at all.
+# rather than via the async db layer because other modules' import-time code
+# (and, historically, @app_commands.choices decorators) need it while this
+# module is still being imported, before db.init() and any event loop exist.
+# It holds every league, active or not; see _active_leagues for the pickers.
 LEAGUE_NAMES: dict = db.load_league_names_sync()
 
 if not LEAGUE_NAMES:
@@ -96,10 +97,39 @@ if not LEAGUE_NAMES:
         "exists and is readable, then restart."
     )
 
-LEAGUE_CHOICES = [
-    app_commands.Choice(name=name, value=tid)
-    for tid, name in LEAGUE_NAMES.items()
-]
+
+
+def _active_leagues() -> dict:
+    """LEAGUE_NAMES minus the leagues /li has deactivated (db.INACTIVE_LEAGUES).
+    LEAGUE_NAMES itself keeps every league, so a score recorded for a league
+    that has since left still shows that league's name."""
+    return {tid: name for tid, name in LEAGUE_NAMES.items() if db.is_league_active(tid)}
+
+
+def _league_choices(names: dict, current: str) -> list:
+    cur = (current or "").lower()
+    return [
+        app_commands.Choice(name=name, value=tid)
+        for tid, name in names.items()
+        if cur in tid.lower() or cur in name.lower()
+    ][:25]
+
+
+# Every live league parameter uses one of these autocompletes rather than
+# @app_commands.choices. Static choices are fixed when the command is
+# registered with Discord, so a league deactivated with /li would stay in the
+# picker until the next /sync; an autocomplete is asked afresh on every
+# keystroke. Since an autocomplete only *suggests*, each command re-checks the
+# value it receives (_validate_league / _league_or_reply).
+async def active_league_autocomplete(interaction: discord.Interaction, current: str):
+    return _league_choices(_active_leagues(), current)
+
+
+async def inactive_league_autocomplete(interaction: discord.Interaction, current: str):
+    """/la's picker, the one place an inactive league is ever offered."""
+    return _league_choices(
+        {tid: name for tid, name in LEAGUE_NAMES.items() if not db.is_league_active(tid)},
+        current)
 
 
 def _sync_league_name(lid: str, name: str):
@@ -154,10 +184,28 @@ assert len(LADDER_STYLE_CHOICES) <= 25, (
 )
 
 def _validate_league(league: str, lang: str = 'en') -> str:
-    key = league.upper()
+    """Normalise a league id, raising ValueError (with a user-facing message)
+    for one that doesn't exist or has been deactivated with /li."""
+    key = (league or '').upper()
     if key not in LEAGUE_NAMES:
-        raise ValueError(i18n.t('common.invalid_league', lang, league=league, leagues=', '.join(LEAGUE_NAMES)))
+        raise ValueError(i18n.t('common.invalid_league', lang, league=league,
+                                leagues=', '.join(_active_leagues())))
+    if not db.is_league_active(key):
+        raise ValueError(i18n.t('common.inactive_league', lang, league=LEAGUE_NAMES[key]))
     return key
+
+
+async def _league_or_reply(interaction: discord.Interaction, league: str) -> str | None:
+    """_validate_league for a slash command: returns the league id, or sends
+    the error to the caller and returns None. Works before or after a defer."""
+    try:
+        return _validate_league(league, i18n.resolve_lang(interaction))
+    except ValueError as e:
+        if interaction.response.is_done():
+            await interaction.followup.send(f"⚠️ {e}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"⚠️ {e}", ephemeral=True)
+        return None
 
 
 ADMIN_EQUIVALENT_ROLES = {'Administrator', 'League Owner', 'Madden Admin'}
@@ -778,9 +826,11 @@ async def openspots_slash(interaction: discord.Interaction):
 
 @tree.command(name="status", description="Get today's matchup status for a league")
 @app_commands.describe(league="League code")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def status_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
     embed = await get_status(league, lang=lang)
     await interaction.response.send_message(embed=embed)
@@ -796,9 +846,11 @@ async def status_slash(interaction: discord.Interaction, league: str):
 
 @tree.command(name="rank", description="Display the power ranking table for a league")
 @app_commands.describe(league="League code")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def rank_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     await interaction.response.defer()
     ctx_like = await bot.get_context(await interaction.original_response())
 
@@ -815,8 +867,10 @@ async def rank_slash(interaction: discord.Interaction, league: str):
     league="League code",
     include_inactive="Include inactive/former players in this league (default: false)"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def stats_slash(interaction: discord.Interaction, league: str, include_inactive: bool = False):
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     # Not admin-gated: league averages are a read-only lookup anyone in the
     # league has a reason to run, same as /rank. (The manual never marked it
     # Admin either — the gate was the odd one out.)
@@ -873,14 +927,12 @@ async def archive_league_autocomplete(interaction: discord.Interaction, current:
         if conn is not None:
             names = await db.list_teams(conn=conn)
     if names is None:
-        names = LEAGUE_NAMES
+        # Before a year is chosen, today's leagues minus inactive ones, like
+        # every other live picker. A season's own archive list is shown as-is:
+        # it's that year's record, and /li is about leagues today.
+        names = _active_leagues()
 
-    cur = (current or "").lower()
-    return [
-        app_commands.Choice(name=name, value=tid)
-        for tid, name in names.items()
-        if cur in tid.lower() or cur in name.lower()
-    ][:25]
+    return _league_choices(names, current)
 
 
 async def _resolve_archive_league(interaction: discord.Interaction, conn, league: str, lang: str) -> str | None:
@@ -1226,9 +1278,11 @@ async def _build_scores_result(league: str, start_date, end_date, lang: str, con
     start="Start date (YYYY-MM-DD), defaults to today",
     end="End date (YYYY-MM-DD), defaults to start date"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def scores_slash(interaction: discord.Interaction, league: str, start: str = None, end: str = None):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
 
@@ -1731,7 +1785,7 @@ SIEGE_MOD_CHOICES = [app_commands.Choice(name=m, value=m) for m in siege.SIEGE_M
     league="League code",
     include_inactive="Include inactive/former players in this league (default: false)"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def dstats_slash(interaction: discord.Interaction, league: str, include_inactive: bool = False):
     # Not admin-gated, matching /stats — a read-only defensive rollup.
     lang = i18n.resolve_lang(interaction)
@@ -1887,7 +1941,7 @@ async def _build_dscores_embed(player: str, start_date, end_date, lang: str,
 
 @tree.command(name="siege", description="Start a new siege match for a league")
 @app_commands.describe(league="Your league")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def siege_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
     try:
@@ -1900,7 +1954,8 @@ async def siege_slash(interaction: discord.Interaction, league: str):
 
 @tree.command(name="node", description="Report a newly-visible siege node")
 @app_commands.describe(league="Your league", mod="Which mod this opponent carries")
-@app_commands.choices(league=LEAGUE_CHOICES, mod=SIEGE_MOD_CHOICES)
+@app_commands.choices(mod=SIEGE_MOD_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def node_slash(interaction: discord.Interaction, league: str, mod: str):
     try:
         league = _validate_league(league)
@@ -1912,8 +1967,7 @@ async def node_slash(interaction: discord.Interaction, league: str, mod: str):
 
 @tree.command(name="siegescore", description="Log drives/points scored against an open siege node")
 @app_commands.describe(league="Your league", player="Player IGN", opponent="Opposing player (open nodes only)")
-@app_commands.choices(league=LEAGUE_CHOICES)
-@app_commands.autocomplete(player=league_player_autocomplete, opponent=siege.siege_opponent_autocomplete)
+@app_commands.autocomplete(league=active_league_autocomplete, player=league_player_autocomplete, opponent=siege.siege_opponent_autocomplete)
 async def siegescore_slash(interaction: discord.Interaction, league: str, player: str, opponent: str):
     try:
         league = _validate_league(league)
@@ -1925,7 +1979,7 @@ async def siegescore_slash(interaction: discord.Interaction, league: str, player
 
 @tree.command(name="siegestatus", description="Check the status of a league's active siege match")
 @app_commands.describe(league="Your league")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def siegestatus_slash(interaction: discord.Interaction, league: str):
     try:
         league = _validate_league(league)
@@ -1937,7 +1991,7 @@ async def siegestatus_slash(interaction: discord.Interaction, league: str):
 
 @tree.command(name="updatesiege", description="Set opponent points and correct siege node/score entries")
 @app_commands.describe(league="Your league")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def updatesiege_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
     try:
@@ -1950,7 +2004,7 @@ async def updatesiege_slash(interaction: discord.Interaction, league: str):
 
 @tree.command(name="siegefinal", description="Close out a league's active siege match")
 @app_commands.describe(league="Your league")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def siegefinal_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
     try:
@@ -1970,7 +2024,7 @@ async def siegesplits_slash(interaction: discord.Interaction, player: str):
 
 @tree.command(name="siegehistory", description="Past completed siege matches for a league")
 @app_commands.describe(league="Your league")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def siegehistory_slash(interaction: discord.Interaction, league: str):
     try:
         league = _validate_league(league)
@@ -2270,9 +2324,11 @@ class RegisterModal(Modal, title="Register New Player"):
 
 @tree.command(name="register", description="Register a new player")
 @app_commands.describe(league="League to add the player to")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def register_slash(interaction: discord.Interaction, league: str):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.send_modal(RegisterModal(league, lang=lang))
 
@@ -2294,6 +2350,7 @@ class TransferLeagueView(View):
                 default=(tid == current_team)
             )
             for tid, name in LEAGUE_NAMES.items()
+            if tid == current_team or db.is_league_active(tid)
         ]
         select = Select(placeholder=i18n.t('transfer.select_placeholder', lang), options=options)
         select.callback = self.on_select
@@ -2896,13 +2953,15 @@ class LadderPlayerMatchView(View):
     screenshot2="Second screenshot (optional)",
     screenshot3="Third screenshot (optional)",
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def ladder_slash(interaction: discord.Interaction, league: str,
                        date: str = None,
                        screenshot1: discord.Attachment = None,
                        screenshot2: discord.Attachment = None,
                        screenshot3: discord.Attachment = None):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
 
     if date is None:
@@ -3629,10 +3688,14 @@ class WeightsView(View):
     category="Which formula to manage",
     league="Optional: manage league-specific overrides"
 )
-@app_commands.choices(category=WEIGHT_CATEGORIES, league=LEAGUE_CHOICES)
+@app_commands.choices(category=WEIGHT_CATEGORIES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def weights_slash(interaction: discord.Interaction,
                         category: str, league: str = None):
     if not await _require_admin(interaction): return
+    if league is not None:
+        league = await _league_or_reply(interaction, league)
+        if league is None: return
     lang = i18n.resolve_lang(interaction)
     view = WeightsView(category, league, lang=lang)
     await view.load()
@@ -3796,9 +3859,12 @@ async def _build_ladder_image(league: str, game_date, conn=None, season_label: s
     date="Date (YYYY-MM-DD), defaults to today",
     style="Visual style for the image (defaults to Classic)"
 )
-@app_commands.choices(league=LEAGUE_CHOICES, style=LADDER_STYLE_CHOICES)
+@app_commands.choices(style=LADDER_STYLE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def show_ladder_slash(interaction: discord.Interaction,
                              league: str, date: str = None, style: str = "classic"):
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
     if date is None:
         game_date = game_day()
@@ -3838,8 +3904,11 @@ async def show_ladder_slash(interaction: discord.Interaction,
 
 @tree.command(name="factors", description="Show the current power rank and ladder weight factors for a league")
 @app_commands.describe(league="League (optional — shows global weights if omitted)")
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def factors_slash(interaction: discord.Interaction, league: str = None):
+    if league is not None:
+        league = await _league_or_reply(interaction, league)
+        if league is None: return
     lang = i18n.resolve_lang(interaction)
     pwr_weights    = await db.get_weights('pwr_rank',  league)
     ladder_weights = await db.get_weights('ladder',    league)
@@ -4068,9 +4137,9 @@ class LeagueAddModal(Modal, title="Add New League"):
             "INSERT INTO teams (id, name, sheet_name) VALUES (?, ?, ?)",
             (lid, name, name)
         )
-        # Add to every module's league-name map and to LEAGUE_CHOICES at runtime
+        # Add to every module's league-name map. The league pickers are
+        # autocompletes over LEAGUE_NAMES, so it's offered immediately.
         _sync_league_name(lid, name)
-        LEAGUE_CHOICES.append(app_commands.Choice(name=name, value=lid))
 
         await interaction.response.send_message(
             i18n.t('league.add.success', lang, name=name, id=lid), ephemeral=True
@@ -4105,11 +4174,6 @@ class LeagueRenameView(View):
                 name = self2.new_name.value.strip()
                 await db.execute("UPDATE teams SET name=?, sheet_name=? WHERE id=?", (name, name, lid))
                 _sync_league_name(lid, name)
-                # Update LEAGUE_CHOICES
-                for i, c in enumerate(LEAGUE_CHOICES):
-                    if c.value == lid:
-                        LEAGUE_CHOICES[i] = app_commands.Choice(name=name, value=lid)
-                        break
                 await inter.response.send_message(
                     i18n.t('league.rename.success', lang, id=lid, name=name),
                     ephemeral=True
@@ -4136,6 +4200,53 @@ async def league_slash(interaction: discord.Interaction, action: str):
             view=LeagueRenameView(leagues, lang=lang),
             ephemeral=True
         )
+
+
+async def _set_league_active_reply(interaction: discord.Interaction, league: str, active: bool):
+    """
+    Shared body of /la (active=True) and /li (active=False), kept out of the
+    @tree.command functions so it can be tested directly.
+
+    Deactivating never deletes anything: the league's teams row, players and
+    scores all stay, and players who moved on to other leagues keep their
+    history there. It only takes the league out of the pickers, /openspots
+    and /newday, and makes league-taking commands refuse it until /la.
+    """
+    lang = i18n.resolve_lang(interaction)
+    key = (league or '').upper()
+    if key not in LEAGUE_NAMES:
+        names = _active_leagues() if not active else {
+            tid: n for tid, n in LEAGUE_NAMES.items() if not db.is_league_active(tid)}
+        await interaction.response.send_message(
+            i18n.t('common.invalid_league', lang, league=league, leagues=', '.join(names) or '—'),
+            ephemeral=True)
+        return
+    name = LEAGUE_NAMES[key]
+    if db.is_league_active(key) == active:
+        await interaction.response.send_message(
+            i18n.t('la.already_active' if active else 'li.already_inactive', lang, league=name),
+            ephemeral=True)
+        return
+    await db.set_league_active(key, active)
+    logger.info(f"League {key} {'activated' if active else 'deactivated'} by {interaction.user}")
+    await interaction.response.send_message(
+        i18n.t('la.success' if active else 'li.success', lang, league=name))
+
+
+@tree.command(name="la", description="Activate a league from the inactive leagues list")
+@app_commands.describe(league="Inactive league to activate")
+@app_commands.autocomplete(league=inactive_league_autocomplete)
+async def la_slash(interaction: discord.Interaction, league: str):
+    if not await _require_admin(interaction): return
+    await _set_league_active_reply(interaction, league, True)
+
+
+@tree.command(name="li", description="Make a league inactive (hidden from league pickers; data is kept)")
+@app_commands.describe(league="Active league to deactivate")
+@app_commands.autocomplete(league=active_league_autocomplete)
+async def li_slash(interaction: discord.Interaction, league: str):
+    if not await _require_admin(interaction): return
+    await _set_league_active_reply(interaction, league, False)
 
 
 
@@ -4569,11 +4680,13 @@ class UpdateMatchupView(View):
     our_defaults="Number of default teams on our side",
     opp_defaults="Number of default teams on opponent side"
 )
-@app_commands.choices(league=LEAGUE_CHOICES)
+@app_commands.autocomplete(league=active_league_autocomplete)
 async def matchup_slash(interaction: discord.Interaction,
                                league: str, date: str = None,
                                our_defaults: int = None, opp_defaults: int = None):
     if not await _require_admin(interaction): return
+    league = await _league_or_reply(interaction, league)
+    if league is None: return
     lang = i18n.resolve_lang(interaction)
     await interaction.response.defer()
 

@@ -66,6 +66,59 @@ async def list_teams(conn=None) -> dict[str, str]:
     return {r['id']: r['name'] for r in rows}
 
 
+# ---------------------------------------------------------------------------
+# Inactive leagues
+# ---------------------------------------------------------------------------
+# A league that has left the system stays in `teams` — its players' historical
+# game_scores rows carry its team_id, and several of those players are still
+# active in other leagues, so deleting the row would orphan their history
+# (and fail outright, with foreign_keys=ON). Instead it's listed here, which
+# hides it from every league picker except /la's, from /openspots, and from
+# /newday, and makes every league-taking command refuse it.
+#
+# A separate table rather than a column on teams: teams is inserted into
+# positionally in places (VALUES (?, ?, ?)), and a fourth column would break
+# every one of those.
+INACTIVE_LEAGUES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS inactive_leagues (
+    team_id        TEXT PRIMARY KEY,
+    deactivated_at TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+)
+"""
+
+# In-memory mirror of the inactive_leagues table. Autocomplete callbacks and
+# the sync _validate_league read this rather than querying, and the bot is the
+# only writer, so set_league_active() keeping it current is enough.
+INACTIVE_LEAGUES: set[str] = set()
+
+
+async def refresh_inactive_leagues() -> set[str]:
+    """Reload INACTIVE_LEAGUES from the database (startup, and tests)."""
+    rows = await fetchall("SELECT team_id FROM inactive_leagues")
+    INACTIVE_LEAGUES.clear()
+    INACTIVE_LEAGUES.update(r['team_id'] for r in rows)
+    return INACTIVE_LEAGUES
+
+
+def is_league_active(team_id: str) -> bool:
+    return team_id not in INACTIVE_LEAGUES
+
+
+async def set_league_active(team_id: str, active: bool):
+    """Activate (active=True) or deactivate a league. Idempotent either way."""
+    if active:
+        await execute("DELETE FROM inactive_leagues WHERE team_id=?", (team_id,))
+        INACTIVE_LEAGUES.discard(team_id)
+    else:
+        await execute(
+            "INSERT OR IGNORE INTO inactive_leagues (team_id, deactivated_at) "
+            "VALUES (?, datetime('now'))",
+            (team_id,)
+        )
+        INACTIVE_LEAGUES.add(team_id)
+
+
 async def init():
     """Open the SQLite connection. Safe to call multiple times — no-ops if already connected."""
     global _db
@@ -76,6 +129,7 @@ async def init():
     await _db.execute("PRAGMA journal_mode=WAL")
     await _db.execute("PRAGMA foreign_keys=ON")
     await _migrate_schema()
+    await refresh_inactive_leagues()
     logger.info(f"SQLite connected → {DB_PATH}")
 
 
@@ -273,6 +327,12 @@ async def _migrate_schema():
     # (NEUROSEASON_SCHEMA) and created here because there is no shell access
     # to create a table any other way on this host.
     await _migrate_neuroseason_schema()
+
+    try:
+        await _db.execute(INACTIVE_LEAGUES_SCHEMA)
+        await _db.commit()
+    except Exception as e:
+        logger.error(f"Migration failed creating the inactive_leagues table: {e}")
 
 
 async def backup_database():
@@ -1982,10 +2042,14 @@ async def get_open_spots(conn=None) -> list[dict]:
     Queries the teams table directly for both team_id and display name,
     rather than a hardcoded list — automatically covers however many
     leagues actually exist, including one added after this was written,
-    with no code change needed here.
+    with no code change needed here. Inactive leagues (see INACTIVE_LEAGUES)
+    are left out.
     Returns a list of {'team_id', 'name', 'active_count', 'open_spots'} dicts.
     """
     teams = await fetchall("SELECT id, name FROM teams ORDER BY id", conn=conn)
+    if conn is None:
+        # A league that has left the system has no roster to fill.
+        teams = [t for t in teams if is_league_active(t['id'])]
     results = []
     for team in teams:
         row = await fetchone(

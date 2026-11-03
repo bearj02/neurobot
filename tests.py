@@ -550,10 +550,12 @@ async def setup_db():
         s = stmt.strip()
         if s:
             await db.execute(s)
+    await db.execute(db.INACTIVE_LEAGUES_SCHEMA)
     for stmt in SEED_DATA.strip().split(";"):
         s = stmt.strip()
         if s:
             await db.execute(s)
+    await db.refresh_inactive_leagues()
 
 
 # ---------------------------------------------------------------------------
@@ -11032,6 +11034,203 @@ class TestLadderUIErrorReporting(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Test: inactive leagues (/la, /li)
+# ---------------------------------------------------------------------------
+
+class TestInactiveLeagues(unittest.IsolatedAsyncioTestCase):
+    """A league deactivated with /li stays in the database but disappears
+    from every live league picker except /la's, from /openspots and from
+    /newday, and league-taking commands refuse it."""
+
+    async def asyncSetUp(self):
+        os.environ["DB_PATH"] = ":memory:"
+        db._db = None
+        await setup_db()
+        import optimized_bot as ob
+        self.ob = ob
+        self._names = patch.dict(ob.LEAGUE_NAMES,
+                                 {'NP': 'NeuroPerverse', 'ND': 'NeuroDiverse'}, clear=True)
+        self._names.start()
+
+    async def asyncTearDown(self):
+        self._names.stop()
+        db.INACTIVE_LEAGUES.clear()
+        await _patched_close()
+
+    @staticmethod
+    def _inter():
+        inter = _FakeInteraction()
+        inter.user = 'admin#0001'    # /la and /li log who did it
+        return inter
+
+    async def _values(self, autocomplete, current=""):
+        return [c.value for c in await autocomplete(_FakeInteraction(), current)]
+
+    # --- db layer ---
+
+    async def test_deactivation_persists_and_reloads_from_the_table(self):
+        await db.set_league_active('ND', False)
+        self.assertFalse(db.is_league_active('ND'))
+        db.INACTIVE_LEAGUES.clear()          # simulate a restart
+        await db.refresh_inactive_leagues()
+        self.assertFalse(db.is_league_active('ND'))
+        self.assertTrue(db.is_league_active('NP'))
+
+        await db.set_league_active('ND', True)
+        db.INACTIVE_LEAGUES.clear()
+        await db.refresh_inactive_leagues()
+        self.assertTrue(db.is_league_active('ND'))
+
+    async def test_set_league_active_is_idempotent(self):
+        await db.set_league_active('ND', False)
+        await db.set_league_active('ND', False)
+        rows = await db.fetchall("SELECT team_id FROM inactive_leagues")
+        self.assertEqual([r['team_id'] for r in rows], ['ND'])
+        await db.set_league_active('ND', True)
+        await db.set_league_active('ND', True)
+        self.assertEqual(await db.fetchall("SELECT team_id FROM inactive_leagues"), [])
+
+    async def test_deactivating_keeps_the_league_its_players_and_their_scores(self):
+        await db.update_player_score("Grizzly", TODAY, 22.0)
+        await db.set_league_active('NP', False)
+        self.assertIsNotNone(await db.fetchone("SELECT id FROM teams WHERE id='NP'"))
+        self.assertEqual(len(await db.fetchall("SELECT id FROM players WHERE team_id='NP'")), 3)
+        row = await db.fetchone("SELECT score FROM game_scores WHERE team_id='NP'")
+        self.assertEqual(row['score'], 22.0)
+
+    async def test_migration_creates_the_table_idempotently(self):
+        await db.execute("DROP TABLE inactive_leagues")
+        await db._migrate_schema()
+        await db._migrate_schema()
+        await db.set_league_active('ND', False)
+        self.assertIn('ND', await db.refresh_inactive_leagues())
+
+    async def test_open_spots_leaves_out_inactive_leagues(self):
+        await db.set_league_active('ND', False)
+        spots = await db.get_open_spots()
+        self.assertEqual([s['team_id'] for s in spots], ['NP'])
+
+    async def test_newday_skips_inactive_leagues(self):
+        import newday
+        await db.set_league_active('ND', False)
+        with patch.object(db, 'new_day', AsyncMock()) as nd:
+            await newday.newday()
+        self.assertEqual([c.args[0] for c in nd.call_args_list], ['NP'])
+
+    # --- pickers ---
+
+    async def test_inactive_league_only_appears_in_la_autocomplete(self):
+        await db.set_league_active('ND', False)
+        self.assertEqual(await self._values(self.ob.active_league_autocomplete), ['NP'])
+        self.assertEqual(await self._values(self.ob.inactive_league_autocomplete), ['ND'])
+        # Before a year is filled in, /legacy falls back to the live list too.
+        self.assertEqual(await self._values(self.ob.archive_league_autocomplete), ['NP'])
+
+    async def test_league_autocomplete_filters_on_id_and_name(self):
+        self.assertEqual(await self._values(self.ob.active_league_autocomplete, "diverse"), ['ND'])
+        self.assertEqual(await self._values(self.ob.active_league_autocomplete, "np"), ['NP'])
+
+    async def test_transfer_menu_hides_inactive_leagues(self):
+        await db.set_league_active('ND', False)
+        view = self.ob.TransferLeagueView('Grizzly', 'NP')
+        select = next(c for c in view.children if getattr(c, 'options', None) is not None)
+        self.assertEqual([o.value for o in select.options], ['NP'])
+
+    def test_every_league_parameter_uses_a_live_autocomplete(self):
+        """Static choices can't change after registration, so a single
+        @app_commands.choices(league=...) would keep offering a deactivated
+        league, and every handler must re-check the value it receives since
+        an autocomplete never restricts what Discord accepts."""
+        import ast
+        src = open(self.ob.__file__, encoding="utf-8").read()
+        validators = {'_validate_league', '_league_or_reply',
+                      '_resolve_archive_league', '_set_league_active_reply'}
+        checked = 0
+        for node in ast.walk(ast.parse(src)):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            if 'league' not in [a.arg for a in node.args.args]:
+                continue
+            is_command = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and d.func.attr == 'command' for d in node.decorator_list)
+            if not is_command:
+                continue
+            checked += 1
+            ac = None
+            for d in node.decorator_list:
+                if not (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                        and d.func.attr in ('autocomplete', 'choices')):
+                    continue
+                for kw in d.keywords:
+                    if kw.arg == 'league':
+                        self.assertNotEqual(d.func.attr, 'choices', f"{node.name} uses static league choices")
+                        ac = kw.value.id
+            expected = {'la_slash': 'inactive_league_autocomplete'}.get(
+                node.name, 'archive_league_autocomplete' if node.name.startswith('legacy_')
+                else 'active_league_autocomplete')
+            self.assertEqual(ac, expected, node.name)
+            called = {n.func.id for n in ast.walk(node)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            self.assertTrue(called & validators, f"{node.name} never validates its league")
+        self.assertGreater(checked, 20)
+
+    # --- command behaviour ---
+
+    async def test_league_commands_refuse_an_inactive_league(self):
+        await db.set_league_active('ND', False)
+        inter = _FakeInteraction()
+        self.assertIsNone(await self.ob._league_or_reply(inter, 'nd'))
+        self.assertIn('/la', inter.texts()[0])
+        self.assertEqual(await self.ob._league_or_reply(_FakeInteraction(), 'np'), 'NP')
+
+        # The same refusal after a defer goes through the followup.
+        inter = _FakeInteraction()
+        await inter.response.defer()
+        self.assertIsNone(await self.ob._league_or_reply(inter, 'ND'))
+        self.assertEqual(len(inter.followup.messages), 1)
+
+        with self.assertRaises(ValueError):
+            self.ob._validate_league('ND')
+
+    async def test_li_then_la_round_trip(self):
+        import i18n
+        inter = self._inter()
+        await self.ob._set_league_active_reply(inter, 'nd', False)
+        self.assertFalse(db.is_league_active('ND'))
+        self.assertIn('NeuroDiverse', inter.texts()[0])
+
+        inter = self._inter()
+        await self.ob._set_league_active_reply(inter, 'ND', False)
+        self.assertEqual(inter.texts()[0], i18n.t('li.already_inactive', 'en', league='NeuroDiverse'))
+
+        inter = self._inter()
+        await self.ob._set_league_active_reply(inter, 'ND', True)
+        self.assertTrue(db.is_league_active('ND'))
+
+        inter = self._inter()
+        await self.ob._set_league_active_reply(inter, 'ND', True)
+        self.assertEqual(inter.texts()[0], i18n.t('la.already_active', 'en', league='NeuroDiverse'))
+
+    async def test_la_li_reject_an_unknown_league(self):
+        inter = self._inter()
+        await self.ob._set_league_active_reply(inter, 'ZZ', False)
+        self.assertIn('ZZ', inter.texts()[0])
+        self.assertEqual(db.INACTIVE_LEAGUES, set())
+
+    def test_manual_documents_la_and_li_in_every_language(self):
+        import i18n
+        for lang in i18n.SUPPORTED_LANGS:
+            names = [n for n, _ in i18n.TRANSLATIONS['manual.page4.fields'][lang]]
+            self.assertIn('/la', names, lang)
+            self.assertIn('/li', names, lang)
+        en = dict(i18n.TRANSLATIONS['manual.page4.fields']['en'])
+        self.assertIn('only ever appear in the autofill list for this command', en['/la'])
+        self.assertIn('briefly reactivate', en['/li'])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
