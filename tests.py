@@ -1810,6 +1810,44 @@ class TestDB(unittest.IsolatedAsyncioTestCase):
         # Yearly column (index 3) should reflect the same average get_league_stats computed
         self.assertEqual(league_avg_row[3], f"{stats['avg_yearly']:.2f}")
 
+    async def test_send_stats_image_shows_fumble_adjusted_next_to_each_average(self):
+        """Every average column is followed by an 'FA' column holding its
+        fumble-adjusted counterpart — for each player and the league row."""
+        import sheet_image
+        # 18 points over 3 drives with 1 fumble: plain 18.00, FA 27.00.
+        await db.update_player_score("Grizzly", TODAY, 18.0, fumbles=1)
+        await db.update_player_score("dougbaldwin", TODAY, 30.0)
+        stats = await db.get_league_stats("NP")
+
+        captured = {}
+        original = sheet_image._render_table
+        def spy(title, headers, rows, aligns=None, subtitle=None):
+            captured.update(headers=headers, rows=rows, aligns=aligns, subtitle=subtitle)
+            return original(title, headers, rows, aligns, subtitle=subtitle)
+        sheet_image._render_table = spy
+        try:
+            ctx = MagicMock()
+            ctx.send = AsyncMock()
+            await sheet_image.send_stats_image(ctx, "NP")
+        finally:
+            sheet_image._render_table = original
+
+        headers, rows = captured['headers'], captured['rows']
+        self.assertEqual(len(captured['aligns']), len(headers))
+        self.assertTrue(all(len(r) == len(headers) for r in rows))
+        self.assertIn('fumble-adjusted', captured['subtitle'])
+        for label in ['Yearly', '30-Day', '7-Day', '3-Day', 'HOF', 'E1', 'E2', 'E3', 'Gold-']:
+            self.assertEqual(headers[headers.index(label) + 1], 'FA', label)
+
+        yearly = headers.index('Yearly')
+        grizzly = next(r for r in rows if r[1] == 'Grizzly')
+        self.assertEqual(grizzly[yearly], '18.00')
+        self.assertEqual(grizzly[yearly + 1], '27.00')
+
+        league_row = rows[-1]
+        self.assertEqual(league_row[yearly + 1], f"{stats['avg_yearly_fumble_adj']:.2f}")
+        self.assertNotEqual(league_row[yearly + 1], league_row[yearly])
+
     async def test_dscore_stores_drive_outcomes(self):
         await db.update_player_dscore("Grizzly", TODAY, 8, None, "3", "F", "0")
         row = await db.get_player_dscore("Grizzly", TODAY)

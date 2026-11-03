@@ -812,8 +812,13 @@ shows both numbers together.
 field next to the existing yearly average — the single most-viewed of the
 ten, added without doubling every field on an already-dense 17-field
 card. The other nine fumble-adjusted values exist in `get_player_stats`'s
-return dict and are available to any future command that wants them, just
-not yet wired into a specific display beyond this one field and `/avg`.
+return dict and are available to any future command that wants them.
+
+**`/stats` (and `/legacy stats`) show all nine of the image's averages
+with an `FA` column right after each one**, for every player row and the
+LEAGUE AVG row (`get_league_stats` returns `*_fumble_adj` keys, averaged
+across players the same way as the plain ones). The image subtitle explains
+"FA". This took the table from 16 to 25 columns, about 2500px wide.
 
 **Also selectable as independent pwr_rank/ladder_rank factors** — 11 new
 labels in `ALL_STAT_KEYS` (`optimized_bot.py`): the 7 pwr_rank-side

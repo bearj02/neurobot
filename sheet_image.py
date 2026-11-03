@@ -321,49 +321,53 @@ async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, seas
             return
 
         league  = league_name or LEAGUE_NAMES.get(team_id, team_id)
-        headers = ['#', 'Player', 'Games', 'Yearly', '30-Day', '7-Day', '3-Day',
-                   'HOF', 'E1', 'E2', 'E3', 'Gold-', 'Kobes', '3+TD%', '2PT%', 'Fumbles']
-        aligns  = ['R', 'L', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R']
 
         def fmt(v, pct=False):
             if v is None:
                 return '--'
             return f"{v:.1%}" if pct else f"{v:.2f}"
 
+        def count(v):
+            return str(v or '--')
+
+        # Each average is followed by its fumble-adjusted counterpart ("FA",
+        # fumbles treated as null drives — see db._fumble_adjusted_avg).
+        # Player rows read get_player_stats' keys; the league row reads
+        # get_league_stats', which match except for the two count columns.
+        averages = [('Yearly', 'avg_yearly'), ('30-Day', 'avg_30day'),
+                    ('7-Day', 'avg_7day'), ('3-Day', 'avg_3day'),
+                    ('HOF', 'hof_avg'), ('E1', 'e1_avg'), ('E2', 'e2_avg'),
+                    ('E3', 'e3_avg'), ('Gold-', 'gold_avg')]
+        headers = ['#', 'Player', 'Games']
+        for label, _ in averages:
+            headers += [label, 'FA']
+        headers += ['Kobes', '3+TD%', '2PT%', 'Fumbles']
+        aligns  = ['R', 'L'] + ['R'] * (len(headers) - 2)
+
+        def stat_cells(src):
+            cells = []
+            for _, key in averages:
+                cells += [fmt(src.get(key)), fmt(src.get(f'{key}_fumble_adj'))]
+            return cells
+
         rows = []
         for i, p in enumerate(stats['players'], 1):
             rows.append([
                 str(i),
                 str(p['ign'] or ''),
-                str(p.get('games') or '--'),
-                fmt(p.get('avg_yearly')),
-                fmt(p.get('avg_30day')),
-                fmt(p.get('avg_7day')),
-                fmt(p.get('avg_3day')),
-                fmt(p.get('hof_avg')),
-                fmt(p.get('e1_avg')),
-                fmt(p.get('e2_avg')),
-                fmt(p.get('e3_avg')),
-                fmt(p.get('gold_avg')),
-                str(p.get('kobes') or '--'),
+                count(p.get('games')),
+                *stat_cells(p),
+                count(p.get('kobes')),
                 fmt(p.get('three_td_pct'), pct=True),
                 fmt(p.get('two_pt_pct'), pct=True),
-                str(p.get('fumbles') or '--'),
+                count(p.get('fumbles')),
             ])
 
         # League-average summary row at the bottom
         rows.append([
             '', 'LEAGUE AVG',
             str(stats['games']),
-            fmt(stats['avg_yearly']),
-            fmt(stats['avg_30day']),
-            fmt(stats['avg_7day']),
-            fmt(stats['avg_3day']),
-            fmt(stats['hof_avg']),
-            fmt(stats['e1_avg']),
-            fmt(stats['e2_avg']),
-            fmt(stats['e3_avg']),
-            fmt(stats['gold_avg']),
+            *stat_cells(stats),
             str(stats['kobes']),
             fmt(stats['three_td_pct'], pct=True),
             fmt(stats['two_pt_pct'], pct=True),
@@ -374,7 +378,8 @@ async def send_stats_image(ctx, team_id, include_inactive=False, conn=None, seas
         title = f"{league} — League Stats{scope}"
         if season_label:
             title += f"  {season_label}"
-        buf = _render_table(title, headers, rows, aligns)
+        buf = _render_table(title, headers, rows, aligns,
+                            subtitle="FA = fumble-adjusted (fumbles count as null drives)")
         await ctx.send(file=discord.File(buf, filename=f"{team_id}_stats.png"))
         logger.info(f"Stats image sent for {team_id}")
 
