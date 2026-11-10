@@ -275,7 +275,7 @@ def get_score_gif(score: int):
         12: gif_files_12,  8: gif_files_8,   6: gif_files_6,
     }
     if score in (19, 21, 23):
-        return 'HA! This ^ mf kicking extra points!'
+        return "Ha, get a load of this guy.  He's kicking XPs"
     if score in gif_map and gif_map[score]:
         return random.choice(gif_map[score])
     if score <= 16 and gif_files_bad:
@@ -3108,7 +3108,7 @@ async def on_message(message):
     elif 'bingbong' in content:
         await gif_queue.put((channel, (random.choice(bingbonggifs), False)))
     elif any(kp in content for kp in ('19!','21!','23!')):
-        await gif_queue.put((channel, 'HA! This ^ mf kicking extra points!'))
+        await gif_queue.put((channel, "Ha, get a load of this guy.  He's kicking XPs"))
     else:
         for trigger, pool in gif_triggers:
             if trigger in content and pool:
